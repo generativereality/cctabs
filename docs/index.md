@@ -1,12 +1,12 @@
 ---
 layout: home
-title: cctabs — Claude Code with Tabs
-description: Manage parallel Claude Code sessions from a single CLI. Native terminal tabs, no tmux.
+title: cctabs — Tab-Awareness for Claude Code
+description: Run massively parallel Claude Code sessions. Tab-aware CLI that lets you open, fork, inspect, and coordinate sessions across native terminal tabs.
 
 hero:
   name: cctabs
-  text: Claude Code with tabs
-  tagline: Parallel sessions. Native tabs. No tmux.
+  text: Tab-awareness for Claude Code
+  tagline: Run massively more in parallel. Every session gets its own tab. No tmux.
   actions:
     - theme: brand
       text: Get Started
@@ -16,16 +16,16 @@ hero:
       link: https://github.com/generativereality/cctabs
 
 features:
+  - title: Massively parallel
+    details: Spin up as many Claude Code sessions as you need — each in its own native terminal tab. Open a batch, send each one a task, and let them all work at once.
   - title: No tmux
-    details: Uses your terminal's native tab API. Each session is a real tab, not a tmux pane. Scrolling and copy-paste work exactly as you expect.
+    details: Uses your terminal's native tab API. Scrolling and copy-paste work exactly as you expect. No panes, no wrappers, no fighting the multiplexer.
   - title: Fork sessions
     details: Branch any conversation into a new independent tab. Try alternative approaches without disrupting the original.
   - title: Claude Code skill included
-    details: Claude Code itself can call cctabs to check what sessions are running, spawn parallel agents, and coordinate across tabs.
-  - title: Config-driven defaults
-    details: Set flags like --dangerously-skip-permissions once in config and they apply to every session automatically.
+    details: Claude Code itself can call cctabs to spawn parallel agents, monitor progress, fork conversations, and coordinate work across tabs autonomously.
   - title: Tab name = session name
-    details: Terminal tab title and Claude Code session name stay in sync natively. You always know which tab is which.
+    details: Terminal tab title and Claude Code session name stay in sync. You always know which tab is which, even with dozens open.
   - title: Scriptable
     details: Plain CLI output, composable in shell scripts, Claude Code hooks, and automation workflows.
 ---

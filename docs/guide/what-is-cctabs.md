@@ -1,15 +1,15 @@
 ---
 title: What is cctabs? — cctabs
-description: cctabs is Claude Code with tabs — a session manager that uses native terminal tabs instead of tmux to run parallel Claude Code sessions.
+description: cctabs adds tab-awareness to Claude Code, letting you run massively parallel sessions across native terminal tabs instead of tmux panes.
 ---
 
 # What is cctabs?
 
-cctabs is Claude Code with tabs. It's a CLI that lets you open, resume, fork, inspect, and close Claude Code sessions — each one in its own native terminal tab.
+cctabs adds tab-awareness to Claude Code. It's a CLI that lets you open, resume, fork, inspect, and coordinate Claude Code sessions across native terminal tabs — so you can run massively more in parallel.
 
 ## The problem
 
-Running multiple Claude Code sessions in parallel is powerful, but the tooling around it is rough:
+Claude Code is powerful, but it's designed for one session at a time. When you need to work in parallel — splitting tasks across auth, API, frontend, infra — the tooling falls short:
 
 - **tmux-based tools** (claude-squad, agent-deck, ccmanager) wrap everything in panes. Scrolling is awkward. Copy-paste breaks. You're fighting tmux instead of using your terminal.
 - **Manual tab management** works but has no memory — you lose track of which tab is which session, which directory it's in, and whether it's still active.
