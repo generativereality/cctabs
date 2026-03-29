@@ -1,12 +1,12 @@
 ---
 layout: home
-title: cctabs — Let Claude Code run Claude Code
-description: Give Claude tab-awareness and watch it spawn 10, 15 parallel sessions on its own — each in a real terminal tab you can see, scroll, and switch to. No tmux. No TUI. Just your terminal.
+title: cctabs — Self-aware Claude Code across terminal tabs
+description: Install one plugin and Claude spawns 10, 15 parallel sessions on its own — each in a named terminal tab you can see, scroll, and switch to. No tmux. No TUI.
 
 hero:
   name: cctabs
-  text: Let Claude Code run Claude Code
-  tagline: "Stop manually opening sessions like it's 2024. Give Claude tab-awareness and watch it spawn 10, 15 parallel sessions on its own — each in a real terminal tab you can see, scroll, and switch to. No tmux. No TUI. Just your terminal."
+  text: Self-aware Claude Code across terminal tabs
+  tagline: "Install one plugin and Claude spawns 10, 15 parallel sessions on its own — each in a named tab (auth, api, frontend) you can see, scroll, and switch to. No tmux. No TUI."
   actions:
     - theme: brand
       text: Get Started
