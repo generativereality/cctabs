@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitepress'
 
 const siteUrl = 'https://cctabs.com'
-const ogTitle = 'cctabs — tab-awareness for Claude Code'
-const ogDescription = 'Run massively parallel Claude Code sessions. Tab-aware CLI that lets you open, fork, inspect, and coordinate sessions across native terminal tabs.'
+const ogTitle = 'cctabs — Self-aware Claude Code across terminal tabs'
+const ogDescription = 'Install one plugin and Claude spawns 10, 15 parallel sessions on its own — each in a named terminal tab. No tmux. No TUI.'
 
 export default defineConfig({
   title: 'cctabs',
-  description: 'Tab-awareness for Claude Code. Run massively parallel sessions across native terminal tabs, no tmux.',
+  description: 'Self-aware Claude Code across terminal tabs. Install one plugin and Claude spawns parallel sessions — each in a named terminal tab. No tmux. No TUI.',
   lang: 'en-US',
 
   sitemap: {
