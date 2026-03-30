@@ -20,11 +20,15 @@ export default defineConfig({
     ['meta', { property: 'og:title', content: ogTitle }],
     ['meta', { property: 'og:description', content: ogDescription }],
     ['meta', { property: 'og:site_name', content: 'cctabs' }],
+    ['meta', { property: 'og:image', content: `${siteUrl}/og.png` }],
+    ['meta', { property: 'og:image:width', content: '1200' }],
+    ['meta', { property: 'og:image:height', content: '630' }],
 
     // Twitter / X card
-    ['meta', { name: 'twitter:card', content: 'summary' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:title', content: ogTitle }],
     ['meta', { name: 'twitter:description', content: ogDescription }],
+    ['meta', { name: 'twitter:image', content: `${siteUrl}/og.png` }],
 
     // Additional SEO
     ['meta', { name: 'author', content: 'generativereality' }],
