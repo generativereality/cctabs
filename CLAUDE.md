@@ -22,5 +22,5 @@ Claude Code tab manager. Terminal tabs as the UI, no tmux.
 - `src/index.ts` — CLI entry point
 - `src/commands/` — subcommands (`new`, `fork`, `close`, `send`, etc.)
 - `src/core/` — core logic (session management, Wave Terminal adapter)
-- `skills/herd/SKILL.md` — Claude Code skill (must be synced to `generativereality/plugins`)
+- `skills/cctabs/SKILL.md` — Claude Code skill (must be synced to `generativereality/plugins`)
 - `.claude-plugin/plugin.json` — plugin manifest (version must match `package.json`)

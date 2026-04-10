@@ -118,7 +118,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   }
 
   // Wait for Wave to fully process the new tab before returning, so rapid
-  // back-to-back `herd new` calls don't race on waitForNewBlock.
+  // back-to-back `cctabs new` calls don't race on waitForNewBlock.
   await new Promise((r) => setTimeout(r, 2000))
 
   adapter.closeSocket()

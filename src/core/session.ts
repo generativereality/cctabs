@@ -165,7 +165,7 @@ export function listSessionNames(dir: string): Array<{ name: string; id: string;
 
 /**
  * Find the most recently created session ID after a given timestamp.
- * Used by `herd fork` to detect the session Claude created in response to /branch.
+ * Used by `cctabs fork` to detect the session Claude created in response to /branch.
  */
 export function findNewestSessionIdSince(
   dir: string,

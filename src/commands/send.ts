@@ -27,7 +27,7 @@ export const sendCommand = define({
     const filePath = ctx.values.file as string | undefined
     const appendEnter = (ctx.values.enter as boolean | undefined) ?? true
 
-    if (!query) { consola.error('Usage: herd send <tab-or-block> [text]'); process.exit(1) }
+    if (!query) { consola.error('Usage: cctabs send <tab-or-block> [text]'); process.exit(1) }
 
     // Resolve text source: inline arg > --file > stdin
     let rawText: string

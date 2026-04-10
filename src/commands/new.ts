@@ -28,7 +28,7 @@ export const newCommand = define({
     // If prompt text provided, write to temp file so we can pass it via --file
     let initialPromptFile: string | undefined
     if (promptText) {
-      initialPromptFile = join(tmpdir(), `herd-prompt-${Date.now()}.txt`)
+      initialPromptFile = join(tmpdir(), `cctabs-prompt-${Date.now()}.txt`)
       writeFileSync(initialPromptFile, promptText)
     } else if (promptFile) {
       initialPromptFile = promptFile

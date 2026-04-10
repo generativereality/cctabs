@@ -75,7 +75,7 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © 2025 generativereality',
+      copyright: 'Copyright © 2026 Augmented Mind',
     },
   },
 })

@@ -55,9 +55,9 @@ npm install -g cctabs
 **Skill only** (if you already have the CLI installed via npm):
 
 ```bash
-mkdir -p .claude/skills/herd
-curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skills/herd/SKILL.md \
-  -o .claude/skills/herd/SKILL.md
+mkdir -p .claude/skills/cctabs
+curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skills/cctabs/SKILL.md \
+  -o .claude/skills/cctabs/SKILL.md
 ```
 
 **Requirements:** [Wave Terminal](https://waveterm.dev) · macOS · Node.js 20+

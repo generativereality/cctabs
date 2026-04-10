@@ -12,7 +12,7 @@ export const renameCommand = define({
   async run(ctx) {
     const query = ctx.positionals[1]
     const newName = ctx.positionals[2]
-    if (!query || !newName) { consola.error('Usage: herd rename <tab> <new-name>'); process.exit(1) }
+    if (!query || !newName) { consola.error('Usage: cctabs rename <tab> <new-name>'); process.exit(1) }
     const adapter = requireWaveAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
     const matches = adapter.resolveTab(query, tabsById, tabNames)

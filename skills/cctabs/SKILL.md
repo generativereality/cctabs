@@ -1,5 +1,5 @@
 ---
-name: herd
+name: cctabs
 description: Manage Claude Code sessions across terminal tabs (NOT browser tabs) — list running sessions, open new ones, fork, close, inspect output, and send input. Use this when working with multiple parallel Claude Code sessions in terminal tabs.
 ---
 

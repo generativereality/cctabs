@@ -33,8 +33,8 @@ if [ "$VERSION" != "$PLUGIN_VERSION" ]; then
 fi
 
 # Check skill file match
-if ! diff -q "$REPO_ROOT/skills/herd/SKILL.md" "$PLUGINS_DIR/plugins/cctabs/skills/herd/SKILL.md" >/dev/null 2>&1; then
-  echo "MISMATCH: skills/herd/SKILL.md differs from plugins repo"
+if ! diff -q "$REPO_ROOT/skills/cctabs/SKILL.md" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs/SKILL.md" >/dev/null 2>&1; then
+  echo "MISMATCH: skills/cctabs/SKILL.md differs from plugins repo"
   ERRORS=1
 fi
 
@@ -49,9 +49,9 @@ if [ "$CHECK_ONLY" = true ]; then
 fi
 
 # Sync files
-mkdir -p "$PLUGINS_DIR/plugins/cctabs/.claude-plugin" "$PLUGINS_DIR/plugins/cctabs/skills/herd"
+mkdir -p "$PLUGINS_DIR/plugins/cctabs/.claude-plugin" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs"
 cp "$REPO_ROOT/.claude-plugin/plugin.json" "$PLUGINS_DIR/plugins/cctabs/.claude-plugin/plugin.json"
-cp "$REPO_ROOT/skills/herd/SKILL.md" "$PLUGINS_DIR/plugins/cctabs/skills/herd/SKILL.md"
+cp "$REPO_ROOT/skills/cctabs/SKILL.md" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs/SKILL.md"
 
 cd "$PLUGINS_DIR"
 if git diff --quiet; then

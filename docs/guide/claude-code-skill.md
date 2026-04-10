@@ -57,7 +57,7 @@ cctabs send payments "yes\n"
 
 ## How it works
 
-The skill (`SKILL.md`) is loaded into Claude Code's context when placed in `.claude/skills/herd/`. It gives Claude:
+The skill (`SKILL.md`) is loaded into Claude Code's context when placed in `.claude/skills/cctabs/`. It gives Claude:
 
 - The full command reference
 - Workflow patterns for common multi-session tasks

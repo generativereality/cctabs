@@ -67,7 +67,7 @@ export const restoreCommand = define({
         continue
       }
       if (sessions.length > 1) {
-        consola.log(`  ${tab.name} — multiple sessions found, skipping (use herd resume --session to pick one)`)
+        consola.log(`  ${tab.name} — multiple sessions found, skipping (use cctabs resume --session to pick one)`)
         results.push({ name: tab.name, result: 'ambiguous (multiple sessions)' })
         continue
       }
