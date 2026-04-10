@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1200px;
+    height: 630px;
+    background: #0f0f1a;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .bg-glow {
+    position: absolute;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 70%);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 80px;
+    padding: 0 80px;
+    width: 100%;
+  }
+
+  .left { flex: 1; }
+
+  .badge {
+    display: inline-block;
+    background: rgba(99,102,241,0.2);
+    border: 1px solid rgba(99,102,241,0.4);
+    color: #a5b4fc;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 14px;
+    border-radius: 20px;
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    font-size: 88px;
+    font-weight: 800;
+    color: #ffffff;
+    letter-spacing: -3px;
+    line-height: 1;
+    margin-bottom: 20px;
+  }
+
+  h1 span { color: #6366f1; }
+
+  .tagline {
+    font-size: 24px;
+    color: #94a3b8;
+    font-weight: 400;
+    line-height: 1.4;
+  }
+
+  .install {
+    margin-top: 32px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 14px 20px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 18px;
+    color: #e2e8f0;
+    display: inline-block;
+  }
+
+  .install .prompt { color: #6366f1; margin-right: 8px; }
+
+  .terminal {
+    width: 420px;
+    background: #1a1a2e;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    overflow: hidden;
+    box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+    flex-shrink: 0;
+  }
+
+  .term-tabs {
+    display: flex;
+    background: #111120;
+    padding: 8px 12px 0;
+    gap: 4px;
+  }
+
+  .tab {
+    padding: 6px 16px;
+    border-radius: 6px 6px 0 0;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: 'SF Mono', monospace;
+  }
+
+  .tab.active { background: #1a1a2e; color: #a5b4fc; }
+  .tab.inactive { background: rgba(255,255,255,0.04); color: #4b5563; }
+
+  .term-body { padding: 16px; }
+
+  .line {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    display: flex;
+    gap: 8px;
+  }
+
+  .ps { color: #6366f1; }
+  .cmd { color: #e2e8f0; }
+  .out { color: #6b7280; padding-left: 16px; }
+  .green { color: #34d399; }
+  .indigo { color: #818cf8; }
+</style>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="container">
+    <div class="left">
+      <div class="badge">Claude Code</div>
+      <h1>cc<span>tabs</span></h1>
+      <div class="tagline">Terminal tabs as the UI.<br>No tmux. Claude orchestrates itself.</div>
+      <div class="install">
+        <span class="prompt">$</span>npm install -g @generativereality/cctabs
+      </div>
+    </div>
+    <div class="terminal">
+      <div class="term-tabs">
+        <div class="tab active">auth ●</div>
+        <div class="tab inactive">api</div>
+        <div class="tab inactive">infra</div>
+      </div>
+      <div class="term-body">
+        <div class="line"><span class="ps">$</span><span class="cmd">cctabs sessions</span></div>
+        <div class="line"><span class="out green">● auth</span><span class="out">active  ~/Dev/myapp</span></div>
+        <div class="line"><span class="out indigo">○ api</span><span class="out">idle    ~/Dev/myapp</span></div>
+        <div class="line"><span class="out">  infra  terminal</span></div>
+        <div class="line" style="margin-top:8px"><span class="ps">$</span><span class="cmd">cctabs new payments ~/Dev/myapp \</span></div>
+        <div class="line"><span class="cmd" style="padding-left:16px">--prompt "implement billing"</span></div>
+        <div class="line"><span class="out green">✔ Tab "payments" opened</span></div>
+        <div class="line" style="margin-top:8px"><span class="ps">$</span><span class="cmd">cctabs scrollback payments 5</span></div>
+        <div class="line"><span class="out">❯ Starting on billing endpoint...</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
