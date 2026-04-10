@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Tab bar background -->
+  <rect x="2" y="10" width="28" height="20" rx="3" fill="#1a1a2e"/>
+  <!-- Tab 1 (active) -->
+  <rect x="2" y="4" width="10" height="8" rx="2" fill="#6366f1"/>
+  <!-- Tab 2 -->
+  <rect x="13" y="6" width="8" height="6" rx="2" fill="#374151"/>
+  <!-- Tab 3 -->
+  <rect x="22" y="7" width="8" height="5" rx="2" fill="#374151"/>
+  <!-- Terminal prompt line -->
+  <rect x="6" y="17" width="4" height="2" rx="1" fill="#6366f1"/>
+  <rect x="12" y="17" width="12" height="2" rx="1" fill="#4b5563"/>
+  <!-- Terminal line 2 -->
+  <rect x="6" y="22" width="4" height="2" rx="1" fill="#6366f1"/>
+  <rect x="12" y="22" width="8" height="2" rx="1" fill="#4b5563"/>
+</svg>
