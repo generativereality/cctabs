@@ -27,6 +27,29 @@ Do not modify PATH or npm configuration beyond this.
 
 Each Claude Code session runs in its own **terminal tab**. `cctabs` lets you — and other Claude Code sessions — introspect and orchestrate the full session fleet.
 
+## When to Use Worktrees
+
+**Use `--worktree` whenever a tab will edit code on a branch that differs from the main working tree.** This includes:
+- Fixing CI on a PR (`cctabs new fix-1789 ~/Dev/myapp --worktree`)
+- Working on a feature branch while the main checkout runs a dev server
+- Any task where multiple tabs might checkout different branches
+
+Without `--worktree`, all tabs share the same working directory. If two tabs checkout different branches, they stomp on each other's files — causing silent conflicts, lost changes, and broken dev servers.
+
+**Rule of thumb:**
+- **Read-only / docs / coordination** → no worktree needed (stays on current branch)
+- **Editing code on a different branch** → always `--worktree`
+
+```bash
+# ❌ WRONG — two tabs checking out different branches in the same directory
+cctabs new fix-auth ~/Dev/myapp --prompt "checkout PR #101 and fix lint"
+cctabs new fix-api ~/Dev/myapp --prompt "checkout PR #102 and fix tests"
+
+# ✅ RIGHT — each gets its own isolated copy
+cctabs new fix-auth ~/Dev/myapp --worktree --prompt "checkout PR #101 and fix lint"
+cctabs new fix-api ~/Dev/myapp --worktree --prompt "checkout PR #102 and fix tests"
+```
+
 ## Quick Reference
 
 ```bash
