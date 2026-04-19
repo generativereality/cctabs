@@ -141,6 +141,18 @@ export class WaveAdapter {
     return r.stdout ?? ''
   }
 
+  /** Poll scrollback to confirm it really is empty (block has no live shell).
+   * A freshly-opened tab may briefly have empty scrollback before the prompt
+   * renders, so poll a few times before declaring the block dead. */
+  async confirmScrollbackEmpty(blockId: string, attempts = 3, intervalMs = 500): Promise<boolean> {
+    for (let i = 0; i < attempts; i++) {
+      const sb = this.scrollback(blockId, 10)
+      if (sb.trim()) return false
+      if (i < attempts - 1) await sleep(intervalMs)
+    }
+    return true
+  }
+
   /** Detect whether a Claude session is running in a terminal block */
   detectSessionStatus(blockId: string): import('../types/index.js').SessionStatus {
     const tail = this.scrollback(blockId, 10)

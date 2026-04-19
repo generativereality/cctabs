@@ -4,6 +4,7 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireWaveAdapter } from '../core/wave.js'
+import { openSession } from '../core/open-session.js'
 import { findSessionsByName } from '../core/session.js'
 
 export const restoreCommand = define({
@@ -59,6 +60,9 @@ export const restoreCommand = define({
     const extraFlags = config.claude.flags.join(' ')
     const results: Array<{ name: string; result: string }> = []
 
+    // Collect tabs that need to be recreated (after the socket loop completes)
+    const toRecreate: Array<{ name: string; sessionId: string; blockIds: string[]; tabId: string }> = []
+
     for (const tab of toResume) {
       const sessions = findSessionsByName(dir, tab.name)
       if (sessions.length === 0) {
@@ -75,12 +79,26 @@ export const restoreCommand = define({
       const sessionId = sessions[0].id
 
       if (dryRun) {
-        consola.log(`  ${tab.name} → would resume session ${sessionId.slice(0, 8)}…`)
+        const mode = tab.status === 'unknown' ? 'recreate' : 'send'
+        consola.log(`  ${tab.name} → would ${mode} session ${sessionId.slice(0, 8)}…`)
         results.push({ name: tab.name, result: `dry run: ${sessionId.slice(0, 8)}…` })
         continue
       }
 
-      consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}…`)
+      // Dead tab (empty scrollback, typical after Wave restart) — recreate.
+      // Can't call openSession here because the adapter socket is in use;
+      // defer until we've closed the socket.
+      if (tab.status === 'unknown') {
+        const stillEmpty = await adapter.confirmScrollbackEmpty(tab.blockId)
+        if (stillEmpty) {
+          const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
+          toRecreate.push({ name: tab.name, sessionId, blockIds, tabId: tab.tabId })
+          results.push({ name: tab.name, result: 'queued for recreate' })
+          continue
+        }
+      }
+
+      consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}… (send)`)
       const cmd = `cd ${JSON.stringify(dir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(tab.name)}\r`
       await adapter.sendInput(tab.blockId, cmd)
 
@@ -110,7 +128,32 @@ export const restoreCommand = define({
       }
     }
 
-    adapter.closeSocket()
+    // Recreate dead tabs sequentially (each openSession opens its own socket)
+    if (!dryRun && toRecreate.length) {
+      // Delete the old blocks first
+      for (const t of toRecreate) {
+        for (const bid of t.blockIds) adapter.deleteBlock(bid)
+      }
+      adapter.closeSocket()
+
+      consola.info(`Recreating ${toRecreate.length} dead tab(s)…`)
+      for (const t of toRecreate) {
+        try {
+          const newTabId = await openSession({
+            tabName: t.name,
+            dir,
+            claudeCmd: `claude --resume ${t.sessionId} --name ${JSON.stringify(t.name)}`,
+          })
+          const r = results.find((x) => x.name === t.name)!
+          r.result = `✔ recreated [${newTabId.slice(0, 8)}]`
+        } catch (err) {
+          const r = results.find((x) => x.name === t.name)!
+          r.result = `✘ recreate failed: ${(err as Error).message}`
+        }
+      }
+    } else {
+      adapter.closeSocket()
+    }
 
     // Summary
     console.log('\nRestore summary:')

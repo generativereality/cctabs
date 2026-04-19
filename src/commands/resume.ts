@@ -99,8 +99,23 @@ export const resumeCommand = define({
         consola.warn(`Claude is already running in tab "${name}" (${status}) — skipping resume`)
         process.exit(0)
       }
+
+      // Empty scrollback ('unknown') means the tab has no live shell — typical
+      // after a Wave restart. Recreate the tab rather than send into the void.
       if (status === 'unknown') {
-        consola.warn(`Scrollback unavailable for tab "${name}" — cannot confirm shell is ready. Proceeding anyway.`)
+        const stillEmpty = await adapter.confirmScrollbackEmpty(termBlock.blockid)
+        if (stillEmpty) {
+          consola.info(`Tab "${name}" has no live shell (empty scrollback) — recreating`)
+          for (const b of blocks) adapter.deleteBlock(b.blockid)
+          adapter.closeSocket()
+          const newTabId = await openSession({
+            tabName: name,
+            dir,
+            claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
+          })
+          consola.success(`Tab "${name}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)`)
+          return
+        }
       }
 
       const config = loadConfig()

@@ -3,9 +3,11 @@ import { homedir } from 'os'
 import { join, basename, extname } from 'path'
 import { resolve } from 'path'
 
-/** Convert an absolute path to Claude's project slug (/ and . → -) */
+/** Convert an absolute path to Claude Code's project slug.
+ * Claude Code replaces any non-alphanumeric character (spaces, /, ., etc.) with '-'.
+ * Hyphens are preserved. Example: "/Users/me/Remember This" → "-Users-me-Remember-This". */
 export function pathToProjectSlug(dir: string): string {
-  return resolve(dir).replace(/[/.]/g, '-')
+  return resolve(dir).replace(/[^A-Za-z0-9-]/g, '-')
 }
 
 /** Find the most recent .jsonl session file in a Claude project directory */
