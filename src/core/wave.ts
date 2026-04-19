@@ -123,7 +123,10 @@ export class WaveAdapter {
 
   blocksList(): Block[] {
     try {
-      const out = execFileSync('wsh', ['blocks', 'list', '--json'], {
+      // Default `wsh` RPC timeout is 5s, which is too tight when many tabs
+      // are open (the response payload grows, as does the work on the daemon
+      // side). Passing --timeout here gives us room before a silent failure.
+      const out = execFileSync('wsh', ['blocks', 'list', '--json', '--timeout', '15000'], {
         encoding: 'utf-8',
       })
       return JSON.parse(out) as Block[]
@@ -216,7 +219,7 @@ export class WaveAdapter {
 
   async waitForNewBlock(
     beforeIds: Set<string>,
-    timeoutMs = 5000,
+    timeoutMs = 15_000,
   ): Promise<{ blockId: string; tabId: string } | null> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
