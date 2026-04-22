@@ -236,10 +236,34 @@ cctabs new feature ~/Dev/myapp --worktree
 
 **Worktree base-commit caveat:** after spawning with `--worktree`, verify the branch base matches your expectation (see "Spawning gotchas" above). If your orchestrator has local commits that haven't been pushed, the worktree may branch from the stale remote tip instead of HEAD. This bites hardest when parallel tabs need to share schema/types your orchestrator has been working on — they won't see those changes if they branched before the commits landed upstream.
 
+## Handling `cctabs new` Timeout Errors
+
+`cctabs new` may occasionally fail with "Timed out waiting for new terminal block". This does **NOT** mean you have too many tabs or that Wave Terminal has hit a limit.
+
+**Possible causes** (root cause not yet confirmed):
+- Wave Terminal may need to be in focus / foreground for tab creation to register
+- The internal timeout may be slightly too short for the current system load
+- Transient IPC timing issue between cctabs and Wave
+
+**What to do:**
+1. **Retry the same command** — it often works on the second attempt
+2. If it fails again, wait a few seconds and retry once more
+3. If it keeps failing, ask the user to bring Wave Terminal to the foreground and try again
+
+**What NOT to do:**
+- ❌ Do NOT assume there is a "tab limit" — there isn't one
+- ❌ Do NOT close other tabs to "make room" — this destroys the user's sessions
+- ❌ Do NOT suggest the user has too many tabs open
+
 ## Workflow: Cleanup
 
+**⚠️ NEVER close tabs without explicit user approval.** Each tab may contain an active session with important context, uncommitted work, or in-progress tasks. Closing a tab is destructive and irreversible.
+
+**Always ask first:**
+> "These tabs look idle: `old-feature`, `fix-1234`. Want me to close any of them?"
+
+Only after the user confirms:
 ```bash
-cctabs sessions                        # find idle/terminal tabs
 cctabs close old-feature               # close by name (prefix match)
 cctabs close e5f6a7b8                  # close by block ID prefix
 ```
