@@ -327,13 +327,14 @@ export class WaveAdapter {
     tabNames: Map<string, string>,
   ): string[] {
     const q = query.toLowerCase()
-    return [...tabsById.keys()].filter((tid) => {
+    const ids = [...tabsById.keys()]
+    const exact = ids.filter(
+      (tid) => (tabNames.get(tid) ?? '').toLowerCase() === q,
+    )
+    if (exact.length > 0) return exact
+    return ids.filter((tid) => {
       const name = tabNames.get(tid) ?? ''
-      return (
-        name.toLowerCase() === q ||
-        tid.startsWith(query) ||
-        name.toLowerCase().startsWith(q)
-      )
+      return tid.startsWith(query) || name.toLowerCase().startsWith(q)
     })
   }
 
@@ -346,16 +347,16 @@ export class WaveAdapter {
     query: string,
   ): Array<{ data: Workspace['workspacedata']; windowId: string }> {
     const q = query.toLowerCase()
-    return workspaces
-      .filter(({ workspacedata: wd }) => {
-        const name = wd.name ?? ''
-        return (
-          name.toLowerCase() === q ||
-          wd.oid.startsWith(query) ||
-          name.toLowerCase().startsWith(q)
-        )
-      })
-      .map((w) => ({ data: w.workspacedata, windowId: w.windowid }))
+    const exact = workspaces.filter(
+      ({ workspacedata: wd }) => (wd.name ?? '').toLowerCase() === q,
+    )
+    const pool = exact.length > 0
+      ? exact
+      : workspaces.filter(({ workspacedata: wd }) => {
+          const name = wd.name ?? ''
+          return wd.oid.startsWith(query) || name.toLowerCase().startsWith(q)
+        })
+    return pool.map((w) => ({ data: w.workspacedata, windowId: w.windowid }))
   }
 }
 
