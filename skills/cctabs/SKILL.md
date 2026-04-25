@@ -71,6 +71,7 @@ cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
 cctabs resume <name> [dir]               # resume last session (reuses tab or creates one)
+cctabs restore [dir] [--dry]             # resume every dead tab (e.g. after a reboot)
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename a tab
@@ -125,6 +126,18 @@ cctabs resume api ~/Dev/myapp
 
 **Use `cctabs resume` instead of `cctabs new` when you want to continue a previous conversation.**
 `cctabs new` always starts a fresh Claude session. `cctabs resume` picks up where the last session left off.
+
+## Workflow: Restoring tabs after a reboot
+
+After a Wave/computer restart, every tab loses its Claude session and shows up with `terminal` or `unknown` status. `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
+
+```bash
+cctabs restore                    # search all projects (default)
+cctabs restore --dry              # preview what would be resumed without doing it
+cctabs restore ~/Dev/myapp        # restrict the search to one project dir
+```
+
+If a session was started in a different `cwd` than the tab's current directory (common after `cd`-ing inside the tab), the global search still finds it via the recorded session metadata — no need to guess the right dir.
 
 ## Workflow: Forking a Session
 

@@ -130,6 +130,74 @@ export function findSessionsByName(dir: string, name: string): SessionMatch[] {
 }
 
 /**
+ * Like findSessionsByName, but searches every project directory under
+ * ~/.claude/projects. Each match carries the cwd recorded in the session.
+ * Used by `cctabs restore` so callers don't have to guess the right dir.
+ */
+export function findSessionsByNameGlobally(name: string): Array<SessionMatch & { dir: string }> {
+  const projectsRoot = join(homedir(), '.claude', 'projects')
+  if (!existsSync(projectsRoot)) return []
+
+  const matches: Array<SessionMatch & { dir: string }> = []
+
+  for (const slug of readdirSync(projectsRoot)) {
+    const projectDir = join(projectsRoot, slug)
+    let isDir = false
+    try { isDir = statSync(projectDir).isDirectory() } catch { continue }
+    if (!isDir) continue
+
+    const files = readdirSync(projectDir).filter((f) => extname(f) === '.jsonl')
+    for (const f of files) {
+      const fullPath = join(projectDir, f)
+      try {
+        const content = readFileSync(fullPath, 'utf-8')
+        const lines = content.split('\n')
+
+        let currentTitle = ''
+        let cwd = ''
+        let firstPrompt = ''
+        let lastActivity = ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const entry = JSON.parse(line)
+            if (entry.customTitle !== undefined) currentTitle = entry.customTitle
+            if (!cwd && typeof entry.cwd === 'string') cwd = entry.cwd
+            if (!firstPrompt && entry.type === 'user' && entry.message?.content) {
+              const text = typeof entry.message.content === 'string'
+                ? entry.message.content
+                : entry.message.content.find((c: { type: string }) => c.type === 'text')?.text ?? ''
+              if (text.startsWith('<')) continue
+              firstPrompt = text.slice(0, 120).replace(/\n/g, ' ').trim()
+              if (text.length > 120) firstPrompt += '…'
+            }
+            if (entry.message?.role === 'assistant' && entry.message?.content) {
+              const parts = Array.isArray(entry.message.content) ? entry.message.content : [{ type: 'text', text: entry.message.content }]
+              for (const p of parts) {
+                if (p.type === 'text' && p.text?.trim()) {
+                  lastActivity = p.text.slice(0, 120).replace(/\n/g, ' ').trim()
+                  if (p.text.length > 120) lastActivity += '…'
+                }
+              }
+            }
+          } catch { /* skip malformed lines */ }
+        }
+
+        if (currentTitle !== name || !cwd) continue
+
+        const stat = statSync(fullPath)
+        matches.push({ id: basename(f, '.jsonl'), mtime: stat.mtimeMs, size: stat.size, firstPrompt, lastActivity, dir: cwd })
+      } catch {
+        // skip unreadable files
+      }
+    }
+  }
+
+  return matches.sort((a, b) => b.mtime - a.mtime)
+}
+
+/**
  * List all unique session names (customTitle) in a project directory.
  * Used to show available names when a resume lookup fails.
  */

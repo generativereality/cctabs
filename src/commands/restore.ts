@@ -5,17 +5,18 @@ import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireWaveAdapter } from '../core/wave.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByName } from '../core/session.js'
+import { findSessionsByName, findSessionsByNameGlobally } from '../core/session.js'
 
 export const restoreCommand = define({
   name: 'restore',
-  description: 'Resume Claude sessions in all terminal-state tabs (e.g. after a reboot)',
+  description: 'Resume Claude sessions in all terminal-state tabs (e.g. after a reboot). Searches every Claude project dir by default; pass an explicit dir to scope the search.',
   args: {
-    dir: { type: 'positional', description: 'Working directory (default: cwd)' },
     dry: { type: 'boolean', short: 'n', description: 'Show what would be resumed without actually doing it' },
   },
   async run(ctx) {
-    const dir = resolve((ctx.positionals[1] ?? process.cwd()).replace(/^~/, homedir()))
+    // dir is optional: if omitted, every project under ~/.claude/projects is searched.
+    const rawDir = ctx.positionals[1]
+    const scopedDir = rawDir ? resolve(rawDir.replace(/^~/, homedir())) : null
     const dryRun = ctx.values.dry as boolean | undefined
 
     const adapter = requireWaveAdapter()
@@ -61,26 +62,46 @@ export const restoreCommand = define({
     const results: Array<{ name: string; result: string }> = []
 
     // Collect tabs that need to be recreated (after the socket loop completes)
-    const toRecreate: Array<{ name: string; sessionId: string; blockIds: string[]; tabId: string }> = []
+    const toRecreate: Array<{ name: string; sessionId: string; sessionDir: string; blockIds: string[]; tabId: string }> = []
 
     for (const tab of toResume) {
-      const sessions = findSessionsByName(dir, tab.name)
-      if (sessions.length === 0) {
-        consola.log(`  ${tab.name} — no session named "${tab.name}" found, skipping`)
-        results.push({ name: tab.name, result: 'no matching session' })
-        continue
-      }
-      if (sessions.length > 1) {
-        consola.log(`  ${tab.name} — multiple sessions found, skipping (use cctabs resume --session to pick one)`)
-        results.push({ name: tab.name, result: 'ambiguous (multiple sessions)' })
-        continue
-      }
+      // When no dir is given, search globally and use each session's own cwd.
+      // When a dir is given, restrict the search to that dir (legacy behavior).
+      let sessionId: string | null = null
+      let sessionDir: string | null = null
 
-      const sessionId = sessions[0].id
+      if (scopedDir) {
+        const sessions = findSessionsByName(scopedDir, tab.name)
+        if (sessions.length === 0) {
+          consola.log(`  ${tab.name} — no session named "${tab.name}" found in ${scopedDir}, skipping`)
+          results.push({ name: tab.name, result: 'no matching session' })
+          continue
+        }
+        if (sessions.length > 1) {
+          consola.log(`  ${tab.name} — multiple sessions found, skipping (use cctabs resume --session to pick one)`)
+          results.push({ name: tab.name, result: 'ambiguous (multiple sessions)' })
+          continue
+        }
+        sessionId = sessions[0].id
+        sessionDir = scopedDir
+      } else {
+        const sessions = findSessionsByNameGlobally(tab.name)
+        if (sessions.length === 0) {
+          consola.log(`  ${tab.name} — no session named "${tab.name}" found in any project, skipping`)
+          results.push({ name: tab.name, result: 'no matching session' })
+          continue
+        }
+        if (sessions.length > 1) {
+          // Take the most recent — but tell the user which dir we picked.
+          consola.log(`  ${tab.name} — multiple sessions found across projects, picking newest (${sessions[0].dir})`)
+        }
+        sessionId = sessions[0].id
+        sessionDir = sessions[0].dir
+      }
 
       if (dryRun) {
         const mode = tab.status === 'unknown' ? 'recreate' : 'send'
-        consola.log(`  ${tab.name} → would ${mode} session ${sessionId.slice(0, 8)}…`)
+        consola.log(`  ${tab.name} → would ${mode} session ${sessionId.slice(0, 8)}… in ${sessionDir}`)
         results.push({ name: tab.name, result: `dry run: ${sessionId.slice(0, 8)}…` })
         continue
       }
@@ -92,14 +113,14 @@ export const restoreCommand = define({
         const stillEmpty = await adapter.confirmScrollbackEmpty(tab.blockId)
         if (stillEmpty) {
           const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
-          toRecreate.push({ name: tab.name, sessionId, blockIds, tabId: tab.tabId })
+          toRecreate.push({ name: tab.name, sessionId, sessionDir, blockIds, tabId: tab.tabId })
           results.push({ name: tab.name, result: 'queued for recreate' })
           continue
         }
       }
 
-      consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}… (send)`)
-      const cmd = `cd ${JSON.stringify(dir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(tab.name)}\r`
+      consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}… in ${sessionDir} (send)`)
+      const cmd = `cd ${JSON.stringify(sessionDir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(tab.name)}\r`
       await adapter.sendInput(tab.blockId, cmd)
 
       // Brief pause between sends to avoid overwhelming Wave
@@ -141,7 +162,7 @@ export const restoreCommand = define({
         try {
           const newTabId = await openSession({
             tabName: t.name,
-            dir,
+            dir: t.sessionDir,
             claudeCmd: `claude --resume ${t.sessionId} --name ${JSON.stringify(t.name)}`,
           })
           const r = results.find((x) => x.name === t.name)!
