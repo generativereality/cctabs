@@ -122,13 +122,15 @@ export class WaveAdapter {
   // -- wsh subprocess helpers --
 
   blocksList(): Block[] {
+    // wsh's global block listing is unreliable when the current workspace is
+    // ephemeral / not surfaced by `wsh workspace list` (common after a Wave
+    // restart). Filter by the running terminal's workspace to get a stable
+    // view; without --workspace, wsh frequently returns "No blocks found".
+    const wsId = process.env.WAVETERM_WORKSPACEID ?? ''
+    const args = ['blocks', 'list', '--json', '--timeout', '15000']
+    if (wsId) args.push('--workspace', wsId)
     try {
-      // Default `wsh` RPC timeout is 5s, which is too tight when many tabs
-      // are open (the response payload grows, as does the work on the daemon
-      // side). Passing --timeout here gives us room before a silent failure.
-      const out = execFileSync('wsh', ['blocks', 'list', '--json', '--timeout', '15000'], {
-        encoding: 'utf-8',
-      })
+      const out = execFileSync('wsh', args, { encoding: 'utf-8' })
       return JSON.parse(out) as Block[]
     } catch {
       return []
@@ -290,32 +292,47 @@ export class WaveAdapter {
     }
 
     const tabNames = new Map<string, string>()
-    let workspaces: Workspace[] = []
+    let rawWorkspaces: Workspace[] = []
 
     try {
       for (const tabId of tabsById.keys()) {
         const td = await this.getTab(tabId)
         tabNames.set(tabId, (td.name as string) ?? tabId.slice(0, 8))
       }
-      workspaces = await this.workspaceList()
+      rawWorkspaces = await this.workspaceList()
     } catch {
       // fall through to env-based fallback
     } finally {
       this.closeSocket()
     }
 
-    if (!workspaces.length) {
-      const wsId = process.env.WAVETERM_WORKSPACEID ?? ''
-      workspaces = [
-        {
-          workspacedata: {
-            oid: wsId,
-            name: wsId.slice(0, 8) || 'default',
-            tabids: [...tabsById.keys()],
-          },
-          windowid: '',
+    // wsh's `workspacelist` RPC may omit the current ephemeral workspace
+    // (especially after a Wave restart) and instead surface stale/orphaned
+    // workspaces. Always synthesize an entry for the running workspace from
+    // the blocks we actually see, and merge in any extra workspaces from RPC.
+    const currentWsId = process.env.WAVETERM_WORKSPACEID ?? ''
+    const tabIdsHere = [...tabsById.keys()]
+    const existing = rawWorkspaces.find((w) => w.workspacedata.oid === currentWsId)
+
+    const workspaces: Workspace[] = []
+    if (currentWsId) {
+      workspaces.push({
+        workspacedata: {
+          oid: currentWsId,
+          name: existing?.workspacedata.name ?? (currentWsId.slice(0, 8) || 'current'),
+          tabids: tabIdsHere,
         },
-      ]
+        windowid: existing?.windowid ?? '',
+      })
+    }
+    for (const ws of rawWorkspaces) {
+      if (ws.workspacedata.oid !== currentWsId) workspaces.push(ws)
+    }
+    if (!workspaces.length) {
+      workspaces.push({
+        workspacedata: { oid: '', name: 'default', tabids: tabIdsHere },
+        windowid: '',
+      })
     }
 
     return { blocks, tabsById, workspaces, tabNames }

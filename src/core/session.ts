@@ -234,6 +234,46 @@ export function listSessionNames(dir: string): Array<{ name: string; id: string;
 }
 
 /**
+ * Resolve a session ID prefix (e.g. "19aae7b4") to the full UUID by scanning
+ * `~/.claude/projects/`. Returns the input unchanged if it already looks like
+ * a full UUID, or null if no unique match exists. Pass `dir` to scope the
+ * search to one project; otherwise every project is checked.
+ *
+ * `claude --resume <prefix>` does NOT accept truncated IDs — it treats them
+ * as a search query and shows the picker. So callers must expand prefixes
+ * before forwarding to claude.
+ */
+export function expandSessionId(input: string, dir?: string): string | null {
+  if (!input) return null
+  // Already a full UUID — pass through unchanged.
+  if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input)) {
+    return input
+  }
+
+  const projectsRoot = join(homedir(), '.claude', 'projects')
+  if (!existsSync(projectsRoot)) return null
+
+  const projectDirs = dir
+    ? [join(projectsRoot, pathToProjectSlug(dir))]
+    : readdirSync(projectsRoot)
+        .map((d) => join(projectsRoot, d))
+        .filter((p) => {
+          try { return statSync(p).isDirectory() } catch { return false }
+        })
+
+  const matches: string[] = []
+  for (const pd of projectDirs) {
+    if (!existsSync(pd)) continue
+    for (const f of readdirSync(pd)) {
+      if (extname(f) !== '.jsonl') continue
+      const id = basename(f, '.jsonl')
+      if (id.startsWith(input) && !matches.includes(id)) matches.push(id)
+    }
+  }
+  return matches.length === 1 ? matches[0] : null
+}
+
+/**
  * Find the most recently created session ID after a given timestamp.
  * Used by `cctabs fork` to detect the session Claude created in response to /branch.
  */

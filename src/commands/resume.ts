@@ -5,7 +5,7 @@ import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireWaveAdapter } from '../core/wave.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByName, pathToProjectSlug, listSessionNames } from '../core/session.js'
+import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
 
 function formatAge(mtimeMs: number): string {
   const mins = Math.round((Date.now() - mtimeMs) / 60_000)
@@ -38,7 +38,12 @@ export const resumeCommand = define({
     let sessionId: string | undefined
 
     if (explicitSession) {
-      sessionId = explicitSession
+      const expanded = expandSessionId(explicitSession, dir) ?? expandSessionId(explicitSession)
+      if (!expanded) {
+        consola.error(`Session '${explicitSession}' not found (or matches multiple sessions). Pass the full UUID.`)
+        process.exit(1)
+      }
+      sessionId = expanded
     } else {
       const sessions = findSessionsByName(dir, name)
       if (sessions.length === 0) {
