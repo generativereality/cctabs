@@ -20,8 +20,8 @@ features:
     details: Install one plugin and Claude Code gains tab-awareness. It sees what's running, opens new tabs, starts new sessions, and coordinates work across them — automatically.
   - title: Real terminal tabs
     details: Every session runs in a native terminal tab. See them all in your tab bar. Click to switch. Scroll the output. Copy-paste normally. Not a TUI. Not tmux. Your actual terminal.
-  - title: Go from 4 sessions to 15
-    details: Most people manually open a few Claude Code sessions. With cctabs, Claude handles the session management — so you scale to 10, 15 parallel sessions without the overhead.
+  - title: Restore after a computer restart
+    details: After a reboot, just say "restore my cctabs now after a computer restart" — Claude reopens every named tab and resumes each session where it left off.
   - title: You stay in control
     details: Every session is visible in its own tab. Read any session's output. Send input to any session. Fork conversations. Close what's done. You steer, Claude builds.
   - title: Fork to explore
