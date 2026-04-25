@@ -1,6 +1,6 @@
 {
   "name": "@generativereality/cctabs",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Claude Code tab manager. Terminal tabs as the UI, no tmux.",
   "type": "module",
   "bin": {
@@ -16,10 +16,10 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "check": "bun run typecheck && bun run build",
+    "check": "npm run typecheck && npm run build",
     "release": "bumpp && npm publish",
     "sync-plugin": "bash scripts/sync-plugin.sh",
-    "prepack": "bash scripts/sync-plugin.sh --check && bun run build"
+    "prepack": "bash scripts/sync-plugin.sh --check && npm run build"
   },
   "keywords": [
     "claude-code",
