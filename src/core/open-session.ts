@@ -12,6 +12,20 @@ interface OpenSessionOptions {
   workspaceQuery?: string
   /** If set, poll for Claude's ready prompt then send this file's content as the initial task */
   initialPromptFile?: string
+  /** Env vars to prepend to the shell command (e.g. ANTHROPIC_BASE_URL for Ollama) */
+  envVars?: Record<string, string>
+  /** If set, append `--model <name>` to the claude command */
+  modelOverride?: string
+}
+
+function shellQuoteEnv(env: Record<string, string>): string {
+  const entries = Object.entries(env)
+  if (!entries.length) return ''
+  return (
+    entries
+      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+      .join(' ') + ' '
+  )
 }
 
 /** Poll scrollback until a pattern is visible, then return. Rejects on timeout. */
@@ -41,7 +55,7 @@ async function waitForScrollbackMatch(
 }
 
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
-  const { tabName, claudeCmd, workspaceQuery, initialPromptFile } = opts
+  const { tabName, claudeCmd, workspaceQuery, initialPromptFile, envVars, modelOverride } = opts
   const dir = resolve(opts.dir.replace(/^~/, homedir()))
 
   if (!existsSync(dir)) {
@@ -98,7 +112,9 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
 
   const extraFlags = config.claude.flags.join(' ')
   const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
-  const cmd = `cd ${JSON.stringify(dir)} && claude${extraFlags ? ' ' + extraFlags : ''} ${claudeCmd.replace(/^claude\s*/, '')}${namePart}\r`
+  const modelPart = modelOverride ? ` --model ${JSON.stringify(modelOverride)}` : ''
+  const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
+  const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} ${claudeCmd.replace(/^claude\s*/, '')}${namePart}${modelPart}\r`
   await adapter.sendInput(blockId, cmd)
 
   if (initialPromptFile) {

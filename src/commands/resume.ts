@@ -6,6 +6,13 @@ import { loadConfig } from '../core/config.js'
 import { requireWaveAdapter } from '../core/wave.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
+import { resolveBackend, listBackends } from '../core/backends.js'
+
+function shellQuoteEnv(env: Record<string, string>): string {
+  const entries = Object.entries(env)
+  if (!entries.length) return ''
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ') + ' '
+}
 
 function formatAge(mtimeMs: number): string {
   const mins = Math.round((Date.now() - mtimeMs) / 60_000)
@@ -28,6 +35,8 @@ export const resumeCommand = define({
     name: { type: 'positional', description: 'Tab / session name' },
     dir: { type: 'positional', description: 'Working directory (default: cwd)' },
     session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
+    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Run `cctabs backends` to list.' },
+    model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude).' },
   },
   async run(ctx) {
     const name = ctx.positionals[1]
@@ -35,6 +44,22 @@ export const resumeCommand = define({
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
 
     const explicitSession = ctx.values.session as string | undefined
+    const backendName = ctx.values.backend as string | undefined
+    const modelOverride = ctx.values.model as string | undefined
+
+    let envVars: Record<string, string> | undefined
+    let resolvedModel = modelOverride
+    if (backendName) {
+      const backend = resolveBackend(backendName)
+      if (!backend) {
+        consola.error(`Unknown backend "${backendName}". Available:`)
+        for (const b of listBackends()) consola.log(`  ${b.name.padEnd(22)} ${b.description}`)
+        process.exit(1)
+      }
+      envVars = backend.env
+      resolvedModel ??= backend.model || undefined
+    }
+
     let sessionId: string | undefined
 
     if (explicitSession) {
@@ -117,6 +142,8 @@ export const resumeCommand = define({
             tabName: name,
             dir,
             claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
+            envVars,
+            modelOverride: resolvedModel,
           })
           consola.success(`Tab "${name}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)`)
           return
@@ -125,7 +152,9 @@ export const resumeCommand = define({
 
       const config = loadConfig()
       const extraFlags = config.claude.flags.join(' ')
-      const cmd = `cd ${JSON.stringify(dir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(name)}\r`
+      const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
+      const modelPart = resolvedModel ? ` --model ${JSON.stringify(resolvedModel)}` : ''
+      const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(name)}${modelPart}\r`
       await adapter.sendInput(termBlock.blockid, cmd)
 
       // Verify Claude actually started (poll for up to 15s)
@@ -153,6 +182,8 @@ export const resumeCommand = define({
         tabName: name,
         dir,
         claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
+        envVars,
+        modelOverride: resolvedModel,
       })
       consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)`)
     } else {
@@ -162,6 +193,8 @@ export const resumeCommand = define({
         tabName: name,
         dir,
         claudeCmd: 'claude',
+        envVars,
+        modelOverride: resolvedModel,
       })
       consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude at ${dir} (new tab, no prior session found)`)
     }

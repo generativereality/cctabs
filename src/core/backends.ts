@@ -1,0 +1,200 @@
+/**
+ * Backend presets. Each preset resolves to a set of env vars (prepended to the
+ * shell command in the new tab) plus a Claude --model name.
+ *
+ * The default `anthropic` preset is a no-op: no env vars, no --model override —
+ * Claude Code uses its built-in API connection.
+ *
+ * Ollama-backed presets point ANTHROPIC_BASE_URL at Ollama's
+ * Anthropic-compatible /v1/messages endpoint (Ollama ≥ 0.14):
+ *   https://docs.ollama.com/openai
+ *
+ * The `*-tee` variants route through the local logging proxy on :11500
+ * (`npm run ollama-tee` in the motin-scripts repo) for wire-level inspection.
+ */
+
+import { existsSync, readFileSync } from 'fs'
+import { CONFIG_PATH } from './config.js'
+
+export interface BackendSpec {
+  /** Env vars to prepend to the `claude` command */
+  env: Record<string, string>
+  /** Value for `claude --model <name>` */
+  model: string
+  /** Human-friendly description shown in error messages */
+  description?: string
+}
+
+const OLLAMA_LOCAL = 'http://localhost:11434'
+const OLLAMA_TEE = 'http://localhost:11500'
+
+/**
+ * For Ollama-backed Claude Code sessions we pin the small/fast/haiku model to
+ * the same model. Otherwise Claude Code's background "haiku" calls 404 against
+ * Ollama because the haiku tag doesn't exist there.
+ */
+function ollamaEnv(baseUrl: string, model: string): Record<string, string> {
+  return {
+    ANTHROPIC_BASE_URL: baseUrl,
+    ANTHROPIC_AUTH_TOKEN: 'ollama',
+    ANTHROPIC_API_KEY: '',
+    ANTHROPIC_SMALL_FAST_MODEL: model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+  }
+}
+
+const BUILTIN_BACKENDS: Record<string, BackendSpec> = {
+  anthropic: {
+    env: {},
+    model: '',
+    description: 'Default Anthropic API (no override)',
+  },
+
+  // --- Ollama Cloud (Pro tier required for these tags) ---
+  kimi: {
+    env: ollamaEnv(OLLAMA_LOCAL, 'kimi-k2.6:cloud'),
+    model: 'kimi-k2.6:cloud',
+    description: 'Kimi K2.6 via Ollama Cloud (Pro)',
+  },
+  'qwen-cloud': {
+    env: ollamaEnv(OLLAMA_LOCAL, 'qwen3-coder-next:cloud'),
+    model: 'qwen3-coder-next:cloud',
+    description: 'Qwen3 Coder Next via Ollama Cloud',
+  },
+  'gemma-cloud': {
+    env: ollamaEnv(OLLAMA_LOCAL, 'gemma4:31b-cloud'),
+    model: 'gemma4:31b-cloud',
+    description: 'Gemma4 31B via Ollama Cloud',
+  },
+
+  // --- Local Ollama (slow on M1 Max — ~100s/turn for 50k system prompt) ---
+  'qwen-local': {
+    env: ollamaEnv(OLLAMA_LOCAL, 'qwen3-coder:30b'),
+    model: 'qwen3-coder:30b',
+    description: 'Qwen3 Coder 30B local (18GB)',
+  },
+  'qwen-next-local': {
+    env: ollamaEnv(OLLAMA_LOCAL, 'qwen3-coder-next:q3_K_M'),
+    model: 'qwen3-coder-next:q3_K_M',
+    description: 'Qwen3 Coder Next Q3_K_M local (38GB) — needs `ollama create` import',
+  },
+  'gpt-oss': {
+    env: ollamaEnv(OLLAMA_LOCAL, 'gpt-oss:20b'),
+    model: 'gpt-oss:20b',
+    description: 'gpt-oss 20B local (13GB)',
+  },
+  llama: {
+    env: ollamaEnv(OLLAMA_LOCAL, 'llama3.1:8b'),
+    model: 'llama3.1:8b',
+    description: 'Llama 3.1 8B local (5GB) — note: garbles on Claude Code\'s 50k system prompt',
+  },
+  'gemma-local': {
+    env: ollamaEnv(OLLAMA_LOCAL, 'gemma4:26b'),
+    model: 'gemma4:26b',
+    description: 'Gemma4 26B local (17GB)',
+  },
+
+  // --- Tee proxy variants (route through localhost:11500 for logging) ---
+  'kimi-tee': {
+    env: ollamaEnv(OLLAMA_TEE, 'kimi-k2.6:cloud'),
+    model: 'kimi-k2.6:cloud',
+    description: 'Kimi via tee proxy (logs to /tmp/ollama-tee.log)',
+  },
+  'qwen-cloud-tee': {
+    env: ollamaEnv(OLLAMA_TEE, 'qwen3-coder-next:cloud'),
+    model: 'qwen3-coder-next:cloud',
+    description: 'Qwen Cloud via tee proxy',
+  },
+  'qwen-next-local-tee': {
+    env: ollamaEnv(OLLAMA_TEE, 'qwen3-coder-next:q3_K_M'),
+    model: 'qwen3-coder-next:q3_K_M',
+    description: 'Qwen Next local Q3 via tee proxy',
+  },
+}
+
+/**
+ * Parse a `[backends.<name>]` section from the config TOML. Each section can
+ * override env vars and/or model. Format:
+ *
+ *   [backends.my-preset]
+ *   model = "qwen3-coder-next:cloud"
+ *   base_url = "http://localhost:11434"
+ *   auth_token = "ollama"          # optional, defaults to "ollama" if base_url is set
+ *
+ * Or for full control:
+ *
+ *   [backends.my-preset]
+ *   model = "..."
+ *   env_ANTHROPIC_BASE_URL = "..."
+ *   env_ANTHROPIC_AUTH_TOKEN = "..."
+ */
+function loadCustomBackends(): Record<string, BackendSpec> {
+  if (!existsSync(CONFIG_PATH)) return {}
+
+  const text = readFileSync(CONFIG_PATH, 'utf-8')
+  const sections: Record<string, Record<string, string>> = {}
+  let section: string | null = null
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.startsWith('[') && line.endsWith(']')) {
+      section = line.slice(1, -1).trim()
+      sections[section] ??= {}
+      continue
+    }
+    if (section?.startsWith('backends.') && line.includes('=')) {
+      const [rawKey, ...rest] = line.split('=')
+      const key = rawKey.trim()
+      const val = rest.join('=').trim()
+      if (val.startsWith('"') && val.endsWith('"')) {
+        sections[section][key] = val.slice(1, -1)
+      }
+    }
+  }
+
+  const result: Record<string, BackendSpec> = {}
+  for (const [section, kv] of Object.entries(sections)) {
+    if (!section.startsWith('backends.')) continue
+    const name = section.slice('backends.'.length)
+    const model = kv.model ?? ''
+    const env: Record<string, string> = {}
+
+    if (kv.base_url) {
+      const baseUrl = kv.base_url
+      const token = kv.auth_token ?? 'ollama'
+      Object.assign(env, {
+        ANTHROPIC_BASE_URL: baseUrl,
+        ANTHROPIC_AUTH_TOKEN: token,
+        ANTHROPIC_API_KEY: '',
+      })
+      if (model) {
+        env.ANTHROPIC_SMALL_FAST_MODEL = model
+        env.ANTHROPIC_DEFAULT_HAIKU_MODEL = model
+      }
+    }
+
+    for (const [k, v] of Object.entries(kv)) {
+      if (k.startsWith('env_')) env[k.slice(4)] = v
+    }
+
+    result[name] = { env, model, description: kv.description ?? `User-defined preset (${CONFIG_PATH})` }
+  }
+
+  return result
+}
+
+export function resolveBackend(name: string): BackendSpec | null {
+  if (!name) return null
+  const custom = loadCustomBackends()
+  return custom[name] ?? BUILTIN_BACKENDS[name] ?? null
+}
+
+export function listBackends(): { name: string; description: string }[] {
+  const custom = loadCustomBackends()
+  const merged = { ...BUILTIN_BACKENDS, ...custom }
+  return Object.entries(merged).map(([name, spec]) => ({
+    name,
+    description: spec.description ?? '',
+  }))
+}

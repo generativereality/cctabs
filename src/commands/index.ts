@@ -11,6 +11,7 @@ import { scrollbackCommand } from './scrollback.js'
 import { sendCommand } from './send.js'
 import { configCommand } from './config-cmd.js'
 import { restoreCommand } from './restore.js'
+import { backendsCommand } from './backends.js'
 
 // Default command: show sessions (most common use)
 const defaultCommand = define({
@@ -35,6 +36,7 @@ const subCommands = new Map([
   ['send', sendCommand],
   ['config', configCommand],
   ['restore', restoreCommand],
+  ['backends', backendsCommand],
 ])
 
 export async function run(): Promise<void> {

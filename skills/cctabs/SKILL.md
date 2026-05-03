@@ -70,6 +70,7 @@ cctabs new fix-api ~/Dev/myapp --worktree --prompt "checkout PR #102 and fix tes
 cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
+cctabs new <name> [dir] -b <preset>      # new tab on a non-Anthropic backend (Ollama)
 cctabs resume <name> [dir]               # resume last session (reuses tab or creates one)
 cctabs restore [dir] [--dry]             # resume every dead tab (e.g. after a reboot)
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
@@ -77,8 +78,73 @@ cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename a tab
 cctabs scrollback <tab-or-block> [n]    # read terminal output (default: 50 lines)
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
+cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
+
+## Backends: running Claude Code on Ollama / Kimi / Qwen / local models
+
+By default, `cctabs new` runs `claude` against the Anthropic API. Pass `--backend <preset>` (or `-b`) to launch the tab against a different model provider — useful for cheap/free scratch sessions, privacy-sensitive work, or experimenting with frontier open-weight models.
+
+`cctabs` does this by prepending the right env vars (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, etc.) and `--model <name>` to the `claude` command in the new tab.
+
+### Built-in presets
+
+Run `cctabs backends` for the live list. Common ones:
+
+| Preset | What it is | When to use |
+|---|---|---|
+| `anthropic` (default) | Anthropic API | Production / coding work where capability matters |
+| `kimi` | Kimi K2.6 via Ollama Cloud (Pro tier) | Cheap frontier alternative; ~5s/turn |
+| `qwen-cloud` | Qwen3 Coder Next via Ollama Cloud | Fastest Pro option (~3.8s/turn) |
+| `gemma-cloud` | Gemma4 31B via Ollama Cloud | Cheap general-purpose |
+| `qwen-local` | Qwen3 Coder 30B local (18GB) | Offline / private; slow on M1 |
+| `qwen-next-local` | Qwen3 Coder Next Q3_K_M local (38GB) | Private + most capable local; needs `ollama create` import |
+| `gpt-oss` | gpt-oss 20B local (13GB) | Private; slow; ~100s/turn for 50k system prompt |
+| `llama` | Llama 3.1 8B local | Fast but garbles inside Claude Code's 50k system prompt — capability gate |
+| `*-tee` | Same as above but routed through `:11500` proxy | Wire-level inspection (`ollama-tee` proxy must be running) |
+
+### Cost × privacy framing
+
+Two axes matter:
+
+1. **Cost** — Anthropic Pro $20/mo or Max ($100/$200/mo); Ollama Cloud Pro $20/mo (3 concurrent, includes Kimi/Qwen Cloud); local = free but hardware-bound
+2. **Privacy** — Anthropic API: Anthropic sees prompts. Ollama Cloud: Ollama sees prompts. Local: nothing leaves the laptop
+
+Match the tier to the task:
+- Sensitive prompts (client code, customer data) → `qwen-next-local` or `gpt-oss`
+- Routine exploration / orchestration → `anthropic` (default)
+- Cost-sensitive bulk work → `kimi` or `qwen-cloud`
+
+### Examples
+
+```bash
+# Spin up a tab on Kimi for a side experiment
+cctabs new explore-kimi ~/Dev/myapp -b kimi -p "explore alternative API designs"
+
+# Local privacy session, slower but no data leaves the laptop
+cctabs new private-refactor ~/Dev/clientwork -b qwen-next-local -W
+
+# Compare two models on the same task in parallel
+cctabs new task-anthropic ~/Dev/myapp -p "implement spec X"
+cctabs new task-kimi ~/Dev/myapp -b kimi -p "implement spec X"
+
+# Custom local Ollama tag not in built-in presets:
+cctabs new x ~/Dev/myapp -b qwen-local -m my-custom-tag:latest
+```
+
+### Caveats
+
+- **Local backends are slow on M1.** A Claude Code turn against the local 50k-token system prompt takes ~100s prefill + generation on M1 Max. Only worth it for non-time-sensitive private work.
+- **Llama 3.1 8B garbles tool calls** under Claude Code's system prompt. Capability gate, not a bug.
+- **Ollama Cloud Pro requires `ollama signin`** (one-time). Free tier denies cloud-tagged models.
+- **Custom presets** can be added in `~/.config/cctabs/config.toml`:
+  ```toml
+  [backends.my-preset]
+  model = "qwen3-coder-next:cloud"
+  base_url = "http://localhost:11434"
+  description = "My custom preset"
+  ```
 
 ## Workflow: Checking What's Running
 

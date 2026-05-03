@@ -1,6 +1,6 @@
 {
   "name": "@generativereality/cctabs",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Claude Code tab manager. Terminal tabs as the UI, no tmux.",
   "type": "module",
   "bin": {
