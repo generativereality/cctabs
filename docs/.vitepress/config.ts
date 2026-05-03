@@ -35,6 +35,10 @@ export default defineConfig({
     ['meta', { name: 'author', content: 'generativereality' }],
     ['meta', { name: 'keywords', content: 'cctabs, claude code, ai coding, terminal sessions, agent orchestration, claude code sessions, multi-agent, wave terminal' }],
 
+    // Google tag (gtag.js) — cookieless config, no banner required
+    ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-KW9J78R8C6' }],
+    ['script', {}, `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'denied'});gtag('js',new Date());gtag('config','G-KW9J78R8C6',{client_storage:'none',anonymize_ip:true,allow_google_signals:false,allow_ad_personalization_signals:false});`],
+
   ],
 
   themeConfig: {
