@@ -57,8 +57,10 @@ The plugin is published as `tabby-cctabs` on npm and gets dropped into Tabby's u
 TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
 mkdir -p "$TABBY_PLUGINS"
 [ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
-npm install --prefix "$TABBY_PLUGINS" tabby-cctabs
+npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
 ```
+
+`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm, so npm 7+ refuses without it. Tabby's GUI plugin manager handles this internally.
 
 Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
 Windows: `%APPDATA%\tabby`.

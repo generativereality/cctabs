@@ -6,7 +6,20 @@ The cctabs CLI was originally Wave-Terminal-only. This plugin makes Tabby a firs
 
 ## Install
 
-When the plugin is published, install it from Tabby → **Settings → Plugins** (search "cctabs").
+Easiest path: Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby.
+
+Programmatic (macOS):
+
+```sh
+TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
+mkdir -p "$TABBY_PLUGINS"
+[ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
+npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
+```
+
+`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) ship as part of Tabby itself, not on npm. Linux uses `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`, Windows uses `%APPDATA%\tabby`.
+
+After install, quit Tabby and reopen it (plugins load at startup), then verify with `curl http://127.0.0.1:3300/api/health` or `cctabs doctor`.
 
 For local development, see *Build and sideload* below.
 
