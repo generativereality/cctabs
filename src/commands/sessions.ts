@@ -8,8 +8,8 @@ export const sessionsCommand = define({
   async run() {
     const adapter = requireAdapter()
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-    const currentTab = process.env.WAVETERM_TABID ?? ''
-    const currentWs = process.env.WAVETERM_WORKSPACEID ?? ''
+    const currentTab = adapter.currentTabId()
+    const currentWs = adapter.currentWorkspaceId()
 
     console.log('Sessions')
     console.log('='.repeat(50))

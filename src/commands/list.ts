@@ -8,9 +8,9 @@ export const listCommand = define({
   async run() {
     const adapter = requireAdapter()
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-    const currentBlock = process.env.WAVETERM_BLOCKID ?? ''
-    const currentTab = process.env.WAVETERM_TABID ?? ''
-    const currentWs = process.env.WAVETERM_WORKSPACEID ?? ''
+    const currentBlock = adapter.currentBlockId()
+    const currentTab = adapter.currentTabId()
+    const currentWs = adapter.currentWorkspaceId()
 
     for (const wsp of workspaces) {
       const { oid, name, tabids } = wsp.workspacedata

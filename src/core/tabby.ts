@@ -235,6 +235,19 @@ export class TabbyAdapter implements TerminalAdapter {
     return workspaces.map((w) => ({ data: w.workspacedata, windowId: w.windowid }))
   }
 
+  currentTabId(): string {
+    return this.identifySelf() ?? ''
+  }
+
+  currentBlockId(): string {
+    // Tabby has a 1:1 tab↔block mapping in our data model.
+    return this.currentTabId()
+  }
+
+  currentWorkspaceId(): string {
+    return 'tabby'
+  }
+
   // ---- Tabby-specific: identify the tab cctabs is currently running in ----
 
   /**

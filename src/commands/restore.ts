@@ -21,7 +21,7 @@ export const restoreCommand = define({
 
     const adapter = requireAdapter()
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-    const currentTab = process.env.WAVETERM_TABID ?? ''
+    const currentTab = adapter.currentTabId()
 
     // Collect all tabs with their status
     const tabs: Array<{

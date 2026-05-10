@@ -409,6 +409,18 @@ export class WaveAdapter implements TerminalAdapter {
     return blocks.filter((b) => b.blockid.startsWith(query))
   }
 
+  currentTabId(): string {
+    return process.env.WAVETERM_TABID ?? ''
+  }
+
+  currentBlockId(): string {
+    return process.env.WAVETERM_BLOCKID ?? ''
+  }
+
+  currentWorkspaceId(): string {
+    return process.env.WAVETERM_WORKSPACEID ?? ''
+  }
+
   resolveWorkspace(
     workspaces: Workspace[],
     query: string,

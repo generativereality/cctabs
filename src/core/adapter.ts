@@ -44,6 +44,15 @@ export interface TerminalAdapter {
     workspaces: Workspace[],
     query: string,
   ): Array<{ data: Workspace['workspacedata']; windowId: string }>
+
+  // -- current-context helpers ("which tab am I running in?") --
+  /** Tab the cctabs process is currently running in, or '' if unknown. */
+  currentTabId(): string
+  /** Block the cctabs process is currently running in, or '' if unknown.
+   * On Tabby this is the same as currentTabId (1:1 tab↔block mapping). */
+  currentBlockId(): string
+  /** Workspace the cctabs process is currently running in, or '' if unknown. */
+  currentWorkspaceId(): string
 }
 
 /** Returns the adapter that matches the running terminal. Exits with a clear
