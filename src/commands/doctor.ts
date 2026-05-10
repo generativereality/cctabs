@@ -116,8 +116,8 @@ function checkTabbyPlugin (): CheckResult {
     status: 'fail',
     detail: `${host}:${port} unreachable (${health.error ?? 'unknown'})`,
     hint:
-      'Install: `npm install --legacy-peer-deps --prefix "$HOME/Library/Application Support/tabby/plugins" tabby-cctabs` ' +
-      '— then quit and reopen Tabby.',
+      'Run `cctabs install-tabby-plugin` from inside a Tabby tab — it npm-installs the plugin and reopens Tabby. ' +
+      'Or do it by hand: `npm install --legacy-peer-deps --prefix "$HOME/Library/Application Support/tabby/plugins" tabby-cctabs`, then quit + reopen Tabby.',
   }
 }
 

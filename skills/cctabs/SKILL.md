@@ -47,23 +47,38 @@ After confirming `cctabs` is on PATH, **always run `cctabs doctor` before your f
 
 If `cctabs doctor` reports `✘ Tabby cctabs plugin — … unreachable`:
 
-1. Ask the user: *"You're running in Tabby and the cctabs plugin isn't installed yet. Want me to install it? (one npm install + a Tabby restart)"*
-2. On approval, run the install snippet below.
-3. Ask the user to **quit Tabby (`Cmd+Q`) and reopen it** — the plugin only loads at startup; you can't reload it from outside Tabby.
-4. After they confirm Tabby is back up, re-run `cctabs doctor` and expect all checks green before issuing any cctabs commands.
+1. Ask the user once: *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin` — that npm-installs the plugin AND restarts Tabby in the background, dropping you back into a forked session. Caveat: any other Tabby tabs you have open will be killed. OK?"*
+2. On approval, run the auto-install command (see below). It returns immediately; Tabby quits ~2s later, reopens, and spawns a new tab with `claude --resume <id> --fork-session`.
+3. Your turn ends with Tabby's restart. Tell the user the next step is for them: when the new claude tab comes up, type `cctabs doctor` (or whatever they were originally trying to do) — the resumed session will pick up from there.
+
+If the user wants to keep their other tabs intact, fall back to the manual snippet and tell them to quit + reopen Tabby themselves.
 
 Don't try to drive cctabs (`new`, `sessions`, …) before the plugin is reachable — every command will fail with a confusing 7+s timeout.
 
-#### Programmatic install (macOS)
+#### Auto-install + auto-restart (recommended)
+
+```bash
+cctabs install-tabby-plugin --yes
+```
+
+What it does, in order:
+1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs`
+2. Captures the current claude session id from `~/.claude/projects/<slug>/`
+3. Spawns a detached background worker that quits Tabby, waits for it to die, reopens it, then opens a new tab running `claude --resume <id> --fork-session` in your current cwd.
+
+**Other Tabby tabs in the same window get killed.** Tabby's session recovery may or may not bring them back. Use `--no-restart` to skip step 3 if the user wants control.
+
+#### Manual install (fallback)
 
 ```bash
 TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
 mkdir -p "$TABBY_PLUGINS"
 [ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
 npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
+# then ask the user to quit + reopen Tabby
 ```
 
-`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm, so npm 7+ refuses without it. Tabby's GUI plugin manager handles this internally.
+`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm. Tabby's GUI plugin manager handles this internally.
 
 Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
 Windows: `%APPDATA%\tabby`.
