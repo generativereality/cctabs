@@ -303,21 +303,81 @@ person doesn't pay the same toll:
 - `Tabby run zsh -lc "<cmd>"` mangles argv — pass a launcher script path
   instead.
 
-## Known unknowns / risks to revisit
+## Shipped state (cctabs v0.3.0 / tabby-cctabs v0.1.0)
 
-- **Tabby plugin loading API stability.** Tabby's plugin format is
-  well-documented but evolves; the build setup may need tweaks across
-  Tabby releases.
-- **Express dependency in a webpack-bundled Tabby plugin.** May need a
-  smaller HTTP server (e.g. `node:http` directly) to keep bundle size
-  down and avoid cjs/esm headaches inside Tabby's webpack.
-- **PID walk on Linux/Windows.** macOS uses `ps -o ppid= -p N`; Linux works
-  identically; Windows needs `wmic` or `Get-CimInstance Win32_Process`.
-  Initial implementation can be macOS+Linux only.
-- **Multiple Tabby windows.** A single plugin instance covers all windows;
-  the API exposes only "tabs" — we don't model windows. May need to
-  revisit if a workspace-like grouping shows up.
-- **Distribution discoverability.** Tabby's plugin manager pulls from npm
-  using a `tabby-plugin` keyword. We need both that keyword *and* a working
-  Tabby plugin manifest (`package.json` `tabby` field) for the manager to
-  see us.
+The PR `feat/tabby-support` is squash-merged into main. cctabs v0.3.0 is
+on npm with TabbyAdapter + the `install-tabby-plugin` subcommand. The
+plugin `tabby-cctabs@0.1.0` is on npm; `npm install --legacy-peer-deps
+--prefix <plugins-dir> tabby-cctabs` Just Works once the user restarts
+Tabby.
+
+End-to-end Claude-in-Tabby flow exercised live (2026-05-10):
+
+1. Fresh user opens Tabby for the first time.
+2. Starts `claude --allow-dangerously-skip-permissions` in a Tabby shell tab.
+3. Asks Claude something cctabs-flavoured ("list all tabs").
+4. cctabs CLI returns the `TabbyPluginUnreachableError` with the install
+   command embedded. Claude sees it, asks the user for consent, runs
+   `cctabs install-tabby-plugin --yes`.
+5. Tabby restarts; user lands in a forked claude session with the
+   plugin running.
+
+Key design decisions that shipped (deviating from earlier plan):
+
+- **Plugin renamed unscoped: `tabby-cctabs`** (not
+  `@generativereality/tabby-cctabs`). Tabby's loader enumerates direct
+  `tabby-*` children of `node_modules/`; scoped packages would land at
+  `node_modules/@scope/...` and never get discovered.
+- **Output capture via `session.output$`, not SerializeAddon.** The xterm
+  serialize buffer is empty for tabs Tabby hasn't rendered yet
+  (background tabs, restored sessions). `OutputBufferStore` polls
+  `tab.session` for late attachments and accumulates a 256 KB ring per
+  tab. Caveat: a tab the user has never focused has no live session at
+  all — buffer reads return empty until first visit.
+- **Self-documenting failure modes, not preflight checks.** Every
+  TabbyAdapter command throws `TabbyPluginUnreachableError` whose message
+  contains the install command. The skill no longer mandates "always run
+  doctor first" — the agent reacts to whatever cctabs surfaces.
+- **`cctabs install-tabby-plugin` does the npm install + Tabby restart in
+  one shot.** Spawns a detached worker so the calling Claude can return
+  before Tabby is killed. After Tabby reopens, it auto-launches a tab
+  with `claude --resume <id> --fork-session` in the original cwd, so
+  context is preserved across the restart.
+
+## Known issues / follow-ups for the next session
+
+- **Other Tabby tabs die on auto-restart.** `install-tabby-plugin` quits
+  the whole Tabby app, not just the current window. Tabby's session
+  recovery may or may not restore other tabs. Minor for first-time
+  install (likely only one tab open) but a problem if it ever needs to
+  re-run. Ideas: detect "more than one tab" and refuse / offer to merge
+  into a manual flow.
+- **Hidden Tabby tabs return empty buffer.** Per the OutputBufferStore
+  caveat above. `cctabs sessions` reports those as `? unknown`. Could
+  improve by also reading `session.guessedCWD` / OSC-7 cwd, or by
+  proactively focusing each tab once at plugin load.
+- **Tab status "active" vs "terminal" detection misfires.** The
+  Wave-derived `detectSessionStatus` looks for substrings like
+  `'⏵⏵ bypass'` (with spaces). Tabby buffers strip spaces in some
+  contexts (`⏵⏵bypasspermissionson`), causing claude tabs to be
+  reported as `terminal`. Loosen the matchers or detect by process name.
+- **Linux + Windows of `install-tabby-plugin`** are partially stubbed —
+  the macOS path is the only one verified live. Windows needs `pkill`
+  → `taskkill`, a different plugins-dir, and a `tabby` launch shim.
+- **Tabby's session-recovery + our `install-tabby-plugin` overlap.** When
+  Tabby restarts, it tries to recover all prior tabs, *and* we open a
+  new "resume claude" tab. Result is sometimes a duplicated claude tab.
+  Reasonable to accept as cosmetic for now.
+- **No unit tests for `TabbyAdapter`.** Wave has none either; might be
+  worth at least a smoke test that mocks the HTTP layer.
+- **`cctabs install-tabby-plugin` doesn't verify the install actually
+  worked before dispatching the restart worker.** If the plugin install
+  silently fails (npm picks up cached broken state, etc.), Tabby
+  restarts into a still-broken state. Could add a post-install health
+  check before the restart.
+
+## Background notes (older planning, kept for context)
+
+The sections above (`Architecture`, `Plugin HTTP API`, `Phases`, …) were
+written before implementation. They mostly match what shipped, with the
+deviations called out under "Key design decisions" above.
