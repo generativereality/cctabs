@@ -41,20 +41,36 @@ Do not modify PATH or npm configuration beyond this.
 
 Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
 
-Detect the running terminal:
+The fastest way to verify everything is set up correctly is:
 
 ```bash
-echo "${TERM_PROGRAM:-${WAVETERM_JWT:+wave}}"   # → 'Tabby' or 'wave'
+cctabs doctor
 ```
 
-If `Tabby`, check the plugin:
+`doctor` prints one line per check (terminal detection, Wave Accessibility, Tabby plugin reachability, Wave DB scan). On Tabby, a missing/unreachable plugin shows up as a clear failure with the install command in the hint.
+
+#### Install programmatically (recommended once approved by user)
+
+The plugin is published as `tabby-cctabs` on npm and gets dropped into Tabby's user-plugins directory. macOS:
 
 ```bash
-curl -fsS http://127.0.0.1:3300/api/health
-# → {"ok":true,"version":"0.1.0"}
+TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
+mkdir -p "$TABBY_PLUGINS"
+[ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
+npm install --prefix "$TABBY_PLUGINS" tabby-cctabs
 ```
 
-If that fails, ask: *"You're running in Tabby — cctabs needs the cctabs Tabby plugin. Want me to install it?"* On approval, point the user at **Settings → Plugins** in Tabby (search "cctabs") for one-click install. The plugin runs as long as Tabby is open; cctabs will fail with a clear error if it isn't reachable.
+Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
+Windows: `%APPDATA%\tabby`.
+
+After install:
+
+1. Tell the user to **quit and reopen Tabby** (`Cmd+Q` then relaunch). Plugins load only at startup.
+2. Re-run `curl -fsS http://127.0.0.1:3300/api/health` (or `cctabs doctor`) — expect `{"ok":true,"version":"<n>"}`.
+
+#### Install via Tabby's GUI
+
+Open Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby. Same end state, different path.
 
 Do not assume that "no Wave detected → cctabs unusable" — Tabby is fully supported.
 
