@@ -5,8 +5,9 @@ import { TerminalTabComponent } from 'tabby-local'
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http'
 import { TabRegistry } from './tab-registry'
 import { PidIndex } from './pid-index'
+import { OutputBufferStore } from './output-buffer'
 import { CctabsLogger } from './logger'
-import { serializeBuffer, bufferLines } from './buffer'
+import { bufferLines } from './buffer'
 
 const PLUGIN_VERSION = '0.1.0'
 
@@ -57,6 +58,7 @@ export class CctabsServer {
     private config: ConfigService,
     private tabs: TabRegistry,
     private pids: PidIndex,
+    private output: OutputBufferStore,
     private logger: CctabsLogger,
   ) {
     this.start()
@@ -176,7 +178,7 @@ export class CctabsServer {
         return sendJson(res, 400, { error: 'tab is not a terminal' })
       }
       const lastN = url.searchParams.get('lines')
-      const text = serializeBuffer(tab)
+      const text = this.output.read(tab)
       const lines = bufferLines(text, lastN ? Number(lastN) : undefined)
       return sendJson(res, 200, { lines, totalLines: lines.length })
     }

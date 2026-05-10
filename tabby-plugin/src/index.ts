@@ -8,6 +8,7 @@ import { SettingsTabProvider } from 'tabby-settings'
 import { CctabsLogger } from './logger'
 import { TabRegistry } from './tab-registry'
 import { PidIndex } from './pid-index'
+import { OutputBufferStore } from './output-buffer'
 import { CctabsServer } from './server'
 import { CctabsConfigProvider, CctabsSettingsTabProvider } from './settings'
 import { CctabsSettingsTabComponent } from './settings-tab.component'
@@ -21,6 +22,7 @@ import { CctabsSettingsTabComponent } from './settings-tab.component'
     CctabsLogger,
     TabRegistry,
     PidIndex,
+    OutputBufferStore,
     CctabsServer,
     { provide: ConfigProvider, useClass: CctabsConfigProvider, multi: true },
     { provide: SettingsTabProvider, useClass: CctabsSettingsTabProvider, multi: true },
@@ -30,8 +32,13 @@ import { CctabsSettingsTabComponent } from './settings-tab.component'
   ],
 })
 export default class CctabsPluginModule {
-  // Force the server to instantiate eagerly so it starts on plugin load.
-  constructor (logger: CctabsLogger, _server: CctabsServer) {
+  // Force the server (and the output-buffer store, which the server uses)
+  // to instantiate eagerly so they start capturing on plugin load.
+  constructor (
+    logger: CctabsLogger,
+    _output: OutputBufferStore,
+    _server: CctabsServer,
+  ) {
     logger.info('plugin loaded')
   }
 }
