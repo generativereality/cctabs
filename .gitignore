@@ -5,3 +5,6 @@ docs/.vitepress/cache/
 .DS_Store
 *.log
 .playwright-mcp/
+
+# Local clones of upstream projects checked out for reference only.
+related-repos/

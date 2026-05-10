@@ -64,6 +64,7 @@ export default defineConfig({
           { text: 'Session Workflows', link: '/guide/workflows' },
           { text: 'Claude Code Skill', link: '/guide/claude-code-skill' },
           { text: 'Configuration', link: '/guide/configuration' },
+          { text: 'Troubleshooting', link: '/guide/troubleshooting' },
         ],
       },
       {

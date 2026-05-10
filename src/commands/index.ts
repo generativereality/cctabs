@@ -12,6 +12,7 @@ import { sendCommand } from './send.js'
 import { configCommand } from './config-cmd.js'
 import { restoreCommand } from './restore.js'
 import { backendsCommand } from './backends.js'
+import { doctorCommand } from './doctor.js'
 
 // Default command: show sessions (most common use)
 const defaultCommand = define({
@@ -37,6 +38,7 @@ const subCommands = new Map([
   ['config', configCommand],
   ['restore', restoreCommand],
   ['backends', backendsCommand],
+  ['doctor', doctorCommand],
 ])
 
 export async function run(): Promise<void> {

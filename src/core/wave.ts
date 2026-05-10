@@ -1,10 +1,34 @@
 import { createConnection, type Socket } from 'net'
-import { execFileSync, spawnSync } from 'child_process'
+import { spawnSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import { homedir } from 'os'
 import { join } from 'path'
 import type { Block, Workspace, AllData } from '../types/index.js'
 import { detectTerminal, printUnsupportedTerminalError } from './terminal.js'
+import { findOrphanTabIds, WSH_ORPHAN_TABID_PATTERN, type OrphanReport } from './wave-db.js'
+
+export class WaveOrphanTabidError extends Error {
+  reports: OrphanReport[]
+  wshStderr: string
+  constructor(reports: OrphanReport[], wshStderr: string) {
+    const lines = [
+      "Wave Terminal's block listing aborted: a workspace's tabids list references a tab that no longer exists in db_tab.",
+      'wsh stderr: ' + wshStderr.trim(),
+      '',
+      'Affected workspaces:',
+      ...reports.map(
+        (r) =>
+          `  • "${r.workspaceName}" [${r.workspaceId.slice(0, 8)}] — ${r.orphanTabIds.length} orphan tabid(s): ${r.orphanTabIds.map((t) => t.slice(0, 8)).join(', ')}`,
+      ),
+      '',
+      'Run `cctabs doctor` to back up the Wave DB and apply the fix.',
+    ]
+    super(lines.join('\n'))
+    this.name = 'WaveOrphanTabidError'
+    this.reports = reports
+    this.wshStderr = wshStderr
+  }
+}
 
 const SOCK_PATH = join(
   homedir(),
@@ -114,6 +138,7 @@ class WaveSocket {
 export class WaveAdapter {
   private socket: WaveSocket | null = null
   private jwt: string
+  private lastBlocksListStderr = ''
 
   constructor() {
     this.jwt = process.env.WAVETERM_JWT ?? ''
@@ -129,12 +154,28 @@ export class WaveAdapter {
     const wsId = process.env.WAVETERM_WORKSPACEID ?? ''
     const args = ['blocks', 'list', '--json', '--timeout', '15000']
     if (wsId) args.push('--workspace', wsId)
+    const r = spawnSync('wsh', args, { encoding: 'utf-8' })
+    this.lastBlocksListStderr = r.stderr ?? ''
+    if (r.status !== 0 || !r.stdout?.trim()) return []
     try {
-      const out = execFileSync('wsh', args, { encoding: 'utf-8' })
-      return JSON.parse(out) as Block[]
+      return JSON.parse(r.stdout) as Block[]
     } catch {
       return []
     }
+  }
+
+  /** If the most recent blocksList() looked like it hit Wave's orphan-tabid
+   * abort, run a sqlite3 self-check to confirm. Returns reports when orphans
+   * are found, otherwise null. */
+  diagnoseOrphanTabids(): OrphanReport[] | null {
+    const stderr = this.lastBlocksListStderr
+    if (!stderr || !WSH_ORPHAN_TABID_PATTERN.test(stderr)) return null
+    const reports = findOrphanTabIds()
+    return reports.length ? reports : null
+  }
+
+  getLastBlocksListStderr(): string {
+    return this.lastBlocksListStderr
   }
 
   scrollback(blockId: string, lastN = 50): string {
@@ -283,6 +324,14 @@ export class WaveAdapter {
 
   async getAllData(): Promise<AllData> {
     const blocks = this.blocksList()
+
+    if (!blocks.length) {
+      const orphans = this.diagnoseOrphanTabids()
+      if (orphans) {
+        this.closeSocket()
+        throw new WaveOrphanTabidError(orphans, this.lastBlocksListStderr)
+      }
+    }
 
     const tabsById = new Map<string, Block[]>()
     for (const b of blocks) {

@@ -132,3 +132,15 @@ Show the config file path and current values.
 ```bash
 cctabs config
 ```
+
+## cctabs doctor
+
+Diagnose Wave Terminal DB issues — currently the orphan-tabid bug that breaks
+`wsh blocks list`. See [Troubleshooting](../guide/troubleshooting.md) for the
+full background.
+
+```bash
+cctabs doctor              # diagnose only
+cctabs doctor --fix        # back up the DB and apply the fix interactively
+cctabs doctor --fix --yes  # skip the confirmation prompt
+```
