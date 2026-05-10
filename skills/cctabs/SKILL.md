@@ -41,17 +41,20 @@ Do not modify PATH or npm configuration beyond this.
 
 Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
 
-The fastest way to verify everything is set up correctly is:
+#### Bootstrap loop (run this on first cctabs use in any new environment)
 
-```bash
-cctabs doctor
-```
+After confirming `cctabs` is on PATH, **always run `cctabs doctor` before your first cctabs command in a session**. Doctor prints one line per check (terminal, Wave Accessibility, Tabby plugin reachability, Wave DB scan).
 
-`doctor` prints one line per check (terminal detection, Wave Accessibility, Tabby plugin reachability, Wave DB scan). On Tabby, a missing/unreachable plugin shows up as a clear failure with the install command in the hint.
+If `cctabs doctor` reports `✘ Tabby cctabs plugin — … unreachable`:
 
-#### Install programmatically (recommended once approved by user)
+1. Ask the user: *"You're running in Tabby and the cctabs plugin isn't installed yet. Want me to install it? (one npm install + a Tabby restart)"*
+2. On approval, run the install snippet below.
+3. Ask the user to **quit Tabby (`Cmd+Q`) and reopen it** — the plugin only loads at startup; you can't reload it from outside Tabby.
+4. After they confirm Tabby is back up, re-run `cctabs doctor` and expect all checks green before issuing any cctabs commands.
 
-The plugin is published as `tabby-cctabs` on npm and gets dropped into Tabby's user-plugins directory. macOS:
+Don't try to drive cctabs (`new`, `sessions`, …) before the plugin is reachable — every command will fail with a confusing 7+s timeout.
+
+#### Programmatic install (macOS)
 
 ```bash
 TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
@@ -65,16 +68,11 @@ npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
 Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
 Windows: `%APPDATA%\tabby`.
 
-After install:
+#### Alternative: install via Tabby's GUI
 
-1. Tell the user to **quit and reopen Tabby** (`Cmd+Q` then relaunch). Plugins load only at startup.
-2. Re-run `curl -fsS http://127.0.0.1:3300/api/health` (or `cctabs doctor`) — expect `{"ok":true,"version":"<n>"}`.
+If the user prefers, point them at Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby. Same end state.
 
-#### Install via Tabby's GUI
-
-Open Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby. Same end state, different path.
-
-Do not assume that "no Wave detected → cctabs unusable" — Tabby is fully supported.
+Do not assume "no Wave detected → cctabs unusable" — Tabby is fully supported.
 
 ---
 
