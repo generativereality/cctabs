@@ -60,14 +60,15 @@ export class TabbyAdapter implements TerminalAdapter {
   }
 
   blocksList(): Block[] {
-    // Synchronous in WaveAdapter; we deopt to a sync XHR-style spawn here.
+    // Synchronous in WaveAdapter; we deopt to a sync curl spawn here so the
+    // existing command code can keep its synchronous shape.
     const out = spawnSync(
       'curl',
       ['-fsS', '--max-time', '5', this.url('/api/tabs')],
       { encoding: 'utf-8' },
     )
     if (out.status !== 0 || !out.stdout) return []
-    let parsed: { tabs: Array<{ uuid: string; type: string }> }
+    let parsed: { tabs: Array<{ uuid: string; type: string; cwd?: string | null }> }
     try {
       parsed = JSON.parse(out.stdout)
     } catch {
@@ -75,7 +76,12 @@ export class TabbyAdapter implements TerminalAdapter {
     }
     return parsed.tabs
       .filter((t) => t.type === 'terminal')
-      .map((t) => ({ blockid: t.uuid, tabid: t.uuid, view: 'term' }))
+      .map((t) => ({
+        blockid: t.uuid,
+        tabid: t.uuid,
+        view: 'term',
+        meta: t.cwd ? { 'cmd:cwd': t.cwd } : undefined,
+      }))
   }
 
   scrollback(blockId: string, lastN = 50): string {

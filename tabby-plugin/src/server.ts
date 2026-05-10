@@ -153,7 +153,13 @@ export class CctabsServer {
     }
 
     if (method === 'POST' && sub === 'close') {
-      await this.app.closeTab(tab, false)
+      // app.closeTab() only accepts top-level tabs. Walk up to find the
+      // SplitTabComponent (or other wrapper) that lives in app.tabs.
+      let target: BaseTabComponent = tab
+      while (!this.app.tabs.includes(target) && (target as any).parent) {
+        target = (target as any).parent
+      }
+      await this.app.closeTab(target, false)
       return sendJson(res, 200, {})
     }
 
