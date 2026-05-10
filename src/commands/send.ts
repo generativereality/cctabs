@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 import { readFileSync } from 'fs'
 
 function readStdin(): Promise<string> {
@@ -41,7 +41,7 @@ export const sendCommand = define({
 
     if (appendEnter && !rawText.endsWith('\r')) rawText += '\r'
 
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
 
     // Try tab resolution first, fall back to block resolution

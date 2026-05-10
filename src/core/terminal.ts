@@ -2,6 +2,7 @@
 
 export type KnownTerminal =
   | 'wave'
+  | 'tabby'
   | 'iterm2'
   | 'ghostty'
   | 'warp'
@@ -13,10 +14,16 @@ export type KnownTerminal =
   | 'unknown'
 
 export function detectTerminal(): KnownTerminal {
-  if (process.env.WAVETERM_JWT) return 'wave'
-
   const prog = process.env.TERM_PROGRAM ?? ''
   const term = process.env.TERM ?? ''
+
+  // TERM_PROGRAM is set by the actual parent terminal at shell startup.
+  // Check Tabby first because WAVETERM_JWT can leak into Tabby child shells
+  // when Tabby was launched from a Wave session (`open -a Tabby`), and we
+  // want the *current* terminal to win.
+  if (prog === 'Tabby') return 'tabby'
+
+  if (process.env.WAVETERM_JWT) return 'wave'
 
   if (prog === 'iTerm.app') return 'iterm2'
   if (prog === 'ghostty' || process.env.GHOSTTY_RESOURCES_DIR) return 'ghostty'
@@ -32,6 +39,7 @@ export function detectTerminal(): KnownTerminal {
 
 const TERMINAL_NAMES: Record<KnownTerminal, string> = {
   wave: 'Wave Terminal',
+  tabby: 'Tabby',
   iterm2: 'iTerm2',
   ghostty: 'Ghostty',
   warp: 'Warp',

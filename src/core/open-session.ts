@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { consola } from 'consola'
 import { loadConfig } from './config.js'
-import { requireWaveAdapter } from './wave.js'
+import { requireAdapter, type TerminalAdapter } from './adapter.js'
 
 interface OpenSessionOptions {
   tabName: string
@@ -30,7 +30,7 @@ function shellQuoteEnv(env: Record<string, string>): string {
 
 /** Poll scrollback until a pattern is visible, then return. Rejects on timeout. */
 async function waitForScrollbackMatch(
-  adapter: ReturnType<typeof requireWaveAdapter>,
+  adapter: TerminalAdapter,
   blockId: string,
   pattern: string | RegExp,
   label: string,
@@ -65,7 +65,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
 
   const config = loadConfig()
 
-  const adapter = requireWaveAdapter()
+  const adapter = requireAdapter()
 
   let focusWindowId: string | undefined
 

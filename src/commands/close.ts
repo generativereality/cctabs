@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 
 export const closeCommand = define({
   name: 'close',
@@ -11,7 +11,7 @@ export const closeCommand = define({
   async run(ctx) {
     const query = ctx.positionals[1]
     if (!query) { consola.error('Tab name or ID is required'); process.exit(1) }
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
     const matches = adapter.resolveTab(query, tabsById, tabNames)
     if (!matches.length) { consola.error(`No tab matching '${query}' (tabs in workspaces with no open window are not visible — open that workspace first)`); process.exit(1) }

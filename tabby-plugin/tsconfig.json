@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "es2016",
+    "module": "es2015",
+    "moduleResolution": "node",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "importHelpers": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "lib": ["DOM", "ES2019", "ES2021"],
+    "baseUrl": "src",
+    "outDir": "dist",
+    "paths": {
+      "tabby-*": ["../../related-repos/tabby/tabby-*"],
+      "*": [
+        "../node_modules/*",
+        "../../related-repos/tabby/node_modules/*",
+        "../../related-repos/tabby/app/node_modules/*"
+      ]
+    }
+  },
+  "exclude": ["node_modules", "dist"],
+  "angularCompilerOptions": {
+    "enableI18nLegacyMessageIdFormat": false,
+    "strictInjectionParameters": false
+  }
+}

@@ -1,15 +1,15 @@
 import { define } from 'gunshi'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 
 export const sessionsCommand = define({
   name: 'sessions',
   description: 'List tabs with active/idle session status',
   args: {},
   async run() {
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-    const currentTab = process.env.WAVETERM_TABID ?? ''
-    const currentWs = process.env.WAVETERM_WORKSPACEID ?? ''
+    const currentTab = adapter.currentTabId()
+    const currentWs = adapter.currentWorkspaceId()
 
     console.log('Sessions')
     console.log('='.repeat(50))

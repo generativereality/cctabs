@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 
 export const scrollbackCommand = define({
   name: 'scrollback',
@@ -14,7 +14,7 @@ export const scrollbackCommand = define({
     const lines = (ctx.values.lines as number | undefined) ?? 50
     if (!query) { consola.error('Tab name or block ID is required'); process.exit(1) }
 
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
 
     // Try tab name resolution first (same logic as `send`)

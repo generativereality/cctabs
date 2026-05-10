@@ -8,3 +8,5 @@ docs/.vitepress/cache/
 
 # Local clones of upstream projects checked out for reference only.
 related-repos/
+tabby-plugin/node_modules/
+tabby-plugin/dist/

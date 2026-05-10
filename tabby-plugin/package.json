@@ -1,0 +1,43 @@
+{
+  "name": "tabby-cctabs",
+  "version": "0.1.0",
+  "description": "Tabby plugin that exposes a local HTTP API for the cctabs CLI",
+  "homepage": "https://github.com/generativereality/cctabs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/generativereality/cctabs.git",
+    "directory": "tabby-plugin"
+  },
+  "keywords": [
+    "tabby-plugin",
+    "cctabs"
+  ],
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "webpack --progress --color",
+    "watch": "webpack --progress --color --watch",
+    "sideload": "bash scripts/sideload.sh"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "author": "generativereality",
+  "license": "MIT",
+  "dependencies": {
+    "uuid": "^9.0.0"
+  },
+  "peerDependencies": {
+    "@angular/animations": "*",
+    "@angular/common": "*",
+    "@angular/core": "*",
+    "@angular/forms": "*",
+    "@ng-bootstrap/ng-bootstrap": "*",
+    "rxjs": "*",
+    "tabby-core": "*",
+    "tabby-local": "*",
+    "tabby-settings": "*",
+    "tabby-terminal": "*"
+  }
+}

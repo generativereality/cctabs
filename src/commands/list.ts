@@ -1,16 +1,16 @@
 import { define } from 'gunshi'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 
 export const listCommand = define({
   name: 'list',
   description: 'List all workspaces, tabs, and blocks',
   args: {},
   async run() {
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-    const currentBlock = process.env.WAVETERM_BLOCKID ?? ''
-    const currentTab = process.env.WAVETERM_TABID ?? ''
-    const currentWs = process.env.WAVETERM_WORKSPACEID ?? ''
+    const currentBlock = adapter.currentBlockId()
+    const currentTab = adapter.currentTabId()
+    const currentWs = adapter.currentWorkspaceId()
 
     for (const wsp of workspaces) {
       const { oid, name, tabids } = wsp.workspacedata

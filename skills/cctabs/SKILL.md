@@ -5,7 +5,7 @@ description: Manage Claude Code sessions across terminal tabs (NOT browser tabs)
 
 You are managing Claude Code sessions using the `cctabs` CLI.
 
-**Important:** "tabs" here means **terminal tabs** (e.g. Wave Terminal tabs), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
+**Important:** "tabs" here means **terminal tabs** (Wave Terminal or Tabby), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
 
 ## Before you spawn anything: is cctabs the right tool?
 
@@ -36,6 +36,64 @@ npm install -g @generativereality/cctabs
 ```
 
 Do not modify PATH or npm configuration beyond this.
+
+### Tabby users: a one-time plugin install is needed
+
+Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
+
+You don't need to detect this proactively — every cctabs command will fail with a self-documenting error if the plugin isn't running:
+
+```
+cctabs Tabby plugin not reachable at http://127.0.0.1:3300.
+  reason: …
+Install + restart Tabby in one shot from inside a Tabby tab:
+  cctabs install-tabby-plugin
+…
+```
+
+When you see that error, ask the user once:
+
+> *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin --yes` — that npm-installs the plugin AND restarts Tabby in the background, dropping you back into a forked session. Caveat: any other Tabby tabs you have open will be killed. OK?"*
+
+On approval, run `cctabs install-tabby-plugin --yes`. Tabby quits ~2s after the command returns, reopens automatically, and spawns a new tab with your forked claude session. **Your current turn ends when Tabby quits**; the resumed claude in the new tab is where the user will continue.
+
+If the user wants to keep their other Tabby tabs intact, run `cctabs install-tabby-plugin --no-restart` instead and tell them to quit + reopen Tabby themselves.
+
+`cctabs doctor` is also available for a deliberate environment check (terminal, Wave Accessibility, plugin reachability, Wave DB) — useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
+
+#### Auto-install + auto-restart (recommended)
+
+```bash
+cctabs install-tabby-plugin --yes
+```
+
+What it does, in order:
+1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs`
+2. Captures the current claude session id from `~/.claude/projects/<slug>/`
+3. Spawns a detached background worker that quits Tabby, waits for it to die, reopens it, then opens a new tab running `claude --resume <id> --fork-session` in your current cwd.
+
+**Other Tabby tabs in the same window get killed.** Tabby's session recovery may or may not bring them back. Use `--no-restart` to skip step 3 if the user wants control.
+
+#### Manual install (fallback)
+
+```bash
+TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
+mkdir -p "$TABBY_PLUGINS"
+[ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
+npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
+# then ask the user to quit + reopen Tabby
+```
+
+`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm. Tabby's GUI plugin manager handles this internally.
+
+Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
+Windows: `%APPDATA%\tabby`.
+
+#### Alternative: install via Tabby's GUI
+
+If the user prefers, point them at Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby. Same end state.
+
+Do not assume "no Wave detected → cctabs unusable" — Tabby is fully supported.
 
 ---
 
@@ -317,17 +375,19 @@ cctabs new feature ~/Dev/myapp --worktree
 
 ## Handling `cctabs new` Timeout Errors
 
-`cctabs new` may occasionally fail with "Timed out waiting for new terminal block". This does **NOT** mean you have too many tabs or that Wave Terminal has hit a limit.
+`cctabs new` may occasionally fail with "Timed out waiting for new terminal block" (or, on Tabby, "Shell prompt never appeared in new tab"). This does **NOT** mean you have too many tabs or that the terminal has hit a limit.
 
-**Possible causes** (root cause not yet confirmed):
-- Wave Terminal may need to be in focus / foreground for tab creation to register
-- The internal timeout may be slightly too short for the current system load
-- Transient IPC timing issue between cctabs and Wave
+**Possible causes:**
+- The terminal app may need to be in focus / foreground for tab creation to register (true for both Wave and Tabby).
+- The internal timeout may be slightly too short for the current system load.
+- Transient IPC timing issue between cctabs and the terminal.
+- **Tabby only:** the cctabs plugin must be installed and running (`curl http://127.0.0.1:3300/api/health` to verify).
 
 **What to do:**
 1. **Retry the same command** — it often works on the second attempt
 2. If it fails again, wait a few seconds and retry once more
-3. If it keeps failing, ask the user to bring Wave Terminal to the foreground and try again
+3. If it keeps failing, ask the user to bring the terminal app to the foreground and try again
+4. On Tabby, also confirm the plugin is reachable (see health check above)
 
 **What NOT to do:**
 - ❌ Do NOT assume there is a "tab limit" — there isn't one

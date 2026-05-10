@@ -6,6 +6,7 @@ import { join } from 'path'
 import type { Block, Workspace, AllData } from '../types/index.js'
 import { detectTerminal, printUnsupportedTerminalError } from './terminal.js'
 import { findOrphanTabIds, WSH_ORPHAN_TABID_PATTERN, type OrphanReport } from './wave-db.js'
+import type { TerminalAdapter } from './adapter.js'
 
 export class WaveOrphanTabidError extends Error {
   reports: OrphanReport[]
@@ -135,7 +136,7 @@ class WaveSocket {
 // Wave adapter (public API)
 // ---------------------------------------------------------------------------
 
-export class WaveAdapter {
+export class WaveAdapter implements TerminalAdapter {
   private socket: WaveSocket | null = null
   private jwt: string
   private lastBlocksListStderr = ''
@@ -406,6 +407,18 @@ export class WaveAdapter {
 
   resolveBlock(query: string, blocks: Block[]): Block[] {
     return blocks.filter((b) => b.blockid.startsWith(query))
+  }
+
+  currentTabId(): string {
+    return process.env.WAVETERM_TABID ?? ''
+  }
+
+  currentBlockId(): string {
+    return process.env.WAVETERM_BLOCKID ?? ''
+  }
+
+  currentWorkspaceId(): string {
+    return process.env.WAVETERM_WORKSPACEID ?? ''
   }
 
   resolveWorkspace(

@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
 import { resolveBackend, listBackends } from '../core/backends.js'
@@ -96,7 +96,7 @@ export const resumeCommand = define({
       }
     }
 
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
     const matchingTabs = adapter.resolveTab(name, tabsById, tabNames)
 

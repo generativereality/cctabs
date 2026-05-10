@@ -3,7 +3,7 @@ import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, findSessionsByNameGlobally } from '../core/session.js'
 
@@ -19,9 +19,9 @@ export const restoreCommand = define({
     const scopedDir = rawDir ? resolve(rawDir.replace(/^~/, homedir())) : null
     const dryRun = ctx.values.dry as boolean | undefined
 
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-    const currentTab = process.env.WAVETERM_TABID ?? ''
+    const currentTab = adapter.currentTabId()
 
     // Collect all tabs with their status
     const tabs: Array<{
