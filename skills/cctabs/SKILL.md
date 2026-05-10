@@ -37,23 +37,29 @@ npm install -g @generativereality/cctabs
 
 Do not modify PATH or npm configuration beyond this.
 
-### Tabby users: also install the cctabs Tabby plugin
+### Tabby users: a one-time plugin install is needed
 
 Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
 
-#### Bootstrap loop (run this on first cctabs use in any new environment)
+You don't need to detect this proactively — every cctabs command will fail with a self-documenting error if the plugin isn't running:
 
-After confirming `cctabs` is on PATH, **always run `cctabs doctor` before your first cctabs command in a session**. Doctor prints one line per check (terminal, Wave Accessibility, Tabby plugin reachability, Wave DB scan).
+```
+cctabs Tabby plugin not reachable at http://127.0.0.1:3300.
+  reason: …
+Install + restart Tabby in one shot from inside a Tabby tab:
+  cctabs install-tabby-plugin
+…
+```
 
-If `cctabs doctor` reports `✘ Tabby cctabs plugin — … unreachable`:
+When you see that error, ask the user once:
 
-1. Ask the user once: *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin` — that npm-installs the plugin AND restarts Tabby in the background, dropping you back into a forked session. Caveat: any other Tabby tabs you have open will be killed. OK?"*
-2. On approval, run the auto-install command (see below). It returns immediately; Tabby quits ~2s later, reopens, and spawns a new tab with `claude --resume <id> --fork-session`.
-3. Your turn ends with Tabby's restart. Tell the user the next step is for them: when the new claude tab comes up, type `cctabs doctor` (or whatever they were originally trying to do) — the resumed session will pick up from there.
+> *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin --yes` — that npm-installs the plugin AND restarts Tabby in the background, dropping you back into a forked session. Caveat: any other Tabby tabs you have open will be killed. OK?"*
 
-If the user wants to keep their other tabs intact, fall back to the manual snippet and tell them to quit + reopen Tabby themselves.
+On approval, run `cctabs install-tabby-plugin --yes`. Tabby quits ~2s after the command returns, reopens automatically, and spawns a new tab with your forked claude session. **Your current turn ends when Tabby quits**; the resumed claude in the new tab is where the user will continue.
 
-Don't try to drive cctabs (`new`, `sessions`, …) before the plugin is reachable — every command will fail with a confusing 7+s timeout.
+If the user wants to keep their other Tabby tabs intact, run `cctabs install-tabby-plugin --no-restart` instead and tell them to quit + reopen Tabby themselves.
+
+`cctabs doctor` is also available for a deliberate environment check (terminal, Wave Accessibility, plugin reachability, Wave DB) — useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
 
 #### Auto-install + auto-restart (recommended)
 

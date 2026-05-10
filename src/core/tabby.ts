@@ -9,6 +9,33 @@ import type {
 import type { TerminalAdapter } from './adapter.js'
 
 /**
+ * Thrown when the cctabs Tabby plugin's HTTP API is unreachable.
+ *
+ * Failing loud here matters: if we silently returned empty data the
+ * caller would conclude "no tabs" and act on it. The CLI's outer error
+ * handler renders this with the install hint.
+ */
+export class TabbyPluginUnreachableError extends Error {
+  constructor(public host: string, public port: number, public underlying?: string) {
+    const lines = [
+      `cctabs Tabby plugin not reachable at http://${host}:${port}.`,
+      underlying ? `  reason: ${underlying}` : '',
+      '',
+      'Install + restart Tabby in one shot from inside a Tabby tab:',
+      '  cctabs install-tabby-plugin',
+      '',
+      'Or do it by hand:',
+      `  npm install --legacy-peer-deps --prefix "$HOME/Library/Application Support/tabby/plugins" tabby-cctabs`,
+      '  # then quit Tabby (Cmd+Q) and reopen it.',
+      '',
+      'Verify with: cctabs doctor',
+    ].filter(Boolean)
+    super(lines.join('\n'))
+    this.name = 'TabbyPluginUnreachableError'
+  }
+}
+
+/**
  * cctabs adapter for Tabby Terminal. Talks to the tabby-cctabs
  * plugin's HTTP API (default 127.0.0.1:3300).
  *
@@ -24,10 +51,30 @@ export class TabbyAdapter implements TerminalAdapter {
   private host: string
   private port: number
   private cachedSelfUuid: string | null = null
+  private healthChecked = false
 
   constructor() {
     this.host = process.env.CCTABS_TABBY_HOST ?? '127.0.0.1'
     this.port = Number(process.env.CCTABS_TABBY_PORT ?? '3300')
+  }
+
+  /**
+   * One-shot health check. Throws TabbyPluginUnreachableError on the
+   * first call if /api/health is unreachable. Subsequent calls are no-ops
+   * — once we've confirmed the plugin is up, we trust it for this process.
+   */
+  private ensureHealthy(): void {
+    if (this.healthChecked) return
+    const r = spawnSync(
+      'curl',
+      ['-fsS', '--max-time', '3', this.url('/api/health')],
+      { encoding: 'utf-8' },
+    )
+    if (r.status !== 0 || !r.stdout) {
+      const reason = (r.stderr || '').trim() || `curl exit ${r.status}`
+      throw new TabbyPluginUnreachableError(this.host, this.port, reason)
+    }
+    this.healthChecked = true
   }
 
   // ---- HTTP helpers ----
@@ -60,6 +107,7 @@ export class TabbyAdapter implements TerminalAdapter {
   }
 
   blocksList(): Block[] {
+    this.ensureHealthy()
     // Synchronous in WaveAdapter; we deopt to a sync curl spawn here so the
     // existing command code can keep its synchronous shape.
     const out = spawnSync(
