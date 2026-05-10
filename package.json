@@ -19,6 +19,8 @@
     "check": "npm run typecheck && npm run build",
     "release": "bumpp && npm publish",
     "sync-plugin": "bash scripts/sync-plugin.sh",
+    "build:tabby-plugin": "cd tabby-plugin && npm install && npm run build",
+    "publish:tabby-plugin": "cd tabby-plugin && npm publish --access public",
     "prepack": "bash scripts/sync-plugin.sh --check && npm run build"
   },
   "keywords": [

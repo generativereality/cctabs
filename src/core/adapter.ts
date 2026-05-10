@@ -1,6 +1,7 @@
 import type { AllData, Block, SessionStatus, Workspace } from '../types/index.js'
 import { detectTerminal, printUnsupportedTerminalError } from './terminal.js'
 import { WaveAdapter } from './wave.js'
+import { TabbyAdapter } from './tabby.js'
 
 /**
  * The shared shape every backend adapter (Wave, Tabby, …) presents to the
@@ -52,7 +53,9 @@ export function requireAdapter(): TerminalAdapter {
   if (terminal === 'wave') {
     return new WaveAdapter()
   }
-  // Tabby support lives behind phase 4 of notes/tabby-support-plan.md
+  if (terminal === 'tabby') {
+    return new TabbyAdapter()
+  }
   printUnsupportedTerminalError(terminal)
   process.exit(1)
 }

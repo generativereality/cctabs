@@ -194,24 +194,84 @@ Steps:
 4. `scripts/sync-plugin.sh` extension or new `scripts/sync-tabby-plugin.sh`
    to keep the published plugin version in lockstep with the cctabs CLI.
 
-### Bonus — launch Claude in Tabby from this Wave session
+### Bonus — launch Claude in Tabby from this Wave session ✓
 
-Once Tabby is installed locally, we can fire `open -a Tabby` plus
-`/Applications/Tabby.app/Contents/MacOS/Tabby open -- claude --continue`
-(or the published `tabby` shim) from inside this very Claude session as a
-proof-of-life test. We won't be able to interact with the new Tabby tab from
-*this* Claude session (no plugin yet), but we will have validated that the
-out-of-process launch path works.
+Validated 2026-05-10 from inside this Wave-hosted Claude session.
+
+What worked:
+
+```sh
+brew install --cask tabby
+open -a Tabby                                  # ensure Tabby is running
+
+cat > /tmp/tabby-claude-launcher.sh <<'EOF'
+#!/bin/zsh -l
+cd /Users/motin/Dev/Projects/generativereality/cctabs || exit 1
+exec /Users/motin/.local/bin/claude --resume <session-id> --fork-session
+EOF
+chmod +x /tmp/tabby-claude-launcher.sh
+
+/Applications/Tabby.app/Contents/MacOS/Tabby run /tmp/tabby-claude-launcher.sh
+```
+
+Gotchas surfaced by the experiment:
+
+- `Tabby run zsh -lc "<cmd>"` does **not** work — Tabby's argv parsing drops
+  `-lc` somewhere and ends up calling `zsh "<cmd>"`, which zsh interprets as
+  a script filename (`zsh: can't open input file: cd …`). Use a launcher
+  script instead, or `Tabby run /bin/zsh /path/to/script`.
+- The launched command must reference `claude` by absolute path
+  (`/Users/motin/.local/bin/claude`) unless the launcher script sources a
+  shell that puts `~/.local/bin` on `PATH` (the `#!/bin/zsh -l` shebang does).
+- `--fork-session` is essential when the source session is still active —
+  plain `--resume` would race against the live transcript.
+- macOS shows a per-tab approval prompt for every `Tabby run` invocation. If
+  you fire several `run`s in a row without approving them, Tabby silently
+  queues the IPC requests; once you start approving the dialogs they all
+  fire at once and you end up with N duplicate tabs. **Workflow: send one
+  `run`, approve the dialog, verify the tab opened, then send the next.**
+- After Tabby's IPC handler appears stuck (no `Starting profile` log line
+  after a `CLI arguments received`), check macOS for unhandled approval
+  dialogs before assuming Tabby is broken.
+
+Caveat: from *this* Claude session we can launch Tabby tabs but we can't
+interact with them. That's exactly the gap phases 2–4 close.
 
 ## Status checklist
 
 - [x] Phase 0 — plan doc
-- [ ] Phase 1 — TerminalAdapter interface + WaveAdapter conformance
-- [ ] Phase 2 — tabby-plugin scaffold
-- [ ] Phase 3 — plugin core (HTTP + endpoints)
-- [ ] Phase 4 — TabbyAdapter on cctabs side
-- [ ] Phase 5 — docs + distribution
-- [ ] Bonus — launch-Claude-in-Tabby-from-Wave smoke test
+- [x] Phase 1 — TerminalAdapter interface + WaveAdapter conformance
+- [x] Phase 2 — tabby-plugin scaffold (sources written; first build deferred — see *Build verification* below)
+- [x] Phase 3 — plugin core (HTTP + endpoints)
+- [x] Phase 4 — TabbyAdapter on cctabs side
+- [x] Phase 5 — docs + distribution scaffold (publish + sideload deferred)
+- [x] Bonus — launch-Claude-in-Tabby-from-Wave smoke test (2026-05-10)
+
+## Build verification — what's left before the plugin is real
+
+The plugin source compiles in isolation (we did not run a full webpack
+build in the writing session — that requires `yarn install` + `yarn run
+build:typings` inside a local clone of upstream Tabby, which pulls Angular
+15 + Electron native modules and is slow). To go from "scaffold" to "real":
+
+1. `cd related-repos/tabby && yarn && yarn run build:typings` (one-time).
+2. From repo root: `npm run build:tabby-plugin`. The plugin's
+   `webpack.config.mjs` resolves the shared Tabby webpack config under
+   `related-repos/tabby/webpack.plugin.config.mjs`.
+3. `cd tabby-plugin && npm run sideload` to copy `dist/` and
+   `package.json` into Tabby's plugin folder
+   (`~/Library/Application Support/tabby/plugins/node_modules/tabby-cctabs/`).
+4. Restart Tabby. Open dev tools (Settings → Advanced → Open dev tools)
+   and check the console for `[cctabs] plugin loaded`.
+5. `curl http://127.0.0.1:3300/api/health` should return
+   `{ ok: true, version: "0.1.0" }`.
+6. Inside a Tabby tab: `cctabs sessions` should now succeed without the
+   "switch to Wave" message.
+
+If the build needs adjustments after the first end-to-end run, expect them
+in `webpack.config.mjs` (externals list) and `src/server.ts` (the
+`tabby-terminal` lazy-load in `openNewTab` may need a different export
+name). Both are noted in `tabby-plugin/src/server.ts:openNewTab`.
 
 ## Known unknowns / risks to revisit
 

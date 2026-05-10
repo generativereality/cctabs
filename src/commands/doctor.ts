@@ -8,6 +8,7 @@ import {
   findOrphanTabIds,
   removeOrphanTabIds,
 } from '../core/wave-db.js'
+import { detectTerminal } from '../core/terminal.js'
 
 export const doctorCommand = define({
   name: 'doctor',
@@ -19,6 +20,12 @@ export const doctorCommand = define({
   async run(ctx) {
     const yes = Boolean(ctx.values.yes)
     const fix = Boolean(ctx.values.fix) || yes
+
+    const terminal = detectTerminal()
+    if (terminal !== 'wave' && terminal !== 'unknown') {
+      consola.info(`cctabs doctor diagnoses Wave Terminal’s SQLite DB. You’re running in ${terminal} — nothing to fix here.`)
+      return
+    }
 
     consola.info(`Wave DB: ${WAVE_DB_PATH}`)
     if (!existsSync(WAVE_DB_PATH)) {
