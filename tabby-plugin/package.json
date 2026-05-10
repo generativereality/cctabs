@@ -38,6 +38,7 @@
     "@ng-bootstrap/ng-bootstrap": "*",
     "rxjs": "*",
     "tabby-core": "*",
+    "tabby-local": "*",
     "tabby-settings": "*",
     "tabby-terminal": "*"
   }

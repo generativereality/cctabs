@@ -241,37 +241,67 @@ interact with them. That's exactly the gap phases 2–4 close.
 
 - [x] Phase 0 — plan doc
 - [x] Phase 1 — TerminalAdapter interface + WaveAdapter conformance
-- [x] Phase 2 — tabby-plugin scaffold (sources written; first build deferred — see *Build verification* below)
-- [x] Phase 3 — plugin core (HTTP + endpoints)
-- [x] Phase 4 — TabbyAdapter on cctabs side
-- [x] Phase 5 — docs + distribution scaffold (publish + sideload deferred)
+- [x] Phase 2 — tabby-plugin scaffold (built + sideloaded + verified 2026-05-10)
+- [x] Phase 3 — plugin core (HTTP + endpoints, all verified via curl)
+- [x] Phase 4 — TabbyAdapter on cctabs side (verified end-to-end inside a Tabby tab)
+- [x] Phase 5 — docs + distribution scaffold (npm publish not yet run)
 - [x] Bonus — launch-Claude-in-Tabby-from-Wave smoke test (2026-05-10)
 
-## Build verification — what's left before the plugin is real
+## End-to-end verification (2026-05-10)
 
-The plugin source compiles in isolation (we did not run a full webpack
-build in the writing session — that requires `yarn install` + `yarn run
-build:typings` inside a local clone of upstream Tabby, which pulls Angular
-15 + Electron native modules and is slow). To go from "scaffold" to "real":
+Working setup, run from this Wave session:
 
-1. `cd related-repos/tabby && yarn && yarn run build:typings` (one-time).
-2. From repo root: `npm run build:tabby-plugin`. The plugin's
-   `webpack.config.mjs` resolves the shared Tabby webpack config under
-   `related-repos/tabby/webpack.plugin.config.mjs`.
-3. `cd tabby-plugin && npm run sideload` to copy `dist/` and
-   `package.json` into Tabby's plugin folder
-   (`~/Library/Application Support/tabby/plugins/node_modules/tabby-cctabs/`).
-4. Restart Tabby. Open dev tools (Settings → Advanced → Open dev tools)
-   and check the console for `[cctabs] plugin loaded`.
-5. `curl http://127.0.0.1:3300/api/health` should return
-   `{ ok: true, version: "0.1.0" }`.
-6. Inside a Tabby tab: `cctabs sessions` should now succeed without the
-   "switch to Wave" message.
+1. `brew install --cask tabby`
+2. `git clone https://github.com/Eugeny/tabby related-repos/tabby`
+3. `cd related-repos/tabby/app && yarn`
+4. `cd .. && yarn` (root install — postinstall runs `install-deps.mjs` which
+   yarn-installs every plugin folder and creates the
+   `node_modules/tabby-<plugin>` symlinks the build needs)
+5. `git tag v1.0.231-cctabs-build` (one-shot — `scripts/vars.mjs` calls
+   `git describe --tags` and a fresh clone has no annotated tags within
+   reach; `git fetch --tags --depth=1` pulls them, but for a shallow clone
+   you may still need to plant a local tag)
+6. `yarn run build:typings` (creates `tabby-*/typings/index.d.ts` so our
+   plugin's tsconfig path mapping `tabby-*: [../../related-repos/tabby/tabby-*]`
+   resolves to compiled .d.ts, not raw .ts that pulls every transitive dep)
+7. `cd ../../tabby-plugin && npm install --legacy-peer-deps`
+8. `npm run build` — webpack delegates to Tabby's `webpack.plugin.config.mjs`
+   and adds `related-repos/tabby/{node_modules,app/node_modules}` to
+   `resolve.modules` + `resolveLoader.modules`
+9. `npm run sideload` — copies dist/ + package.json to
+   `~/Library/Application Support/tabby/plugins/node_modules/tabby-cctabs/`
+10. Restart Tabby; `curl http://127.0.0.1:3300/api/health` returns
+    `{ ok: true, version: "0.1.0" }`
 
-If the build needs adjustments after the first end-to-end run, expect them
-in `webpack.config.mjs` (externals list) and `src/server.ts` (the
-`tabby-terminal` lazy-load in `openNewTab` may need a different export
-name). Both are noted in `tabby-plugin/src/server.ts:openNewTab`.
+Verified behaviours:
+
+- `GET /api/tabs` lists every live terminal tab with title, cwd, and pid.
+  Split-tab wrappers are flattened to leaf terminals.
+- `POST /api/tabs/identify` matches caller PIDs against each tab's
+  `pty.getTruePID()` (true shell PID) and `session.getChildProcesses()`
+  (descendants).
+- `POST /api/tabs/new` opens a fresh local-shell tab via
+  `LocalProfile`-shaped params; UUID is registered immediately so the
+  response can return it.
+- `cctabs sessions` inside a Tabby tab lists the Tabby tabs, not Wave's.
+- `cctabs new <name> <dir>` opens a new Tabby tab and starts claude in it
+  (smoke-tested with `cctabs new tabby-smoke /tmp` from within Tabby).
+
+Gotchas hit and fixed during the writing session — kept here so the next
+person doesn't pay the same toll:
+
+- `WAVETERM_JWT` leaks into Tabby child shells when Tabby is launched via
+  `open -a Tabby` from inside a Wave session, which made `detectTerminal()`
+  pick `'wave'` and run the wsh adapter. Fixed: `TERM_PROGRAM === 'Tabby'`
+  is checked before `WAVETERM_JWT`.
+- `Session.getPID()` doesn't exist on tabby-local's `Session`; the shell
+  PID lives on the private `pty` field as `pty.getTruePID(): Promise<number>`.
+  We reach into `(session as any).pty` directly.
+- `tabby-local.TerminalTabComponent` expects `inputs: { profile }` (a
+  `LocalProfile` with `{ options: { command, args, cwd, env } }`), not
+  `inputs: { session }`.
+- `Tabby run zsh -lc "<cmd>"` mangles argv — pass a launcher script path
+  instead.
 
 ## Known unknowns / risks to revisit
 

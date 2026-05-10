@@ -25,9 +25,18 @@ export class PidIndex {
       const session = (tab as any).session
       if (!session) continue
 
-      const ownPid: number | undefined =
-        typeof session.getPID === 'function' ? session.getPID() : session.pid
-      if (typeof ownPid === 'number' && candidate.has(ownPid)) return uuid
+      // The shell PID is the PTY's truePID. tabby-local Session keeps the
+      // pty as a private field; reach into it directly. Falls back to
+      // tabby-mcp-style getChildProcesses (matches descendant pids only).
+      try {
+        const pty: any = session.pty
+        if (pty && typeof pty.getTruePID === 'function') {
+          const truePid: number = await pty.getTruePID()
+          if (typeof truePid === 'number' && candidate.has(truePid)) return uuid
+        }
+      } catch {
+        // pty not ready — try children below
+      }
 
       try {
         const children: Array<{ pid: number }> =

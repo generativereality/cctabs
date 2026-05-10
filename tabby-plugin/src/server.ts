@@ -1,6 +1,7 @@
-import { Inject, Injectable } from '@angular/core'
+import { Injectable } from '@angular/core'
 import { ConfigService, AppService, BaseTabComponent } from 'tabby-core'
 import { BaseTerminalTabComponent } from 'tabby-terminal'
+import { TerminalTabComponent } from 'tabby-local'
 import { createServer, IncomingMessage, ServerResponse, Server } from 'http'
 import { TabRegistry } from './tab-registry'
 import { PidIndex } from './pid-index'
@@ -205,7 +206,10 @@ export class CctabsServer {
           if (!cwd && session?.guessedCWD) cwd = session.guessedCWD
         } catch {}
         try {
-          pid = typeof session?.getPID === 'function' ? session.getPID() : session?.pid
+          // Session exposes getChildProcesses but not getTruePID; the pty
+          // field is private but accessible at runtime.
+          const pty: any = session?.pty
+          if (pty?.getTruePID) pid = await pty.getTruePID()
         } catch {}
       }
       out.push({
@@ -222,25 +226,29 @@ export class CctabsServer {
   }
 
   private async openNewTab (body: any): Promise<string> {
-    // Lazy-load TerminalTabComponent so we can fail gracefully if it's unavailable.
-    const tabbyTerminal: any = require('tabby-terminal')
-    const TerminalTabComponent =
-      tabbyTerminal.TerminalTabComponent ?? tabbyTerminal.UnixDefaultProfile
-
+    // tabby-local's TerminalTabComponent expects { profile: LocalProfile }
+    // where the profile carries { options: { command, args, cwd, env } }.
+    const profile: any = {
+      type: 'local',
+      name: body?.title ?? '',
+      options: {
+        command: body?.command ?? process.env.SHELL ?? '/bin/zsh',
+        args: body?.args ?? [],
+        cwd: body?.cwd ?? null,
+        env: {},
+      },
+    }
     const params: any = {
       type: TerminalTabComponent,
-      inputs: {
-        command: body?.command ?? undefined,
-        cwd: body?.cwd ?? undefined,
-        title: body?.title ?? undefined,
-      },
+      inputs: { profile },
     }
     const tab = this.app.openNewTabRaw(params)
     if (body?.title) {
       tab.customTitle = body.title
       tab.setTitle(body.title)
     }
-    // tabOpened$ has already fired synchronously; UUID is registered.
+    // Force a tree walk so the new tab gets a UUID assigned.
+    this.tabs.entries()
     const uuid = this.tabs.uuidOf(tab)
     if (!uuid) throw new Error('failed to register new tab')
     return uuid
