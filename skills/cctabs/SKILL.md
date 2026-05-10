@@ -5,7 +5,7 @@ description: Manage Claude Code sessions across terminal tabs (NOT browser tabs)
 
 You are managing Claude Code sessions using the `cctabs` CLI.
 
-**Important:** "tabs" here means **terminal tabs** (e.g. Wave Terminal tabs), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
+**Important:** "tabs" here means **terminal tabs** (Wave Terminal or Tabby), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
 
 ## Before you spawn anything: is cctabs the right tool?
 
@@ -36,6 +36,27 @@ npm install -g @generativereality/cctabs
 ```
 
 Do not modify PATH or npm configuration beyond this.
+
+### Tabby users: also install the cctabs Tabby plugin
+
+Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
+
+Detect the running terminal:
+
+```bash
+echo "${TERM_PROGRAM:-${WAVETERM_JWT:+wave}}"   # → 'Tabby' or 'wave'
+```
+
+If `Tabby`, check the plugin:
+
+```bash
+curl -fsS http://127.0.0.1:3300/api/health
+# → {"ok":true,"version":"0.1.0"}
+```
+
+If that fails, ask: *"You're running in Tabby — cctabs needs the cctabs Tabby plugin. Want me to install it?"* On approval, point the user at **Settings → Plugins** in Tabby (search "cctabs") for one-click install. The plugin runs as long as Tabby is open; cctabs will fail with a clear error if it isn't reachable.
+
+Do not assume that "no Wave detected → cctabs unusable" — Tabby is fully supported.
 
 ---
 
@@ -317,17 +338,19 @@ cctabs new feature ~/Dev/myapp --worktree
 
 ## Handling `cctabs new` Timeout Errors
 
-`cctabs new` may occasionally fail with "Timed out waiting for new terminal block". This does **NOT** mean you have too many tabs or that Wave Terminal has hit a limit.
+`cctabs new` may occasionally fail with "Timed out waiting for new terminal block" (or, on Tabby, "Shell prompt never appeared in new tab"). This does **NOT** mean you have too many tabs or that the terminal has hit a limit.
 
-**Possible causes** (root cause not yet confirmed):
-- Wave Terminal may need to be in focus / foreground for tab creation to register
-- The internal timeout may be slightly too short for the current system load
-- Transient IPC timing issue between cctabs and Wave
+**Possible causes:**
+- The terminal app may need to be in focus / foreground for tab creation to register (true for both Wave and Tabby).
+- The internal timeout may be slightly too short for the current system load.
+- Transient IPC timing issue between cctabs and the terminal.
+- **Tabby only:** the cctabs plugin must be installed and running (`curl http://127.0.0.1:3300/api/health` to verify).
 
 **What to do:**
 1. **Retry the same command** — it often works on the second attempt
 2. If it fails again, wait a few seconds and retry once more
-3. If it keeps failing, ask the user to bring Wave Terminal to the foreground and try again
+3. If it keeps failing, ask the user to bring the terminal app to the foreground and try again
+4. On Tabby, also confirm the plugin is reachable (see health check above)
 
 **What NOT to do:**
 - ❌ Do NOT assume there is a "tab limit" — there isn't one
