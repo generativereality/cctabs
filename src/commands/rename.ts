@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 
 export const renameCommand = define({
   name: 'rename',
@@ -13,7 +13,7 @@ export const renameCommand = define({
     const query = ctx.positionals[1]
     const newName = ctx.positionals[2]
     if (!query || !newName) { consola.error('Usage: cctabs rename <tab> <new-name>'); process.exit(1) }
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
     const matches = adapter.resolveTab(query, tabsById, tabNames)
     if (!matches.length) { consola.error(`No tab matching '${query}'`); process.exit(1) }

@@ -1,7 +1,7 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { join } from 'path'
-import { requireWaveAdapter } from '../core/wave.js'
+import { requireAdapter } from '../core/adapter.js'
 import { findLatestSessionId, pathToProjectSlug } from '../core/session.js'
 import { openSession } from '../core/open-session.js'
 
@@ -28,7 +28,7 @@ export const forkCommand = define({
     const customName = ctx.values.name
     if (!sourceQuery) { consola.error('Source tab name is required'); process.exit(1) }
 
-    const adapter = requireWaveAdapter()
+    const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
     const matches = adapter.resolveTab(sourceQuery, tabsById, tabNames)
 

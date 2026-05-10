@@ -2,6 +2,7 @@
 
 export type KnownTerminal =
   | 'wave'
+  | 'tabby'
   | 'iterm2'
   | 'ghostty'
   | 'warp'
@@ -18,6 +19,7 @@ export function detectTerminal(): KnownTerminal {
   const prog = process.env.TERM_PROGRAM ?? ''
   const term = process.env.TERM ?? ''
 
+  if (prog === 'Tabby') return 'tabby'
   if (prog === 'iTerm.app') return 'iterm2'
   if (prog === 'ghostty' || process.env.GHOSTTY_RESOURCES_DIR) return 'ghostty'
   if (prog === 'WarpTerminal') return 'warp'
@@ -32,6 +34,7 @@ export function detectTerminal(): KnownTerminal {
 
 const TERMINAL_NAMES: Record<KnownTerminal, string> = {
   wave: 'Wave Terminal',
+  tabby: 'Tabby',
   iterm2: 'iTerm2',
   ghostty: 'Ghostty',
   warp: 'Warp',
