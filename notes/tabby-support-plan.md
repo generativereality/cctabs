@@ -188,7 +188,7 @@ Steps:
 2. `docs/guide/getting-started.md` — Tabby install path: install Tabby,
    install the cctabs plugin (sideload or via Tabby's plugin manager once
    we publish), then run cctabs.
-3. Publish the plugin to npm as `@generativereality/tabby-cctabs` so Tabby's
+3. Publish the plugin to npm as `tabby-cctabs` so Tabby's
    plugin manager can discover it (Tabby plugin manager queries npm for
    `keywords: ['tabby-plugin']`).
 4. `scripts/sync-plugin.sh` extension or new `scripts/sync-tabby-plugin.sh`

@@ -1,4 +1,4 @@
-# @generativereality/tabby-cctabs
+# tabby-cctabs
 
 Tabby plugin that exposes a small local HTTP API the [`cctabs`](https://github.com/generativereality/cctabs) CLI uses to drive Tabby tabs.
 

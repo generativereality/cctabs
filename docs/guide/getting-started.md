@@ -10,7 +10,7 @@ description: Install cctabs as a Claude Code plugin or via npm, then open your f
 - A supported terminal — either:
   - [Wave Terminal](https://waveterm.dev) (macOS), or
   - [Tabby](https://tabby.sh) (macOS, Linux, Windows) with the
-    [`@generativereality/tabby-cctabs`](https://www.npmjs.com/package/@generativereality/tabby-cctabs)
+    [`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs)
     plugin installed.
 - [Claude Code](https://claude.ai/code) — `claude` on your PATH
 - Node.js ≥ 20

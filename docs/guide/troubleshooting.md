@@ -104,7 +104,7 @@ draft of that issue in `notes/waveterm-blockslist-orphan-tabid.md`.
 ## Tabby: `cctabs sessions` exits with "Tabby plugin GET /api/tabs failed"
 
 `cctabs` running in Tabby talks to the
-[`@generativereality/tabby-cctabs`](https://www.npmjs.com/package/@generativereality/tabby-cctabs)
+[`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs)
 plugin over HTTP on `127.0.0.1:3300`. If the plugin isn't installed or isn't
 running, every cctabs command fails.
 

@@ -9,7 +9,7 @@ import type {
 import type { TerminalAdapter } from './adapter.js'
 
 /**
- * cctabs adapter for Tabby Terminal. Talks to the @generativereality/tabby-cctabs
+ * cctabs adapter for Tabby Terminal. Talks to the tabby-cctabs
  * plugin's HTTP API (default 127.0.0.1:3300).
  *
  * Tab identity: cctabs (running inside a Tabby tab) walks its own
