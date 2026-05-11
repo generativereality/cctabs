@@ -161,7 +161,11 @@ export class TabbyAdapter implements TerminalAdapter {
   }
 
   detectSessionStatus(blockId: string): SessionStatus {
-    const tail = this.scrollback(blockId, 10)
+    // Tabby returns the literal last-N rows of the terminal viewport. Claude
+    // Code's UI renders with blank padding below the prompt, so the bottom 10
+    // rows are usually empty. Read enough rows to cover the full Claude UI
+    // (status line, prompt, recap area).
+    const tail = this.scrollback(blockId, 200)
     if (!tail.trim()) return 'unknown'
 
     const tailLines = tail.split('\n').map((l) => l.trim()).filter(Boolean)
@@ -171,13 +175,34 @@ export class TabbyAdapter implements TerminalAdapter {
       return 'terminal'
     }
 
-    if (
-      ['Claude Code', 'claude.ai/code', '✻ Thinking', '✽ Hatching', '⏵⏵ bypass'].some(
-        (s) => tail.includes(s),
-      )
-    ) {
+    // Tabby's buffer endpoint can drop spaces between adjacent characters
+    // depending on how Claude rendered them, so match against a
+    // whitespace-stripped copy of the tail using whitespace-stripped markers.
+    const compact = tail.replace(/\s+/g, '')
+    const markers = [
+      'Claude Code',
+      'claude.ai/code',
+      '⏵⏵ bypass',
+      '⏵⏵ auto',
+      // Spinner labels Claude Code emits while a turn is in flight. These
+      // dominate the buffer during long thinks and push the status line
+      // out of the readable window.
+      'Thinking',
+      'Hatching',
+      'Composing',
+      'Cogitating',
+      'Befuddling',
+      'Worked for',
+      'Baked for',
+      'Churned for',
+      'Cooked for',
+      'high effort',
+    ]
+    if (markers.some((m) => compact.includes(m.replace(/\s+/g, '')))) {
       return 'active'
     }
+    // Claude Code spinner glyphs cycle through these regardless of label.
+    if (/[✻✽✶✳✢]/.test(tail)) return 'active'
     if (lastLine.toLowerCase().includes('claude')) return 'idle'
     return 'terminal'
   }
