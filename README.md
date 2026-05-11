@@ -67,15 +67,17 @@ curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skill
 ## Usage
 
 ```
-cctabs sessions                          what's running (active/idle status)
+cctabs sessions [--json]                 what's running (active/idle status)
 cctabs list                              all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace]   open tab, start claude
+cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by ID
 cctabs resume <name> [dir]               open tab, run claude --continue
 cctabs fork <tab> [-n new-name]          fork a session into a new tab
 cctabs close <tab>                       close a tab
 cctabs rename <tab> <new-name>           rename a tab
 cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines)
-cctabs send <tab> [text]                 send input — arg, --file, or stdin pipe
+cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
+cctabs restore [--manifest <file|->] [--create-missing]   reattach or spawn from a manifest
 cctabs config                            show config path and values
 ```
 
@@ -112,6 +114,31 @@ cctabs send auth "/clear\n"
 ```bash
 cctabs scrollback auth          # last 50 lines
 cctabs scrollback auth 200      # last 200 lines
+```
+
+### Resume a specific session in a new tab
+
+```bash
+# Useful when multiple sessions share the same dir — pass the exact session ID
+cctabs new auth ~/Dev/myapp -r 19aae7b4-1234-…
+
+# Combines with --worktree to resume inside an existing worktree
+cctabs new auth ~/Dev/myapp -W -r 19aae7b4-…
+```
+
+`cctabs resume <name>` is the right tool when there's only one session for a dir. Use `cctabs new ... --resume` when you need to disambiguate by session ID.
+
+### Migrate a fleet between terminals
+
+```bash
+# On the source terminal, dump everything as a manifest
+cctabs sessions --json > /tmp/fleet.json
+
+# On the destination terminal, attach to any existing tabs and spawn the rest
+cctabs restore --manifest /tmp/fleet.json --create-missing
+
+# Or pipe directly
+cctabs sessions --json | cctabs restore --manifest - --create-missing
 ```
 
 ### Fork a session

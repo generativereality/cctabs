@@ -49,5 +49,8 @@ export async function run(): Promise<void> {
     version: pkg.version,
     description: pkg.description,
     subCommands,
+    // Suppress gunshi's default banner so `--json` output stays parseable
+    // and shells don't see noise when piping commands together.
+    renderHeader: null,
   })
 }
