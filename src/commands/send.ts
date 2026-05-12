@@ -18,6 +18,8 @@ export const sendCommand = define({
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     file: { type: 'string', short: 'f', description: 'Read text from file' },
     enter: { type: 'boolean', short: 'e', description: 'Append newline after text (default: true)' },
+    'wait-for-prompt': { type: 'boolean', short: 'w', description: 'Poll the buffer until a shell prompt ($, %, >, ❯) is visible before sending. Useful for freshly-spawned tabs.' },
+    'wait-timeout': { type: 'number', description: 'Timeout in seconds for --wait-for-prompt (default: 10)' },
   },
   async run(ctx) {
     const query = ctx.positionals[1]
@@ -26,6 +28,8 @@ export const sendCommand = define({
     const inlineText = ctx.positionals[2]
     const filePath = ctx.values.file as string | undefined
     const appendEnter = (ctx.values.enter as boolean | undefined) ?? true
+    const waitForPrompt = (ctx.values['wait-for-prompt'] as boolean | undefined) ?? false
+    const waitTimeoutSec = (ctx.values['wait-timeout'] as number | undefined) ?? 10
 
     if (!query) { consola.error('Usage: cctabs send <tab-or-block> [text]'); process.exit(1) }
 
@@ -67,6 +71,22 @@ export const sendCommand = define({
         process.exit(1)
       }
       blockId = blockMatches[0].blockid
+    }
+
+    if (waitForPrompt) {
+      const deadline = Date.now() + waitTimeoutSec * 1000
+      let ready = false
+      while (Date.now() < deadline) {
+        const tail = adapter.scrollback(blockId, 5)
+        const lastLine = tail.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
+        if (/[$%>❯]\s*$/.test(lastLine)) { ready = true; break }
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      if (!ready) {
+        adapter.closeSocket()
+        consola.error(`Timed out after ${waitTimeoutSec}s waiting for shell prompt in ${blockId.slice(0, 8)}`)
+        process.exit(1)
+      }
     }
 
     const resp = await adapter.sendInput(blockId, rawText)

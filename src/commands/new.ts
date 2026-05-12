@@ -1,10 +1,11 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { writeFileSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
+import { writeFileSync, existsSync } from 'fs'
+import { tmpdir, homedir } from 'os'
+import { join, resolve } from 'path'
 import { openSession } from '../core/open-session.js'
 import { resolveBackend, listBackends } from '../core/backends.js'
+import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 
 export const newCommand = define({
   name: 'new',
@@ -16,6 +17,7 @@ export const newCommand = define({
     worktree: { type: 'boolean', short: 'W', description: 'Launch claude with --worktree <name> for isolated branch work' },
     file: { type: 'string', short: 'f', description: 'Send initial prompt from file once Claude is ready' },
     prompt: { type: 'string', short: 'p', description: 'Send initial prompt text once Claude is ready' },
+    resume: { type: 'string', short: 'r', description: 'Resume an existing Claude session ID (passes --resume <id> to claude). Mutually exclusive with --prompt/--file.' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
   },
@@ -26,9 +28,33 @@ export const newCommand = define({
     const useWorktree = ctx.values.worktree ?? false
     const promptFile = ctx.values.file as string | undefined
     const promptText = ctx.values.prompt as string | undefined
+    const resumeId = ctx.values.resume as string | undefined
     const backendName = ctx.values.backend as string | undefined
     const modelOverride = ctx.values.model as string | undefined
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
+
+    if (resumeId && (promptText || promptFile)) {
+      consola.error('--resume cannot be combined with --prompt or --file (you cannot send an initial prompt to a resumed session via this path).')
+      process.exit(1)
+    }
+
+    let resolvedSessionId: string | undefined
+    if (resumeId) {
+      const absDir = resolve(dir.replace(/^~/, homedir()))
+      const expanded = expandSessionId(resumeId, absDir) ?? expandSessionId(resumeId)
+      if (expanded) {
+        resolvedSessionId = expanded
+      } else {
+        const slug = pathToProjectSlug(absDir)
+        const expected = join(homedir(), '.claude', 'projects', slug, `${resumeId}.jsonl`)
+        if (existsSync(expected)) {
+          resolvedSessionId = resumeId
+        } else {
+          consola.warn(`Session ID "${resumeId}" not found in ~/.claude/projects/ — proceeding anyway (claude will error if invalid).`)
+          resolvedSessionId = resumeId
+        }
+      }
+    }
 
     let envVars: Record<string, string> | undefined
     let resolvedModel = modelOverride
@@ -52,7 +78,14 @@ export const newCommand = define({
       initialPromptFile = promptFile
     }
 
-    const claudeCmd = useWorktree ? `claude --worktree ${JSON.stringify(name)}` : 'claude'
+    let claudeCmd: string
+    if (resolvedSessionId) {
+      const worktreePart = useWorktree ? ` --worktree ${JSON.stringify(name)}` : ''
+      claudeCmd = `claude --resume ${resolvedSessionId}${worktreePart} --name ${JSON.stringify(name)}`
+    } else {
+      claudeCmd = useWorktree ? `claude --worktree ${JSON.stringify(name)}` : 'claude'
+    }
+
     const tabId = await openSession({
       tabName: name,
       dir,
@@ -64,6 +97,7 @@ export const newCommand = define({
     })
     const wt = useWorktree ? ` (worktree: .claude/worktrees/${name})` : ''
     const be = backendName ? ` [backend: ${backendName}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''
-    consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude at ${dir}${wt}${be}`)
+    const rs = resolvedSessionId ? ` --resume ${resolvedSessionId.slice(0, 8)}…` : ''
+    consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude${rs} at ${dir}${wt}${be}`)
   },
 })
