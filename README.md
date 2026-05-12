@@ -206,11 +206,16 @@ flags = ["--allow-dangerously-skip-permissions"]
 | Terminal | Status |
 |----------|--------|
 | [Wave Terminal](https://waveterm.dev) | ✅ Full support |
+| [Tabby](https://tabby.sh) | ✅ Full support (requires the [`tabby-cctabs`](./tabby-plugin/) companion plugin) |
 | iTerm2 | Planned |
 | Ghostty | Planned |
 | Warp | Planned |
 
-Wave is supported via its unix socket RPC. Other terminals will follow as adapters — PRs welcome.
+Wave is supported via its unix socket RPC. Tabby is supported via a small companion plugin that exposes a localhost HTTP API the cctabs CLI talks to — install with `cctabs install-tabby-plugin`. Other terminals will follow as adapters — PRs welcome.
+
+### Login shells on macOS
+
+cctabs-spawned tabs default to **login shells** (`zsh -l`, `bash -l`, etc.) so PATH is initialised the same way Tabby's UI-spawned tabs are. Without `-l`, macOS's `/etc/zprofile` doesn't run, `path_helper` doesn't populate `/usr/local/bin` and `/opt/homebrew/bin` from `/etc/paths`, and brand-new tabs are missing Node, Homebrew, and anything else that lives there. Symptoms: `env: node: No such file or directory` in Claude Code's Bash tool, plugin MCP servers failing to start with ENOENT when they shell out to `npx`, and cctabs CLI itself failing inside the tab it just spawned. See [Tabby issue #2](https://github.com/Eugeny/tabby/issues/2) for the historical context. Pass an explicit `args` array (including `[]`) when calling the `/tabs` endpoint if you need a non-login shell.
 
 ## License
 

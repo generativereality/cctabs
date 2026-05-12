@@ -9,7 +9,18 @@ import { OutputBufferStore } from './output-buffer'
 import { CctabsLogger } from './logger'
 import { bufferLines } from './buffer'
 
-const PLUGIN_VERSION = '0.1.0'
+const PLUGIN_VERSION = '0.1.1'
+
+/**
+ * True when the given command path looks like a shell that supports the `-l`
+ * login-shell flag (zsh, bash, sh, dash, ash, ksh). We err on the side of not
+ * adding `-l` for unfamiliar commands — passing flags an interpreter doesn't
+ * understand makes the spawn fail.
+ */
+function isLoginCapableShell (command: string): boolean {
+  const base = command.split('/').pop() ?? ''
+  return /^(zsh|bash|sh|dash|ash|ksh|mksh|fish)$/.test(base)
+}
 
 interface TabInfo {
   uuid: string
@@ -236,12 +247,24 @@ export class CctabsServer {
   private async openNewTab (body: any): Promise<string> {
     // tabby-local's TerminalTabComponent expects { profile: LocalProfile }
     // where the profile carries { options: { command, args, cwd, env } }.
+    //
+    // Default to a login shell so /etc/zprofile (and therefore path_helper on
+    // macOS) runs and PATH picks up /usr/local/bin, /opt/homebrew/bin, etc.
+    // Without this, tabs spawned by cctabs miss Node/Homebrew binaries and
+    // anything that shells out to `npx` (Claude Code's Bash tool, plugin MCP
+    // servers, cctabs itself) fails with ENOENT. Tabby's own shell providers
+    // (tabby-electron/src/shells/macDefault.ts → args: ['--login'],
+    // posix.ts → args: ['-l']) pass -l by default for the same reason; this
+    // matches their behaviour for tabs we construct ourselves. Callers can
+    // override by passing an explicit `args` array (including `[]`).
+    const command = body?.command ?? process.env.SHELL ?? '/bin/zsh'
+    const defaultArgs = isLoginCapableShell(command) ? ['-l'] : []
     const profile: any = {
       type: 'local',
       name: body?.title ?? '',
       options: {
-        command: body?.command ?? process.env.SHELL ?? '/bin/zsh',
-        args: body?.args ?? [],
+        command,
+        args: body?.args ?? defaultArgs,
         cwd: body?.cwd ?? null,
         env: {},
       },
