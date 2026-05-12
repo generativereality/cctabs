@@ -1,6 +1,13 @@
 ---
 name: cctabs
-description: Manage Claude Code sessions across terminal tabs (NOT browser tabs) — list running sessions, open new ones, fork, close, inspect output, and send input. Use this when working with multiple parallel Claude Code sessions in terminal tabs.
+description: |
+  Manage Claude Code sessions across terminal tabs (Wave Terminal or Tabby) — list, open, fork, close, inspect output, send input. Each terminal tab runs its own Claude Code session.
+
+  TRIGGER when the user says any of: "open a new tab", "open a new cctab" (singular alias), "spawn a tab", "a new cctabs session", "in another tab", "in a separate tab", "fork this tab", "list my tabs", "close that tab", "send to <tab>", "resume <name>" — anything that refers to a terminal tab running Claude Code. ALSO trigger for: "/cctabs", or when the user mentions Wave Terminal / Tabby tab management for Claude Code.
+
+  DO NOT confuse with the Agent tool (background subagents): if the user explicitly says "tab" / "cctab" / "cctabs" they want a separate Claude Code session in a real terminal tab — call this skill, not Agent. The Agent tool is correct when the user says "subagent", "background agent", "spawn an agent", "do this in parallel without a new tab", or when the work is interconnected with the current session's filesystem state.
+
+  NOT for: browser tabs (use playwright/browser-automation), tmux panes, screen sessions, or non-Claude terminals.
 ---
 
 You are managing Claude Code sessions using the `cctabs` CLI.
