@@ -21,7 +21,7 @@ const defaultCommand = define({
   description: pkg.description,
   args: {},
   async run() {
-    await sessionsCommand.run?.call(this, { args: {} } as never)
+    await sessionsCommand.run?.call(this, { values: {} } as never)
   },
 })
 

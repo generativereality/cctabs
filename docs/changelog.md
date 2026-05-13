@@ -19,6 +19,10 @@ npm i -g @generativereality/cctabs
 
 ---
 
+## 0.3.2 — 2026-05-13
+
+- **Fix: `cctabs` with no arguments crashed.** The default command (which dispatches to `sessions`) was passing a fake context shaped like `{ args: {} }` to `sessionsCommand.run`, but `sessions --json` (added in 0.3.1) reads `ctx.values.json`, so the missing `values` key threw `Cannot read properties of undefined (reading 'json')`. Regression from 0.3.1.
+
 ## 0.3.1 — 2026-05-12
 
 - **Tabby: active-session detection now survives viewport padding and spinner redraws.** Previously, Tabby tabs in the middle of a long Claude turn were misreported as `terminal` / `unknown` because the scrollback window only sampled the last 10 rows — Claude's animated status line lives further up. The detector now scans a 200-line tail and matches against spinner labels (`Thinking`, `Composing`, `Worked for…`, etc.) and Claude's brand glyphs.
