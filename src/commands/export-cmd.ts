@@ -39,7 +39,6 @@ export const exportCommand = define({
   name: 'export',
   description: 'Export tabs + their Claude sessions to a tarball you can move to another machine (then `cctabs import`).',
   args: {
-    name: { type: 'positional', description: 'Tab name to export. Omit with --all to export every tab in the workspace.' },
     all: { type: 'boolean', short: 'a', description: 'Export every tab in the workspace (use --workspace to pick one; default is the current workspace).' },
     workspace: { type: 'string', short: 'w', description: 'Workspace to export from when using --all (defaults to current).' },
     out: { type: 'string', short: 'o', description: 'Output path for the tarball. Default: ./cctabs-export-<name>-<timestamp>.tar.gz' },

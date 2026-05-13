@@ -32,7 +32,6 @@ export const importCommand = define({
   name: 'import',
   description: 'Import tabs + sessions from a cctabs-export tarball (produced by `cctabs export`) and open each one as a new tab.',
   args: {
-    archive: { type: 'positional', description: 'Path to the .tar.gz archive produced by `cctabs export`.' },
     cwd: { type: 'string', short: 'C', description: 'Target working directory. With a single-tab archive, replaces the original cwd. Ignored for multi-tab archives.' },
     workspace: { type: 'string', short: 'w', description: 'Workspace to open the new tab(s) in (defaults to current).' },
     force: { type: 'boolean', short: 'f', description: 'Overwrite an existing session jsonl in ~/.claude/projects/ if the same session id already exists locally.' },
