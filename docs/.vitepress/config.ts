@@ -47,6 +47,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/what-is-cctabs' },
       { text: 'Reference', link: '/reference/commands' },
+      { text: 'Changelog', link: '/changelog' },
       { text: 'GitHub', link: 'https://github.com/generativereality/cctabs' },
     ],
 
@@ -69,7 +70,10 @@ export default defineConfig({
       },
       {
         text: 'Reference',
-        items: [{ text: 'Commands', link: '/reference/commands' }],
+        items: [
+          { text: 'Commands', link: '/reference/commands' },
+          { text: 'Changelog', link: '/changelog' },
+        ],
       },
     ],
 
