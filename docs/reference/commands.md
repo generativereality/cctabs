@@ -133,6 +133,46 @@ Show the config file path and current values.
 cctabs config
 ```
 
+## cctabs export
+
+Bundle a tab (or every tab in a workspace) and its Claude session(s) into a tarball
+you can move to another machine, then resume there with `cctabs import`.
+
+```bash
+cctabs export auth                              # → ./cctabs-export-auth-<ts>.tar.gz
+cctabs export auth --out ~/Downloads/auth.tar.gz
+cctabs export --all                             # every tab in the current workspace
+cctabs export --all --workspace tabby
+```
+
+The archive layout is:
+
+```
+meta.json                     # cctabsExportVersion, source machine, tab list
+tabs/<name>/manifest.json     # name, cwd, sessionId, claudeProjectSlug
+tabs/<name>/session.jsonl     # Claude conversation
+```
+
+Tabs without a resolved Claude session (e.g. a terminal that never started Claude)
+are skipped with a reason.
+
+## cctabs import
+
+Import a tarball produced by `cctabs export`: copies each session jsonl into the
+local `~/.claude/projects/<slug>/`, then opens a tab and resumes the session.
+
+```bash
+cctabs import ./auth.tar.gz                    # restore at the original cwd
+cctabs import ./auth.tar.gz --cwd ~/Dev/myapp  # single-tab archives only
+cctabs import ./team-export.tar.gz --dry-run   # show what would happen
+cctabs import ./auth.tar.gz --force            # overwrite a session id that already exists locally
+```
+
+If the target cwd doesn't exist on this machine, the entry is skipped with a hint to
+clone the repo first. Absolute paths inside the conversation log itself are *not*
+rewritten — they'll reference the source machine's paths historically, but Claude
+adapts to the actual current cwd on resume.
+
 ## cctabs doctor
 
 Diagnose Wave Terminal DB issues — currently the orphan-tabid bug that breaks
