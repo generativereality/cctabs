@@ -1,8 +1,8 @@
 {
   "name": "tabby-cctabs",
-  "version": "0.1.0",
-  "description": "Tabby plugin that exposes a local HTTP API for the cctabs CLI",
-  "homepage": "https://github.com/generativereality/cctabs",
+  "version": "0.1.1",
+  "description": "Run a fleet of Claude Code sessions across Tabby tabs — companion plugin for the cctabs CLI.",
+  "homepage": "https://cctabs.com",
   "repository": {
     "type": "git",
     "url": "https://github.com/generativereality/cctabs.git",
@@ -10,7 +10,13 @@
   },
   "keywords": [
     "tabby-plugin",
-    "cctabs"
+    "cctabs",
+    "claude-code",
+    "claude",
+    "ai",
+    "ai-agents",
+    "session-manager",
+    "agent-orchestration"
   ],
   "main": "dist/index.js",
   "scripts": {
