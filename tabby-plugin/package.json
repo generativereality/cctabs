@@ -1,6 +1,6 @@
 {
   "name": "tabby-cctabs",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Run a fleet of Claude Code sessions across Tabby tabs — companion plugin for the cctabs CLI.",
   "homepage": "https://cctabs.com",
   "repository": {

@@ -121,6 +121,40 @@ function checkTabbyPlugin (): CheckResult {
   }
 }
 
+/**
+ * Probe whether `node` is findable in a freshly spawned shell — the canonical
+ * symptom of the macOS non-login PATH bug. Spawning `zsh -l -c 'command -v
+ * node'` simulates the same login-shell init (/etc/zprofile → path_helper)
+ * that cctabs now uses when it opens new Tabby tabs. If this fails, brand-new
+ * tabs will also fail to find Node, every plugin MCP that shells out to npx
+ * will ENOENT, and the cctabs CLI itself becomes unusable from inside those
+ * tabs (chicken-and-egg). The remediation hint covers both the upstream-fix
+ * path (rely on a recent cctabs that defaults to `-l`) and the dotfile
+ * workaround for users on older versions or non-Tabby terminals.
+ */
+function checkSpawnedShellPath (): CheckResult {
+  const r = spawnSync('zsh', ['-l', '-c', 'command -v node'], {
+    encoding: 'utf-8',
+    timeout: 3000,
+  })
+  if (r.status === 0 && r.stdout?.trim()) {
+    return {
+      name: 'Spawned shell PATH (node findable)',
+      status: 'ok',
+      detail: r.stdout.trim(),
+    }
+  }
+  return {
+    name: 'Spawned shell PATH',
+    status: 'warn',
+    detail: r.error?.message ?? r.stderr?.trim() ?? 'node not found in a login zsh',
+    hint:
+      'A login zsh cannot find `node`. Either node is not installed, or PATH is broken. ' +
+      'On macOS, `/usr/local/bin` is added by /etc/zprofile\'s path_helper — non-login shells skip it. ' +
+      'Add `export PATH="/usr/local/bin:$PATH"` to ~/.zshenv as a belt-and-braces fix.',
+  }
+}
+
 interface WaveDbCheck {
   result: CheckResult
   reports?: OrphanReport[]
@@ -246,6 +280,10 @@ export const doctorCommand = define({
     let waveDb: WaveDbCheck | null = null
 
     results.push(checkTerminal(terminal))
+
+    // Useful regardless of terminal: every cctabs-spawned tab needs `node` on
+    // PATH for the CLI itself and for plugin MCPs that invoke `npx`.
+    results.push(checkSpawnedShellPath())
 
     if (terminal === 'tabby') {
       results.push(checkTabbyPlugin())
