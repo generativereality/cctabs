@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir, homedir, hostname } from 'os'
 import { execFileSync } from 'child_process'
@@ -105,22 +105,46 @@ export const exportCommand = define({
       const cwd = termBlock.meta?.['cmd:cwd']
       if (!cwd) { skipped.push({ name: tabName, reason: 'no cwd recorded' }); continue }
 
-      // Resolve session id by tab name (matching how `sessions --json` does it).
+      // Resolve session id by tab name. First try the tab's recorded cwd; if the
+      // session lives in a worktree (`<cwd>/.claude/worktrees/<name>/`) the
+      // Claude project slug is different, so fall back to scanning worktrees.
       let sessionId: string | undefined
+      let effectiveCwd = cwd
       try {
         const matches = findSessionsByName(cwd, tabName)
         if (matches.length) sessionId = matches[0].id
       } catch { /* best-effort */ }
+      if (!sessionId) {
+        const worktreesDir = join(cwd, '.claude', 'worktrees')
+        if (existsSync(worktreesDir)) {
+          try {
+            const candidates: Array<{ id: string; mtime: number; path: string }> = []
+            for (const entry of readdirSync(worktreesDir)) {
+              const wtPath = join(worktreesDir, entry)
+              if (!statSync(wtPath).isDirectory()) continue
+              try {
+                const matches = findSessionsByName(wtPath, tabName)
+                if (matches.length) candidates.push({ id: matches[0].id, mtime: matches[0].mtime, path: wtPath })
+              } catch { /* keep scanning */ }
+            }
+            if (candidates.length) {
+              candidates.sort((a, b) => b.mtime - a.mtime)
+              sessionId = candidates[0].id
+              effectiveCwd = candidates[0].path
+            }
+          } catch { /* worktrees dir unreadable */ }
+        }
+      }
       if (!sessionId) { skipped.push({ name: tabName, reason: 'no Claude session found for this tab name + cwd' }); continue }
 
-      const slug = pathToProjectSlug(cwd)
+      const slug = pathToProjectSlug(effectiveCwd)
       const jsonlPath = join(homedir(), '.claude', 'projects', slug, `${sessionId}.jsonl`)
       if (!existsSync(jsonlPath)) { skipped.push({ name: tabName, reason: `session file missing: ${jsonlPath}` }); continue }
 
       const tabDir = join(tabsRoot, safeDirName(tabName))
       mkdirSync(tabDir, { recursive: true })
       copyFileSync(jsonlPath, join(tabDir, 'session.jsonl'))
-      const manifest = { name: tabName, cwd, sessionId, claudeProjectSlug: slug, workspace: wsName }
+      const manifest = { name: tabName, cwd: effectiveCwd, sessionId, claudeProjectSlug: slug, workspace: wsName }
       writeFileSync(join(tabDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 
       exported.push({ ...manifest })
