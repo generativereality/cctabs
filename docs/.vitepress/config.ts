@@ -8,6 +8,7 @@ export default defineConfig({
   title: 'cctabs',
   description: 'Self-aware agentic coding across terminal tabs. Install one plugin and Claude spawns parallel sessions — each in a named terminal tab. No tmux. No TUI.',
   lang: 'en-US',
+  cleanUrls: true,
 
   sitemap: {
     hostname: siteUrl,
