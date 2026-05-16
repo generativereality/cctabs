@@ -6,6 +6,7 @@ import { join, resolve } from 'path'
 import { openSession } from '../core/open-session.js'
 import { resolveBackend, listBackends } from '../core/backends.js'
 import { expandSessionId, pathToProjectSlug } from '../core/session.js'
+import { setupWorktree } from '../core/worktree.js'
 
 export const newCommand = define({
   name: 'new',
@@ -78,17 +79,42 @@ export const newCommand = define({
       initialPromptFile = promptFile
     }
 
+    // When --worktree is requested, create the worktree explicitly here so it's
+    // anchored to the target repo's current HEAD. Delegating to `claude --worktree`
+    // can branch from the upstream tracking ref (or other unexpected commit) when
+    // local commits aren't pushed — silently producing a stale-base worktree.
+    let sessionDir = dir
+    let worktreeInfo: { worktreePath: string; baseSha: string } | undefined
+    if (useWorktree) {
+      try {
+        const wt = setupWorktree(dir, name)
+        sessionDir = wt.worktreePath
+        worktreeInfo = wt
+        if (wt.created) {
+          const branchNote = wt.reusedBranch ? ` (reused existing branch ${wt.branchName})` : ''
+          consola.info(`Worktree created at ${wt.worktreePath} (base ${wt.baseSha.slice(0, 8)})${branchNote}`)
+          if (wt.baseSha !== wt.parentHeadSha) {
+            consola.warn(`Worktree base ${wt.baseSha.slice(0, 8)} differs from ${dir} HEAD ${wt.parentHeadSha.slice(0, 8)} — branch '${wt.branchName}' already existed and was checked out at its prior tip.`)
+          }
+        } else {
+          consola.info(`Worktree already present at ${wt.worktreePath} (base ${wt.baseSha.slice(0, 8)}) — reusing`)
+        }
+      } catch (e: any) {
+        consola.error(e?.message ?? String(e))
+        process.exit(1)
+      }
+    }
+
     let claudeCmd: string
     if (resolvedSessionId) {
-      const worktreePart = useWorktree ? ` --worktree ${JSON.stringify(name)}` : ''
-      claudeCmd = `claude --resume ${resolvedSessionId}${worktreePart} --name ${JSON.stringify(name)}`
+      claudeCmd = `claude --resume ${resolvedSessionId} --name ${JSON.stringify(name)}`
     } else {
-      claudeCmd = useWorktree ? `claude --worktree ${JSON.stringify(name)}` : 'claude'
+      claudeCmd = 'claude'
     }
 
     const tabId = await openSession({
       tabName: name,
-      dir,
+      dir: sessionDir,
       claudeCmd,
       workspaceQuery: workspace,
       initialPromptFile,
@@ -96,7 +122,7 @@ export const newCommand = define({
       modelOverride: resolvedModel,
       afterActive: true,
     })
-    const wt = useWorktree ? ` (worktree: .claude/worktrees/${name})` : ''
+    const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
     const be = backendName ? ` [backend: ${backendName}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''
     const rs = resolvedSessionId ? ` --resume ${resolvedSessionId.slice(0, 8)}…` : ''
     consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude${rs} at ${dir}${wt}${be}`)

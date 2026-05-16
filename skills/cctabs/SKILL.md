@@ -358,13 +358,10 @@ cctabs send payments "yes\n"   # quick replies
 
 ### Spawning gotchas (hard-won)
 
-1. **Verify the worktree base immediately after spawn.** `--worktree` does not always branch from your current HEAD — if you have local un-pushed commits, the child session may branch from an older commit (whatever the remote tracking branch points at). Always check:
+1. **Worktree base.** `cctabs new --worktree` anchors the new worktree at the target dir's current HEAD (cctabs runs `git worktree add` explicitly, not delegating to `claude --worktree`). The spawn line confirms the base SHA, e.g. `Worktree created at … (base 9d4a26d…)`. If a branch named `worktree-<name>` already exists from a prior run, the worktree is checked out at *that branch's* tip and cctabs prints a warning — verify it's what you want before sending work into the tab. To double-check after spawn:
    ```bash
-   cctabs new kid ~/Dev/myapp --worktree -p "..."
-   # Then in the ORCHESTRATOR tab:
    git -C ~/Dev/myapp/.claude/worktrees/kid log --oneline -1
    ```
-   If the base is not what you expected, abort and fix: either push your commits to the tracking branch first, or spawn without `--worktree` and let the subagent work on your branch directly.
 
 2. **Never instruct a subagent to "rebase your branch on main/next."** Subagents interpret this liberally. A common failure mode: the subagent does `git reset --hard <remote>` and throws away its own completed commits, trying to redo the work from scratch. Instead:
    - Have the orchestrator handle rebases after the subagent is done.
@@ -400,9 +397,10 @@ echo "do the thing" | cctabs send auth       # pipe via stdin
 
 ```bash
 cctabs new feature-name ~/Dev/myapp --worktree
-# Equivalent to: cd ~/Dev/myapp && claude --worktree "feature-name" --name "feature-name"
-# Claude creates: ~/Dev/myapp/.claude/worktrees/feature-name/
-# Claude creates branch: worktree-feature-name
+# cctabs creates the worktree itself, pinned to ~/Dev/myapp's current HEAD:
+#   git -C ~/Dev/myapp worktree add -b worktree-feature-name \
+#     ~/Dev/myapp/.claude/worktrees/feature-name <current HEAD>
+# Then opens a tab at the worktree path and runs plain `claude --name feature-name`.
 ```
 
 ### Existing branch — ask Claude to enter the worktree mid-session
@@ -426,7 +424,7 @@ cctabs new feature ~/Dev/myapp --worktree
 
 **Why:** Manually created worktree dirs placed outside the repo confuse Claude Code's session tracking, project memory lookup (`.claude/` is in the main repo), and CLAUDE.md resolution. Claude Code's built-in worktree support keeps everything co-located under `.claude/worktrees/` and handles cleanup on session exit.
 
-**Worktree base-commit caveat:** after spawning with `--worktree`, verify the branch base matches your expectation (see "Spawning gotchas" above). If your orchestrator has local commits that haven't been pushed, the worktree may branch from the stale remote tip instead of HEAD. This bites hardest when parallel tabs need to share schema/types your orchestrator has been working on — they won't see those changes if they branched before the commits landed upstream.
+**Worktree base commit:** cctabs anchors the new worktree at the target dir's current HEAD (it runs `git worktree add` explicitly rather than delegating to `claude --worktree`), so un-pushed local commits *are* visible to the child session. The success line prints the base SHA — confirm it matches what you expect, especially if you reuse a worktree name and see a "branch already existed" warning.
 
 ## Handling `cctabs new` Timeout Errors
 

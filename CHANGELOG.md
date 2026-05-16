@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **Fix: `cctabs new --worktree` no longer spawns at the wrong commit.** Previously cctabs delegated worktree creation to `claude --worktree <name>`, which can branch from the upstream tracking ref (or another unexpected commit) when local commits aren't pushed — silently producing a worktree at a stale base. Now cctabs runs `git worktree add` itself, explicitly anchored to the target dir's current HEAD, then launches plain `claude` inside the worktree. The success line prints the base SHA so you can verify it's what you expect. If a branch named `worktree-<name>` already exists, cctabs checks it out at its existing tip and warns when that differs from HEAD.
+
 ## 0.4.5 — 2026-06-09
 
 - **New tabs open right after the active tab (Tabby).** `new` / `fork` / `resume` previously dropped the new tab at the far end of the bar; it now lands immediately after the tab you created it from, browser-style. (Wave keeps append behaviour.)
