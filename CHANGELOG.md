@@ -3,6 +3,13 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## 0.4.0 — 2026-05-16
+
+- **`cctabs export` + `cctabs import` — move tabs and their Claude sessions between machines.** `cctabs export <tab>` (or `--all` for the whole workspace) bundles each tab's Claude conversation jsonl plus a small manifest into a `.tar.gz`. On the other machine, `cctabs import <archive>` extracts the jsonls into the local `~/.claude/projects/<target-slug>/` and opens a tab that `claude --resume`s each session. The target's Claude project slug is recomputed from the resolved target cwd, so cross-machine `$HOME` differences just work. Worktree-backed tabs (`cctabs new --worktree`) are handled correctly — export falls back to scanning `<cwd>/.claude/worktrees/*` when the direct slug lookup misses, and records the actual worktree path in the manifest so import recreates the right slug on the target.
+- **`--cwd <path>`** on `import` remaps a single-tab archive to a different directory. **`--dry-run`** previews everything without copying files or spawning tabs. **`--force`** overwrites a session jsonl that's already present locally.
+- Uses the system `tar` binary — no new npm deps.
+- Note: jsonl contents are not rewritten on import. Absolute paths from the source machine remain in the conversation history as historical references; Claude adapts to the actual current cwd on resume.
+
 ## 0.3.2 — 2026-05-13
 
 - **Fix: `cctabs` with no arguments crashed.** The default command (which dispatches to `sessions`) was passing a fake context shaped like `{ args: {} }` to `sessionsCommand.run`, but `sessions --json` (added in 0.3.1) reads `ctx.values.json`, so the missing `values` key threw `Cannot read properties of undefined (reading 'json')`. Regression from 0.3.1.
