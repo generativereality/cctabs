@@ -14,6 +14,8 @@ import { restoreCommand } from './restore.js'
 import { backendsCommand } from './backends.js'
 import { doctorCommand } from './doctor.js'
 import { installTabbyPluginCommand } from './install-tabby-plugin.js'
+import { exportCommand } from './export-cmd.js'
+import { importCommand } from './import-cmd.js'
 
 // Default command: show sessions (most common use)
 const defaultCommand = define({
@@ -41,6 +43,8 @@ const subCommands = new Map([
   ['backends', backendsCommand],
   ['doctor', doctorCommand],
   ['install-tabby-plugin', installTabbyPluginCommand],
+  ['export', exportCommand],
+  ['import', importCommand],
 ])
 
 export async function run(): Promise<void> {
