@@ -27,7 +27,7 @@ features:
   - title: Fork to explore
     details: Branch any conversation into a new independent tab. Try alternative approaches without disrupting the original. Keep what works, close what doesn't.
   - title: One plugin install
-    details: Install the Claude Code plugin and the CLI comes with it. No config files. No tmux. No dependencies. Works in Tabby (recommended, cross-platform) or Wave Terminal.
+    details: Install the Claude Code plugin and the CLI comes with it. No config files. No tmux. No dependencies. Works in Tabby (recommended) or Wave Terminal.
 ---
 
 ## Get started in 60 seconds
@@ -45,7 +45,9 @@ Or follow the manual steps in the [Getting Started guide](/guide/getting-started
 | Terminal | Platforms | Companion install |
 |---|---|---|
 | **[Tabby](https://tabby.sh)** (recommended) | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
-| **[Wave Terminal](https://waveterm.dev)** | macOS | Grant Accessibility permission in System Settings |
+| **[Wave Terminal](https://waveterm.dev)** | macOS · Linux · Windows | Grant Accessibility permission in System Settings |
+
+> cctabs has been actively tested on macOS. Linux and Windows should work via Tabby (Wave too) but haven't been verified yet — reports welcome.
 
 Then, inside Claude Code:
 

@@ -8,11 +8,13 @@ description: Install cctabs as a Claude Code plugin or via npm, then open your f
 ## Prerequisites
 
 - A supported terminal — either:
-  - **[Tabby](https://tabby.sh)** (recommended; macOS, Linux, Windows) with the
+  - **[Tabby](https://tabby.sh)** (recommended) with the
     [`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs) plugin installed.
     Stays responsive with many open tabs and is faster on tab creation and
     scrollback reads, which matters once Claude is orchestrating 10+ sessions.
-  - [Wave Terminal](https://waveterm.dev) (macOS).
+  - [Wave Terminal](https://waveterm.dev).
+  - Both terminals support macOS, Linux, and Windows. cctabs has been actively
+    tested on macOS — Linux and Windows should work but aren't verified yet.
 - [Claude Code](https://claude.ai/code) — `claude` on your PATH
 - Node.js ≥ 20
 
