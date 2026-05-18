@@ -8,18 +8,19 @@ description: Install cctabs as a Claude Code plugin or via npm, then open your f
 ## Prerequisites
 
 - A supported terminal — either:
-  - [Wave Terminal](https://waveterm.dev) (macOS), or
-  - [Tabby](https://tabby.sh) (macOS, Linux, Windows) with the
-    [`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs)
-    plugin installed.
+  - **[Tabby](https://tabby.sh)** (recommended; macOS, Linux, Windows) with the
+    [`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs) plugin installed.
+    Stays responsive with many open tabs and is faster on tab creation and
+    scrollback reads, which matters once Claude is orchestrating 10+ sessions.
+  - [Wave Terminal](https://waveterm.dev) (macOS).
 - [Claude Code](https://claude.ai/code) — `claude` on your PATH
 - Node.js ≥ 20
 
-**One-time setup (Wave only):** Wave Terminal needs Accessibility permission to open new tabs:
+**One-time setup (Tabby):** install the cctabs plugin from Tabby → **Settings → Plugins** (search "cctabs"), or sideload the dev build (see [`tabby-plugin/README.md`](https://github.com/generativereality/cctabs/tree/main/tabby-plugin)).
+
+**One-time setup (Wave):** Wave Terminal needs Accessibility permission to open new tabs:
 
 > System Settings → Privacy & Security → Accessibility → Wave Terminal ✓
-
-**One-time setup (Tabby only):** install the cctabs plugin from Tabby → **Settings → Plugins** (search "cctabs"), or sideload the dev build (see [`tabby-plugin/README.md`](https://github.com/generativereality/cctabs/tree/main/tabby-plugin)).
 
 ## Install
 
@@ -56,7 +57,7 @@ cctabs --version
 
 ## First session
 
-From inside Wave Terminal (or Tabby with the cctabs plugin running):
+From inside Tabby (with the cctabs plugin running) or Wave Terminal:
 
 ```bash
 cctabs sessions
@@ -71,7 +72,7 @@ cctabs new myproject ~/Dev/myproject
 ```
 
 cctabs will:
-1. Open a new terminal tab (Wave or Tabby — whichever you're running in)
+1. Open a new terminal tab (Tabby or Wave — whichever you're running in)
 2. Rename it to `myproject`
 3. `cd` to `~/Dev/myproject`
 4. Launch `claude --name myproject`

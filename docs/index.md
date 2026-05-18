@@ -27,5 +27,32 @@ features:
   - title: Fork to explore
     details: Branch any conversation into a new independent tab. Try alternative approaches without disrupting the original. Keep what works, close what doesn't.
   - title: One plugin install
-    details: Install the Claude Code plugin and the CLI comes with it. No config files. No tmux. No dependencies. Works immediately in Wave Terminal.
+    details: Install the Claude Code plugin and the CLI comes with it. No config files. No tmux. No dependencies. Works in Tabby (recommended, cross-platform) or Wave Terminal.
 ---
+
+## Get started in 60 seconds
+
+The simplest path: open [Claude Code](https://claude.ai/code) in any terminal and paste this prompt:
+
+> Visit https://cctabs.com/guide/getting-started and walk me through setting up cctabs on this machine. I want to use Tabby Terminal _(or "Wave Terminal" if you prefer macOS-native)_.
+
+Claude will install the terminal app, the `tabby-cctabs` companion plugin (or grant Wave's Accessibility permission), and the cctabs Claude Code plugin — then verify with `cctabs sessions`.
+
+Or follow the manual steps in the [Getting Started guide](/guide/getting-started).
+
+### Supported terminals
+
+| Terminal | Platforms | Companion install |
+|---|---|---|
+| **[Tabby](https://tabby.sh)** (recommended) | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
+| **[Wave Terminal](https://waveterm.dev)** | macOS | Grant Accessibility permission in System Settings |
+
+Then, inside Claude Code:
+
+```
+❯ /plugin marketplace add generativereality/plugins
+❯ /plugin install cctabs@generativereality
+❯ /reload-plugins
+```
+
+The plugin ships the `cctabs` CLI **and** a Claude Code skill — so Claude can drive your tabs without you switching to a separate tool.
