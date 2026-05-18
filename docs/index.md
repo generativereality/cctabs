@@ -34,7 +34,7 @@ features:
 
 The simplest path: open [Claude Code](https://claude.ai/code) in any terminal and paste this prompt:
 
-> Visit https://cctabs.com/guide/getting-started and walk me through setting up cctabs on this machine. I want to use Tabby Terminal _(or "Wave Terminal" if you prefer macOS-native)_.
+> Visit https://cctabs.com/guide/getting-started and walk me through setting up cctabs on this machine. I want to use Tabby Terminal.
 
 Claude will install the terminal app, the `tabby-cctabs` companion plugin (or grant Wave's Accessibility permission), and the cctabs Claude Code plugin — then verify with `cctabs sessions`.
 
