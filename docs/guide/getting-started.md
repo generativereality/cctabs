@@ -13,8 +13,14 @@ description: Install cctabs as a Claude Code plugin or via npm, then open your f
     Stays responsive with many open tabs and is faster on tab creation and
     scrollback reads, which matters once Claude is orchestrating 10+ sessions.
   - [Wave Terminal](https://waveterm.dev).
-  - Both terminals support macOS, Linux, and Windows. cctabs has been actively
-    tested on macOS — Linux and Windows should work but aren't verified yet.
+  - Both terminals support macOS, Linux, and Windows. cctabs is actively
+    tested on **macOS**. Wave didn't work in one Ubuntu test; Tabby on
+    Linux/Windows hasn't been tried yet but its plugin format is portable,
+    so it might Just Work. If you hit issues on another platform or want a
+    new terminal supported, point Claude Code at
+    [the repo](https://github.com/generativereality/cctabs), share the
+    error, and ask it to investigate + open a PR — the backend interface is
+    small ([`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts)).
 - [Claude Code](https://claude.ai/code) — `claude` on your PATH
 - Node.js ≥ 20
 

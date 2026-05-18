@@ -47,7 +47,9 @@ Or follow the manual steps in the [Getting Started guide](/guide/getting-started
 | **[Tabby](https://tabby.sh)** (recommended) | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
 | **[Wave Terminal](https://waveterm.dev)** | macOS · Linux · Windows | Grant Accessibility permission in System Settings |
 
-> cctabs has been actively tested on macOS. Linux and Windows should work via Tabby (Wave too) but haven't been verified yet — reports welcome.
+> **Platform status:** cctabs is actively tested on **macOS**. Wave Terminal didn't work in one Ubuntu test; Tabby on Linux and Windows hasn't been tried yet but its plugin format is portable, so it might Just Work.
+>
+> **Hitting issues on Linux, Windows, or another terminal?** Point Claude Code at [the cctabs repo](https://github.com/generativereality/cctabs), share the error, and ask it to investigate and open a PR. Adding a new terminal backend means implementing the small [`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts) interface — Wave and Tabby are the two existing examples.
 
 Then, inside Claude Code:
 
