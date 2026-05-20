@@ -40,6 +40,9 @@ export default defineConfig({
     ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-KW9J78R8C6' }],
     ['script', {}, `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('consent','default',{ad_storage:'denied',ad_user_data:'denied',ad_personalization:'denied',analytics_storage:'granted'});gtag('js',new Date());gtag('config','G-KW9J78R8C6',{client_storage:'none',anonymize_ip:true,allow_google_signals:false,allow_ad_personalization_signals:false});`],
 
+    // Cloudflare Web Analytics — explicit injection; CF auto-inject is unreliable on this Pages project
+    ['script', { defer: '', src: 'https://static.cloudflareinsights.com/beacon.min.js', 'data-cf-beacon': '{"token": "c7fb105b8a8042e6a8133dc310dbabc9"}' }],
+
   ],
 
   themeConfig: {
