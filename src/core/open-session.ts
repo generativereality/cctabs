@@ -59,8 +59,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const dir = resolve(opts.dir.replace(/^~/, homedir()))
 
   if (!existsSync(dir)) {
-    consola.error(`Directory does not exist: ${dir}`)
-    process.exit(1)
+    throw new Error(`Directory does not exist: ${dir}`)
   }
 
   const config = loadConfig()
@@ -73,13 +72,11 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     const { workspaces } = await adapter.getAllData()
     const matches = adapter.resolveWorkspace(workspaces, workspaceQuery)
     if (!matches.length) {
-      consola.error(`No workspace matching '${workspaceQuery}'`)
-      process.exit(1)
+      throw new Error(`No workspace matching '${workspaceQuery}'`)
     }
     const { data, windowId } = matches[0]
     if (!windowId) {
-      consola.error(`Workspace '${data.name}' has no open window`)
-      process.exit(1)
+      throw new Error(`Workspace '${data.name}' has no open window`)
     }
     focusWindowId = windowId
     consola.info(`Workspace: ${data.name}`)
@@ -93,8 +90,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
 
   const result = await adapter.waitForNewBlock(beforeIds)
   if (!result) {
-    consola.error('Timed out waiting for new terminal block')
-    process.exit(1)
+    throw new Error('Timed out waiting for new terminal block')
   }
 
   const { blockId, tabId } = result
@@ -106,8 +102,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   try {
     await waitForScrollbackMatch(adapter, blockId, /[$%>]\s*$/, 'shell prompt', 10_000, 250)
   } catch {
-    consola.error('Shell prompt never appeared in new tab — aborting. Check your shell profile (e.g. nvm default alias).')
-    process.exit(1)
+    throw new Error('Shell prompt never appeared in new tab — aborting. Check your shell profile (e.g. nvm default alias).')
   }
 
   const extraFlags = config.claude.flags.join(' ')
@@ -122,9 +117,8 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     try {
       await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
     } catch {
-      consola.error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
       adapter.closeSocket()
-      process.exit(1)
+      throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
     }
     const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
     await adapter.sendInput(blockId, prompt)
