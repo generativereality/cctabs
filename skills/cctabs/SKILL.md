@@ -66,7 +66,7 @@ On approval, run `cctabs install-tabby-plugin --yes`. Tabby quits ~2s after the 
 
 If the user wants to keep their other Tabby tabs intact, run `cctabs install-tabby-plugin --no-restart` instead and tell them to quit + reopen Tabby themselves.
 
-`cctabs doctor` is also available for a deliberate environment check (terminal, Wave Accessibility, plugin reachability, Wave DB) — useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
+`cctabs doctor` is also available for a deliberate environment check. It adapts to whichever terminal you're running in — terminal detection runs either way; on Wave it additionally inspects Accessibility permission and scans the Wave DB for orphan tabids; on Tabby it probes the cctabs plugin's localhost health endpoint. Useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
 
 #### Auto-install + auto-restart (recommended)
 
@@ -263,7 +263,7 @@ cctabs resume api ~/Dev/myapp
 
 ## Workflow: Restoring tabs after a reboot
 
-After a Wave/computer restart, every tab loses its Claude session and shows up with `terminal` or `unknown` status. `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
+After a terminal restart or computer reboot, every tab loses its Claude session and shows up with `terminal` or `unknown` status (true for both Wave and Tabby). `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
 
 ```bash
 cctabs restore                    # search all projects (default)
