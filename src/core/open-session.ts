@@ -16,6 +16,15 @@ interface OpenSessionOptions {
   envVars?: Record<string, string>
   /** If set, append `--model <name>` to the claude command */
   modelOverride?: string
+  /**
+   * Settle delay after the tab is created and the command sent, before
+   * returning. Guards rapid back-to-back calls from racing on waitForNewBlock.
+   * Defaults to 2000ms. Batch callers (e.g. restore) can lower this: by the
+   * time we return, waitForNewBlock has already confirmed the new block is
+   * visible in `blocks list`, so the next call's beforeIds snapshot is complete
+   * regardless — a short settle is enough to let Wave's tab animation finish.
+   */
+  tailDelayMs?: number
 }
 
 function shellQuoteEnv(env: Record<string, string>): string {
@@ -56,6 +65,7 @@ async function waitForScrollbackMatch(
 
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const { tabName, claudeCmd, workspaceQuery, initialPromptFile, envVars, modelOverride } = opts
+  const tailDelayMs = opts.tailDelayMs ?? 2000
   const dir = resolve(opts.dir.replace(/^~/, homedir()))
 
   if (!existsSync(dir)) {
@@ -65,6 +75,60 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const config = loadConfig()
 
   const adapter = requireAdapter()
+
+  // Optional per-phase timing diagnostics (CCTABS_TIMING=1). Helps profile
+  // where the per-tab cost goes during a large `restore`.
+  const timing = !!process.env.CCTABS_TIMING
+  let tPhase = Date.now()
+  const mark = (label: string) => {
+    if (!timing) return
+    const now = Date.now()
+    consola.log(`    ⏱ ${tabName} ${label}: ${now - tPhase}ms`)
+    tPhase = now
+  }
+
+  // Fast path: adapters that can launch a command in a fresh tab and return
+  // its id directly (Tabby's plugin) skip the newTab → waitForNewBlock →
+  // rename → wait-for-shell-prompt dance entirely, and can be driven in
+  // parallel by the caller. We run claude *as the tab's process* via a login
+  // shell so the user's profile (PATH, nvm, pyenv, …) is sourced — claude and
+  // its npx-based MCP servers need it — and `exec` replaces the shell so the
+  // tab process *is* claude. (workspaceQuery is a Wave-only window concept and
+  // does not apply here.)
+  if (adapter.openTabDirect) {
+    const extraFlags = config.claude.flags.join(' ')
+    const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
+    const modelPart = modelOverride ? ` --model ${JSON.stringify(modelOverride)}` : ''
+    const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
+    const claudeCore = `claude${extraFlags ? ' ' + extraFlags : ''} ${claudeCmd.replace(/^claude\s*/, '')}${namePart}${modelPart}`.replace(/\s+/g, ' ').trim()
+    const shell = process.env.SHELL ?? '/bin/zsh'
+    const launch = `${envPrefix}exec ${claudeCore}`
+
+    const { blockId, tabId } = await adapter.openTabDirect({
+      cwd: dir,
+      title: tabName,
+      command: shell,
+      args: ['-l', '-c', launch],
+    })
+    mark('openTabDirect')
+
+    if (initialPromptFile) {
+      try {
+        await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
+      } catch {
+        adapter.closeSocket()
+        throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
+      }
+      const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
+      await adapter.sendInput(blockId, prompt)
+      // Send Enter separately — bracketed paste mode swallows \r inside the paste
+      await new Promise((r) => setTimeout(r, 100))
+      await adapter.sendInput(blockId, '\r')
+    }
+
+    adapter.closeSocket()
+    return tabId
+  }
 
   let focusWindowId: string | undefined
 
@@ -85,16 +149,20 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const beforeIds = new Set(
     adapter.blocksList().filter((b) => b.view === 'term').map((b) => b.blockid),
   )
+  mark('beforeIds')
 
   await adapter.newTab(focusWindowId)
+  mark('newTab')
 
   const result = await adapter.waitForNewBlock(beforeIds)
   if (!result) {
     throw new Error('Timed out waiting for new terminal block')
   }
+  mark('waitForNewBlock')
 
   const { blockId, tabId } = result
   await adapter.renameTab(tabId, tabName)
+  mark('renameTab')
 
   // Wait for the shell prompt before sending the cd && claude command.
   // Without this, the input can arrive before the shell is ready and get lost.
@@ -104,6 +172,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   } catch {
     throw new Error('Shell prompt never appeared in new tab — aborting. Check your shell profile (e.g. nvm default alias).')
   }
+  mark('shellPrompt')
 
   const extraFlags = config.claude.flags.join(' ')
   const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
@@ -129,7 +198,8 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
 
   // Wait for Wave to fully process the new tab before returning, so rapid
   // back-to-back `cctabs new` calls don't race on waitForNewBlock.
-  await new Promise((r) => setTimeout(r, 2000))
+  if (tailDelayMs > 0) await new Promise((r) => setTimeout(r, tailDelayMs))
+  mark('tail')
 
   adapter.closeSocket()
 

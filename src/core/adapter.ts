@@ -33,6 +33,25 @@ export interface TerminalAdapter {
   renameTab(tabId: string, name: string): Promise<void>
   sendInput(blockId: string, text: string): Promise<unknown>
 
+  /**
+   * Optional fast path: create a tab that launches `command args` in `cwd`
+   * with `title` already set, and return the new tab's ids *directly* — no
+   * newTab() + waitForNewBlock() polling and no separate renameTab(). Adapters
+   * whose backend hands back the new tab id synchronously (e.g. Tabby's plugin)
+   * implement this; the rest leave it undefined and callers fall back to the
+   * newTab()/waitForNewBlock() dance.
+   *
+   * Because the id comes back deterministically (no block-diff to
+   * disambiguate), callers may invoke this concurrently to create many tabs in
+   * parallel.
+   */
+  openTabDirect?(opts: {
+    cwd: string
+    title: string
+    command: string
+    args: string[]
+  }): Promise<{ blockId: string; tabId: string }>
+
   // -- query helpers (pure data manipulation) --
   resolveTab(
     query: string,

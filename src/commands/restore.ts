@@ -229,8 +229,10 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
 
   adapter.closeSocket()
 
-  // Spawn new tabs sequentially (each openSession opens its own socket)
-  for (const entry of toSpawn) {
+  // Spawn new tabs. Adapters with openTabDirect (Tabby) return the new tab id
+  // directly, so there is no block-diff race — spawn them all at once. The
+  // osascript path (Wave) must stay serial.
+  const spawnOne = async (entry: ManifestEntry) => {
     try {
       const claudeCmd = entry.session_id
         ? `claude --resume ${entry.session_id} --name ${JSON.stringify(entry.name)}`
@@ -239,12 +241,19 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
         tabName: entry.name,
         dir: entry.dir,
         claudeCmd,
+        tailDelayMs: 500,
       })
       const sid = entry.session_id ? entry.session_id.slice(0, 8) + '…' : 'fresh'
       results.push({ name: entry.name, result: `✔ spawned [${newTabId.slice(0, 8)}] (${sid})` })
     } catch (err) {
       results.push({ name: entry.name, result: `✘ spawn failed: ${(err as Error).message}` })
     }
+  }
+
+  if (typeof adapter.openTabDirect === 'function') {
+    await Promise.all(toSpawn.map(spawnOne))
+  } else {
+    for (const entry of toSpawn) await spawnOne(entry)
   }
 
   console.log('\nRestore summary:')
@@ -299,6 +308,11 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
 
   const toRecreate: Array<{ name: string; sessionId: string; sessionDir: string; blockIds: string[]; tabId: string }> = []
 
+  // Pass 1 (sync): resolve each tab's session. Defer the slow per-tab
+  // confirmScrollbackEmpty / sendInput work so the empty-checks can be batched.
+  interface Resolved { tab: typeof toResume[number]; sessionId: string; sessionDir: string }
+  const resolved: Resolved[] = []
+
   for (const tab of toResume) {
     let sessionId: string | null = null
     let sessionDir: string | null = null
@@ -338,22 +352,38 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
       continue
     }
 
-    if (tab.status === 'unknown') {
-      const stillEmpty = await adapter.confirmScrollbackEmpty(tab.blockId)
-      if (stillEmpty) {
+    resolved.push({ tab, sessionId, sessionDir })
+  }
+
+  if (!dryRun) {
+    // Pass 2 (parallel): confirm the 'unknown'-status tabs really are dead.
+    // confirmScrollbackEmpty awaits sleeps between polls; running them
+    // concurrently lets those sleeps overlap (~1s total instead of ~1s × N).
+    const unknownTabs = resolved.filter((r) => r.tab.status === 'unknown')
+    const emptyById = new Map<string, boolean>()
+    await Promise.all(
+      unknownTabs.map(async (r) => {
+        emptyById.set(r.tab.tabId, await adapter.confirmScrollbackEmpty(r.tab.blockId))
+      }),
+    )
+
+    // Pass 3: queue recreates for confirmed-dead tabs; send to the rest.
+    for (const r of resolved) {
+      const { tab, sessionId, sessionDir } = r
+      if (tab.status === 'unknown' && emptyById.get(tab.tabId)) {
         const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
         toRecreate.push({ name: tab.name, sessionId, sessionDir, blockIds, tabId: tab.tabId })
         results.push({ name: tab.name, result: 'queued for recreate' })
         continue
       }
+
+      consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}… in ${sessionDir} (send)`)
+      const cmd = `cd ${JSON.stringify(sessionDir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(tab.name)}\r`
+      await adapter.sendInput(tab.blockId, cmd)
+
+      await new Promise((r) => setTimeout(r, 500))
+      results.push({ name: tab.name, result: 'sent' })
     }
-
-    consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}… in ${sessionDir} (send)`)
-    const cmd = `cd ${JSON.stringify(sessionDir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(tab.name)}\r`
-    await adapter.sendInput(tab.blockId, cmd)
-
-    await new Promise((r) => setTimeout(r, 500))
-    results.push({ name: tab.name, result: 'sent' })
   }
 
   if (!dryRun) {
@@ -383,12 +413,16 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
     adapter.closeSocket()
 
     consola.info(`Recreating ${toRecreate.length} dead tab(s)…`)
-    for (const t of toRecreate) {
+
+    const recreateOne = async (t: typeof toRecreate[number]) => {
       try {
         const newTabId = await openSession({
           tabName: t.name,
           dir: t.sessionDir,
           claudeCmd: `claude --resume ${t.sessionId} --name ${JSON.stringify(t.name)}`,
+          // waitForNewBlock already confirms each new block is visible before
+          // returning, so the full 2s settle isn't needed between recreates.
+          tailDelayMs: 500,
         })
         const r = results.find((x) => x.name === t.name)!
         r.result = `✔ recreated [${newTabId.slice(0, 8)}]`
@@ -396,6 +430,16 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
         const r = results.find((x) => x.name === t.name)!
         r.result = `✘ recreate failed: ${(err as Error).message}`
       }
+    }
+
+    // Adapters that return the new tab id directly (openTabDirect, e.g. Tabby)
+    // have no block-diff to race, so recreate every tab at once. The osascript
+    // path (Wave) must stay serial — concurrent Cmd+T keystrokes would land in
+    // the wrong tab and waitForNewBlock could not disambiguate the new blocks.
+    if (typeof adapter.openTabDirect === 'function') {
+      await Promise.all(toRecreate.map(recreateOne))
+    } else {
+      for (const t of toRecreate) await recreateOne(t)
     }
   } else {
     adapter.closeSocket()

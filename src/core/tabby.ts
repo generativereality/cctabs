@@ -241,6 +241,31 @@ export class TabbyAdapter implements TerminalAdapter {
     await this.http('PUT', `/api/tabs/${tabId}/title`, { title: name })
   }
 
+  /**
+   * Fast path: the plugin's POST /api/tabs/new accepts {cwd, title, command,
+   * args} and returns the new tab's uuid synchronously. This collapses the
+   * whole newTab → waitForNewBlock → renameTab → wait-for-shell-prompt →
+   * sendInput sequence into a single round-trip, and (because the uuid is
+   * returned, not discovered by diffing) lets the caller open many tabs at once.
+   */
+  async openTabDirect(opts: {
+    cwd: string
+    title: string
+    command: string
+    args: string[]
+  }): Promise<{ blockId: string; tabId: string }> {
+    this.ensureHealthy()
+    const r = (await this.http('POST', '/api/tabs/new', {
+      cwd: opts.cwd,
+      title: opts.title,
+      command: opts.command,
+      args: opts.args,
+    })) as { uuid?: string } | null
+    const uuid = r?.uuid
+    if (!uuid) throw new Error('Tabby plugin did not return a tab uuid')
+    return { blockId: uuid, tabId: uuid }
+  }
+
   async sendInput(blockId: string, text: string): Promise<unknown> {
     return this.http('POST', `/api/tabs/${blockId}/send`, { data: text })
   }
