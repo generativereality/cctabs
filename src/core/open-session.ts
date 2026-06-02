@@ -63,6 +63,53 @@ async function waitForScrollbackMatch(
   throw new Error(`Timed out waiting for ${label}`)
 }
 
+/**
+ * Wait for Claude's input prompt, then send the initial task and reliably
+ * submit it.
+ *
+ * Reliability matters because a naive "send text, then send \r" loses the
+ * Enter for multi-line prompts: the terminal treats the burst as a bracketed
+ * paste and swallows a \r that arrives inside the paste window, leaving the
+ * text sitting unsent in the input box. We fix that two ways:
+ *   1. Wrap the prompt in explicit bracketed-paste markers so the (possibly
+ *      multi-line) text is ingested as one paste and the following Enter lands
+ *      *outside* it — an unambiguous submit, not a newline.
+ *   2. Verify the turn actually started (a spinner / "esc to interrupt" hint
+ *      appears only while Claude is processing, never at the idle prompt), and
+ *      re-send Enter a few times if not, since a large paste can still be
+ *      mid-ingest when the first Enter arrives.
+ */
+async function sendInitialPrompt(
+  adapter: TerminalAdapter,
+  blockId: string,
+  initialPromptFile: string,
+): Promise<void> {
+  try {
+    await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
+  } catch {
+    adapter.closeSocket()
+    throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
+  }
+
+  const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
+  // Bracketed-paste wrap; prompt is already trimEnd()'d so no stray newline
+  // ends up inside the markers.
+  await adapter.sendInput(blockId, `\x1b[200~${prompt}\x1b[201~`)
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await new Promise((r) => setTimeout(r, attempt === 0 ? 300 : 500))
+    await adapter.sendInput(blockId, '\r')
+    await new Promise((r) => setTimeout(r, 500))
+    const tail = adapter.scrollback(blockId, 40)
+    // Tabby's buffer can drop spaces between glyphs, so match a
+    // whitespace-stripped copy for the text hint.
+    const compact = tail.replace(/\s+/g, '')
+    if (/[✻✽✶✳✢]/.test(tail) || /esctointerrupt/i.test(compact)) return
+  }
+
+  consola.warn('Could not confirm the initial prompt was submitted — it may be sitting in the input box. Press Enter in the tab to send it.')
+}
+
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const { tabName, claudeCmd, workspaceQuery, initialPromptFile, envVars, modelOverride } = opts
   const tailDelayMs = opts.tailDelayMs ?? 2000
@@ -113,17 +160,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     mark('openTabDirect')
 
     if (initialPromptFile) {
-      try {
-        await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
-      } catch {
-        adapter.closeSocket()
-        throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
-      }
-      const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
-      await adapter.sendInput(blockId, prompt)
-      // Send Enter separately — bracketed paste mode swallows \r inside the paste
-      await new Promise((r) => setTimeout(r, 100))
-      await adapter.sendInput(blockId, '\r')
+      await sendInitialPrompt(adapter, blockId, initialPromptFile)
     }
 
     adapter.closeSocket()
@@ -182,18 +219,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   await adapter.sendInput(blockId, cmd)
 
   if (initialPromptFile) {
-    // Poll until Claude's ready prompt appears, then send the initial task
-    try {
-      await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
-    } catch {
-      adapter.closeSocket()
-      throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
-    }
-    const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
-    await adapter.sendInput(blockId, prompt)
-    // Send Enter separately — bracketed paste mode swallows \r inside the paste
-    await new Promise((r) => setTimeout(r, 100))
-    await adapter.sendInput(blockId, '\r')
+    await sendInitialPrompt(adapter, blockId, initialPromptFile)
   }
 
   // Wait for Wave to fully process the new tab before returning, so rapid
