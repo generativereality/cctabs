@@ -123,17 +123,16 @@ function checkTabbyPlugin (): CheckResult {
 
 /**
  * Probe whether `node` is findable in a freshly spawned shell — the canonical
- * symptom of the macOS non-login PATH bug. Spawning `zsh -l -c 'command -v
- * node'` simulates the same login-shell init (/etc/zprofile → path_helper)
- * that cctabs now uses when it opens new Tabby tabs. If this fails, brand-new
- * tabs will also fail to find Node, every plugin MCP that shells out to npx
- * will ENOENT, and the cctabs CLI itself becomes unusable from inside those
- * tabs (chicken-and-egg). The remediation hint covers both the upstream-fix
- * path (rely on a recent cctabs that defaults to `-l`) and the dotfile
- * workaround for users on older versions or non-Tabby terminals.
+ * symptom of the macOS PATH-sourcing bug. Spawning `zsh -l -i -c 'command -v
+ * node'` simulates the same login + interactive shell init (/etc/zprofile →
+ * path_helper, then ~/.zshrc) that cctabs uses when it opens new Tabby tabs.
+ * If this fails, brand-new tabs will also fail to find Node, every plugin MCP
+ * that shells out to npx will ENOENT, and the cctabs CLI itself becomes
+ * unusable from inside those tabs (chicken-and-egg). The flags must match
+ * open-session.ts to keep the doctor honest.
  */
 function checkSpawnedShellPath (): CheckResult {
-  const r = spawnSync('zsh', ['-l', '-c', 'command -v node'], {
+  const r = spawnSync('zsh', ['-l', '-i', '-c', 'command -v node'], {
     encoding: 'utf-8',
     timeout: 3000,
   })
@@ -147,11 +146,12 @@ function checkSpawnedShellPath (): CheckResult {
   return {
     name: 'Spawned shell PATH',
     status: 'warn',
-    detail: r.error?.message ?? r.stderr?.trim() ?? 'node not found in a login zsh',
+    detail: r.error?.message ?? r.stderr?.trim() ?? 'node not found in a login+interactive zsh',
     hint:
-      'A login zsh cannot find `node`. Either node is not installed, or PATH is broken. ' +
-      'On macOS, `/usr/local/bin` is added by /etc/zprofile\'s path_helper — non-login shells skip it. ' +
-      'Add `export PATH="/usr/local/bin:$PATH"` to ~/.zshenv as a belt-and-braces fix.',
+      'A login+interactive zsh cannot find `node`. Either node is not installed, or PATH is broken. ' +
+      'cctabs spawns tabs with `zsh -l -i -c` so both ~/.zprofile and ~/.zshrc are sourced — ' +
+      'if your PATH-extending logic lives elsewhere (e.g. a sourced file that bails on non-interactive), ' +
+      'move the `export PATH=...` lines into ~/.zshenv as a belt-and-braces fix.',
   }
 }
 

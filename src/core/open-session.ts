@@ -138,10 +138,19 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   // its id directly (Tabby's plugin) skip the newTab → waitForNewBlock →
   // rename → wait-for-shell-prompt dance entirely, and can be driven in
   // parallel by the caller. We run claude *as the tab's process* via a login
-  // shell so the user's profile (PATH, nvm, pyenv, …) is sourced — claude and
-  // its npx-based MCP servers need it — and `exec` replaces the shell so the
-  // tab process *is* claude. (workspaceQuery is a Wave-only window concept and
-  // does not apply here.)
+  // *interactive* shell so the user's profile (PATH, nvm, pyenv, …) is sourced
+  // — claude and its npx-based MCP servers need it — and `exec` replaces the
+  // shell so the tab process *is* claude. (workspaceQuery is a Wave-only
+  // window concept and does not apply here.)
+  //
+  // Why both -l and -i: `-l -c` alone is a non-interactive login shell, which
+  // sources `~/.zprofile` (path_helper → /opt/homebrew/bin etc.) but NOT
+  // `~/.zshrc`. Users who add tooling to PATH from `.zshrc` (the macOS
+  // convention for things like ~/.local/bin, pnpm/npm-global, mise/asdf
+  // shims) end up with "command not found: claude" in the spawned tab.
+  // Adding `-i` makes zsh source `.zshrc` even with `-c`, matching what an
+  // interactive Terminal/Tabby tab would see. Same logic applies to bash
+  // (`-l -i -c` sources both ~/.profile and ~/.bashrc on Linux).
   if (adapter.openTabDirect) {
     const extraFlags = config.claude.flags.join(' ')
     const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
@@ -155,7 +164,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
       cwd: dir,
       title: tabName,
       command: shell,
-      args: ['-l', '-c', launch],
+      args: ['-l', '-i', '-c', launch],
     })
     mark('openTabDirect')
 
