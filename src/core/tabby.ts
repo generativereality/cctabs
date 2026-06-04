@@ -184,6 +184,12 @@ export class TabbyAdapter implements TerminalAdapter {
       'claude.ai/code',
       '⏵⏵ bypass',
       '⏵⏵ auto',
+      // Idle-input hints. Long-context sessions sitting at an empty prompt
+      // emit only these strings on redraw, so the startup banner and pill
+      // text scroll out of the ring buffer. Without these the detector
+      // falsely reports 'terminal' for sessions burning hundreds of k tokens.
+      'new task?',
+      'Checking for updates',
       // Spinner labels Claude Code emits while a turn is in flight. These
       // dominate the buffer during long thinks and push the status line
       // out of the readable window.

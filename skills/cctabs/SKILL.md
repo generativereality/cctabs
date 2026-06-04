@@ -44,6 +44,14 @@ npm install -g @generativereality/cctabs
 
 Do not modify PATH or npm configuration beyond this.
 
+### Check the installed version isn't stale
+
+On your first cctabs invocation in a session, look at the version banner cctabs prints (`(@generativereality/cctabs vX.Y.Z)`) and at any `[cctabs] OUTDATED ...` warning line in the output. If you see the warning — or if the banner version is older than the version in this skill's `plugin.json` — tell the user:
+
+> *"Your installed cctabs is `vX.Y.Z`; the current release is `vA.B.C`. Want me to upgrade with `npm install -g @generativereality/cctabs@latest` before continuing?"*
+
+Don't silently work around an outdated CLI: detection heuristics, command flags, and bug fixes diverge between versions, so misbehavior on the user's machine is often "binary on PATH lags behind the plugin docs you're reading." The Claude Code marketplace plugin update path only refreshes this skill — the npm-installed CLI binary is a separate channel and must be upgraded explicitly.
+
 ### Tabby users: a one-time plugin install is needed
 
 Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
