@@ -63,27 +63,40 @@ async function waitForScrollbackMatch(
   throw new Error(`Timed out waiting for ${label}`)
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
 /**
  * Wait for Claude's input prompt, then send the initial task and reliably
  * submit it.
  *
- * Reliability matters because a naive "send text, then send \r" loses the
- * Enter for multi-line prompts: the terminal treats the burst as a bracketed
- * paste and swallows a \r that arrives inside the paste window, leaving the
- * text sitting unsent in the input box. We fix that two ways:
- *   1. Wrap the prompt in explicit bracketed-paste markers so the (possibly
- *      multi-line) text is ingested as one paste and the following Enter lands
- *      *outside* it — an unambiguous submit, not a newline.
- *   2. Verify the turn actually started (a spinner / "esc to interrupt" hint
- *      appears only while Claude is processing, never at the idle prompt), and
- *      re-send Enter a few times if not, since a large paste can still be
- *      mid-ingest when the first Enter arrives.
+ * The naive "send text, then send \r" is unreliable for two distinct reasons,
+ * each handled by its own verify-and-retry stage:
+ *
+ *   1. The paste can be *dropped*. The welcome-screen placeholder (`❯ Try "…"`)
+ *      renders several seconds before the input handler is fully attached, so
+ *      input sent the instant `❯` appears lands in a not-ready terminal and is
+ *      silently lost — the box stays empty and a later Enter does nothing.
+ *      Fix: after pasting, confirm the text actually landed in the box and
+ *      re-paste if not (clearing first so a retry never duplicates).
+ *
+ *   2. The Enter can be *swallowed*. A burst of "text then \r" is seen as one
+ *      bracketed paste and the \r is absorbed as a newline rather than a
+ *      submit. Fix: wrap the prompt in explicit bracketed-paste markers so the
+ *      Enter lands outside the paste, then confirm a turn actually started
+ *      (spinner / "esc to interrupt" appear only while Claude is processing)
+ *      and re-send Enter a few times if not.
+ *
+ * Landed-detection handles both render shapes observed empirically: a short
+ * prompt is echoed inline (so a distinctive prompt substring appears), while a
+ * long / multi-line prompt collapses to a "[Pasted text #N +M lines]" chip.
  */
 async function sendInitialPrompt(
   adapter: TerminalAdapter,
   blockId: string,
   initialPromptFile: string,
 ): Promise<void> {
+  // The first `❯` only means the UI has rendered — treat it as a starting gun
+  // and verify the paste below rather than trusting the input is ready.
   try {
     await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
   } catch {
@@ -92,22 +105,42 @@ async function sendInitialPrompt(
   }
 
   const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
-  // Bracketed-paste wrap; prompt is already trimEnd()'d so no stray newline
-  // ends up inside the markers.
-  await adapter.sendInput(blockId, `\x1b[200~${prompt}\x1b[201~`)
-
-  for (let attempt = 0; attempt < 4; attempt++) {
-    await new Promise((r) => setTimeout(r, attempt === 0 ? 300 : 500))
-    await adapter.sendInput(blockId, '\r')
-    await new Promise((r) => setTimeout(r, 500))
-    const tail = adapter.scrollback(blockId, 40)
-    // Tabby's buffer can drop spaces between glyphs, so match a
-    // whitespace-stripped copy for the text hint.
-    const compact = tail.replace(/\s+/g, '')
-    if (/[✻✽✶✳✢]/.test(tail) || /esctointerrupt/i.test(compact)) return
+  // Distinctive chunk for the inline-echo case. Claude's output is append-only
+  // so once this (or the paste chip) shows up it stays — fine within this one
+  // call on a fresh tab.
+  const sentinel = prompt.replace(/\s+/g, '').slice(0, 24)
+  const landed = (): boolean => {
+    const c = adapter.scrollback(blockId, 60).replace(/\s+/g, '')
+    return (sentinel.length >= 4 && c.includes(sentinel)) || c.includes('[Pastedtext')
   }
 
-  consola.warn('Could not confirm the initial prompt was submitted — it may be sitting in the input box. Press Enter in the tab to send it.')
+  // Stage 1: paste, confirm it landed, re-paste if dropped.
+  let inBox = false
+  for (let attempt = 0; attempt < 3 && !inBox; attempt++) {
+    // Clear first on retries so a re-paste never stacks a second copy.
+    if (attempt > 0) { await adapter.sendInput(blockId, '\x15'); await sleep(200) }
+    await adapter.sendInput(blockId, `\x1b[200~${prompt}\x1b[201~`)
+    for (let i = 0; i < 8; i++) {
+      await sleep(300)
+      if (landed()) { inBox = true; break }
+    }
+  }
+  if (!inBox) {
+    consola.warn('Initial prompt may not have landed in the input box — switch to the tab and press Enter (re-type if the box is empty).')
+    return
+  }
+
+  // Stage 2: submit, confirm the turn started, re-send Enter if not.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await adapter.sendInput(blockId, '\r')
+    await sleep(500)
+    const tail = adapter.scrollback(blockId, 40)
+    // Tabby's buffer can drop spaces between glyphs, so also check a
+    // whitespace-stripped copy for the text hint.
+    if (/[✻✽✶✳✢]/.test(tail) || /esctointerrupt/i.test(tail.replace(/\s+/g, ''))) return
+  }
+
+  consola.warn('Could not confirm the initial prompt was submitted — switch to the tab and press Enter to send it.')
 }
 
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
