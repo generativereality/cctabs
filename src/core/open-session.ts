@@ -37,6 +37,19 @@ function shellQuoteEnv(env: Record<string, string>): string {
   )
 }
 
+/**
+ * POSIX single-quote escape one argv token. The configured `claude.flags` are
+ * joined into a raw shell string and sent as terminal input, so any value with
+ * shell metacharacters must be quoted or the shell mangles it before `claude`
+ * sees it — e.g. a `--model opus[1m]` flag glob-expands under zsh ("no matches
+ * found: opus[1m]") and the launch silently falls back to the default model.
+ * Single quotes are inert in every POSIX shell; embedded single quotes are
+ * closed, escaped, and reopened ('\'').
+ */
+function shellQuoteArg(arg: string): string {
+  return `'${arg.replace(/'/g, "'\\''")}'`
+}
+
 /** Poll scrollback until a pattern is visible, then return. Rejects on timeout. */
 async function waitForScrollbackMatch(
   adapter: TerminalAdapter,
@@ -185,7 +198,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   // interactive Terminal/Tabby tab would see. Same logic applies to bash
   // (`-l -i -c` sources both ~/.profile and ~/.bashrc on Linux).
   if (adapter.openTabDirect) {
-    const extraFlags = config.claude.flags.join(' ')
+    const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
     const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
     const modelPart = modelOverride ? ` --model ${JSON.stringify(modelOverride)}` : ''
     const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
@@ -253,7 +266,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   }
   mark('shellPrompt')
 
-  const extraFlags = config.claude.flags.join(' ')
+  const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
   const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
   const modelPart = modelOverride ? ` --model ${JSON.stringify(modelOverride)}` : ''
   const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
