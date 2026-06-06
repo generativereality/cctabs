@@ -117,6 +117,34 @@ async function sendInitialPrompt(
     throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
   }
 
+  // Auto-confirm Claude's "Do you trust the files in this folder?" dialog when
+  // the session opens on it (a new/untrusted cwd, e.g. a freshly created repo).
+  // Its menu reuses the ❯ glyph, so the wait above matches the dialog rather
+  // than the chat input, and a paste here would be lost into the menu. Enter
+  // selects the default "Yes, I trust this folder". cctabs only ever launches
+  // Claude in a directory the caller explicitly named, so trusting it is the
+  // intended action.
+  //
+  // Retry, patiently: the dialog has its own not-ready window right as it
+  // renders (its input handler attaches a beat after the text paints), so an
+  // Enter sent the instant it appears is dropped. Once it *did* appear, keep
+  // pressing Enter until a FORWARD signal proves we're past it — the chat
+  // input's footer ("auto mode" / "for agents") or placeholder ("Try …"),
+  // none of which the dialog shows. (The output log is append-only, so we
+  // can't detect dismissal by the dialog text *disappearing* — only by new
+  // post-dialog content appearing.)
+  const sawTrust = /trustthisfolder|Yes,?Itrustthis|Isthisaproject/i.test(
+    adapter.scrollback(blockId, 40).replace(/\s+/g, ''),
+  )
+  if (sawTrust) {
+    for (let attempt = 0; attempt < 18; attempt++) {
+      const screen = adapter.scrollback(blockId, 14).replace(/\s+/g, '')
+      if (/automode|foragents|Try["'“]/i.test(screen)) break
+      await adapter.sendInput(blockId, '\r')
+      await sleep(800)
+    }
+  }
+
   const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
   // Distinctive chunk for the inline-echo case. Claude's output is append-only
   // so once this (or the paste chip) shows up it stays — fine within this one
