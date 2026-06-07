@@ -4,6 +4,7 @@ import { homedir } from 'os'
 import { consola } from 'consola'
 import { loadConfig } from './config.js'
 import { requireAdapter, type TerminalAdapter } from './adapter.js'
+import { shellQuoteArg } from './shell.js'
 
 interface OpenSessionOptions {
   tabName: string
@@ -35,19 +36,6 @@ function shellQuoteEnv(env: Record<string, string>): string {
       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
       .join(' ') + ' '
   )
-}
-
-/**
- * POSIX single-quote escape one argv token. The configured `claude.flags` are
- * joined into a raw shell string and sent as terminal input, so any value with
- * shell metacharacters must be quoted or the shell mangles it before `claude`
- * sees it — e.g. a `--model opus[1m]` flag glob-expands under zsh ("no matches
- * found: opus[1m]") and the launch silently falls back to the default model.
- * Single quotes are inert in every POSIX shell; embedded single quotes are
- * closed, escaped, and reopened ('\'').
- */
-function shellQuoteArg(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`
 }
 
 /** Poll scrollback until a pattern is visible, then return. Rejects on timeout. */
@@ -210,12 +198,16 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
 
   // Fast path: adapters that can launch a command in a fresh tab and return
   // its id directly (Tabby's plugin) skip the newTab → waitForNewBlock →
-  // rename → wait-for-shell-prompt dance entirely, and can be driven in
-  // parallel by the caller. We run claude *as the tab's process* via a login
+  // rename → wait-for-shell-prompt dance entirely. We run claude inside a login
   // *interactive* shell so the user's profile (PATH, nvm, pyenv, …) is sourced
-  // — claude and its npx-based MCP servers need it — and `exec` replaces the
-  // shell so the tab process *is* claude. (workspaceQuery is a Wave-only
-  // window concept and does not apply here.)
+  // — claude and its npx-based MCP servers need it. When claude exits we hand
+  // control to a fresh interactive login shell (`; exec $SHELL -l -i`) rather
+  // than `exec`-ing claude as the tab's pid: an exec'd claude leaves the tab
+  // dead at "[process completed]" — a hung tab with no prompt — the moment you
+  // quit claude or Ctrl-C out of it. `;` (not `&&`) so the shell appears even
+  // when claude exits non-zero or via signal, and the launch shell's own `-i`
+  // keeps it alive through the SIGINT that interrupts claude.
+  // (workspaceQuery is a Wave-only window concept and does not apply here.)
   //
   // Why both -l and -i: `-l -c` alone is a non-interactive login shell, which
   // sources `~/.zprofile` (path_helper → /opt/homebrew/bin etc.) but NOT
@@ -232,7 +224,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
     const claudeCore = `claude${extraFlags ? ' ' + extraFlags : ''} ${claudeCmd.replace(/^claude\s*/, '')}${namePart}${modelPart}`.replace(/\s+/g, ' ').trim()
     const shell = process.env.SHELL ?? '/bin/zsh'
-    const launch = `${envPrefix}exec ${claudeCore}`
+    const launch = `${envPrefix}${claudeCore}; exec ${shell} -l -i`
 
     const { blockId, tabId } = await adapter.openTabDirect({
       cwd: dir,

@@ -7,6 +7,7 @@ import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
 import { resolveBackend, listBackends } from '../core/backends.js'
+import { shellQuoteArg } from '../core/shell.js'
 
 function shellQuoteEnv(env: Record<string, string>): string {
   const entries = Object.entries(env)
@@ -151,7 +152,7 @@ export const resumeCommand = define({
       }
 
       const config = loadConfig()
-      const extraFlags = config.claude.flags.join(' ')
+      const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
       const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
       const modelPart = resolvedModel ? ` --model ${JSON.stringify(resolvedModel)}` : ''
       const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(name)}${modelPart}\r`

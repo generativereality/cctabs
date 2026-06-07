@@ -7,6 +7,17 @@ import { loadConfig } from '../core/config.js'
 import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, findSessionsByNameGlobally, expandSessionId } from '../core/session.js'
+import { shellQuoteArg } from '../core/shell.js'
+
+/**
+ * Settle after each direct-spawn (Tabby) recreate, before creating the next
+ * tab. A freshly created tab spawns its PTY only once it becomes the active
+ * tab, and each new tab steals activation from the previous one — so without
+ * this gap only the last-created tab actually launches Claude. One second is
+ * comfortably longer than a PTY fork + shell exec, while keeping a full restore
+ * snappy.
+ */
+const SPAWN_SETTLE_MS = 1000
 
 interface ManifestEntry {
   name: string
@@ -135,7 +146,7 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
   const results: Array<{ name: string; result: string }> = []
   const toSpawn: Array<ManifestEntry> = []
   const config = loadConfig()
-  const extraFlags = config.claude.flags.join(' ')
+  const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
 
   for (const entry of entries) {
     // Resolve session ID (expand prefix or validate). Falls back to the entry's value.
@@ -303,7 +314,7 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
   consola.info(`Found ${toResume.length} tab(s) to restore:`)
 
   const config = loadConfig()
-  const extraFlags = config.claude.flags.join(' ')
+  const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
   const results: Array<{ name: string; result: string }> = []
 
   const toRecreate: Array<{ name: string; sessionId: string; sessionDir: string; blockIds: string[]; tabId: string }> = []
@@ -432,14 +443,23 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
       }
     }
 
-    // Adapters that return the new tab id directly (openTabDirect, e.g. Tabby)
-    // have no block-diff to race, so recreate every tab at once. The osascript
-    // path (Wave) must stay serial — concurrent Cmd+T keystrokes would land in
-    // the wrong tab and waitForNewBlock could not disambiguate the new blocks.
-    if (typeof adapter.openTabDirect === 'function') {
-      await Promise.all(toRecreate.map(recreateOne))
-    } else {
-      for (const t of toRecreate) await recreateOne(t)
+    // Recreate serially. There's no block-diff to race on the openTabDirect
+    // (Tabby) path, but there IS a spawn-on-activation race: Tabby's plugin
+    // builds each tab via openNewTabRaw, which makes the new tab the *active*
+    // one, and a terminal tab spawns its PTY (our `exec claude`) only once it
+    // first becomes active. Firing recreates concurrently means every tab but
+    // the last loses activation before it spawns — only the final tab created
+    // ever starts Claude. Creating them one at a time, with a short settle so
+    // each tab stays active long enough to spawn before the next steals focus,
+    // is exactly what makes a single `cctabs resume` reliable. The Wave
+    // osascript path must stay serial too — concurrent Cmd+T keystrokes would
+    // land in the wrong tab and waitForNewBlock could not disambiguate the new
+    // blocks — and self-paces via its internal waitForNewBlock + shell-prompt
+    // wait, so it needs no extra settle.
+    const usesDirectSpawn = typeof adapter.openTabDirect === 'function'
+    for (const t of toRecreate) {
+      await recreateOne(t)
+      if (usesDirectSpawn) await new Promise((r) => setTimeout(r, SPAWN_SETTLE_MS))
     }
   } else {
     adapter.closeSocket()
