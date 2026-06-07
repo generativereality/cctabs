@@ -7,6 +7,7 @@ import { loadConfig } from '../core/config.js'
 import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, findSessionsByNameGlobally, expandSessionId } from '../core/session.js'
+import { shellQuoteArg } from '../core/shell.js'
 
 interface ManifestEntry {
   name: string
@@ -135,7 +136,7 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
   const results: Array<{ name: string; result: string }> = []
   const toSpawn: Array<ManifestEntry> = []
   const config = loadConfig()
-  const extraFlags = config.claude.flags.join(' ')
+  const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
 
   for (const entry of entries) {
     // Resolve session ID (expand prefix or validate). Falls back to the entry's value.
@@ -303,7 +304,7 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
   consola.info(`Found ${toResume.length} tab(s) to restore:`)
 
   const config = loadConfig()
-  const extraFlags = config.claude.flags.join(' ')
+  const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
   const results: Array<{ name: string; result: string }> = []
 
   const toRecreate: Array<{ name: string; sessionId: string; sessionDir: string; blockIds: string[]; tabId: string }> = []

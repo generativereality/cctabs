@@ -4,6 +4,7 @@ import { homedir } from 'os'
 import { consola } from 'consola'
 import { loadConfig } from './config.js'
 import { requireAdapter, type TerminalAdapter } from './adapter.js'
+import { shellQuoteArg } from './shell.js'
 
 interface OpenSessionOptions {
   tabName: string
@@ -35,19 +36,6 @@ function shellQuoteEnv(env: Record<string, string>): string {
       .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
       .join(' ') + ' '
   )
-}
-
-/**
- * POSIX single-quote escape one argv token. The configured `claude.flags` are
- * joined into a raw shell string and sent as terminal input, so any value with
- * shell metacharacters must be quoted or the shell mangles it before `claude`
- * sees it — e.g. a `--model opus[1m]` flag glob-expands under zsh ("no matches
- * found: opus[1m]") and the launch silently falls back to the default model.
- * Single quotes are inert in every POSIX shell; embedded single quotes are
- * closed, escaped, and reopened ('\'').
- */
-function shellQuoteArg(arg: string): string {
-  return `'${arg.replace(/'/g, "'\\''")}'`
 }
 
 /** Poll scrollback until a pattern is visible, then return. Rejects on timeout. */

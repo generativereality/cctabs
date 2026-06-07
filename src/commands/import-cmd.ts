@@ -7,6 +7,7 @@ import { execFileSync } from 'child_process'
 import { loadConfig } from '../core/config.js'
 import { openSession } from '../core/open-session.js'
 import { pathToProjectSlug } from '../core/session.js'
+import { shellQuoteArg } from '../core/shell.js'
 
 interface ExportedTab {
   name: string
@@ -141,7 +142,7 @@ export const importCommand = define({
 
       // Spawn the tab
       const config = loadConfig()
-      const extraFlags = config.claude.flags.length ? ' ' + config.claude.flags.join(' ') : ''
+      const extraFlags = config.claude.flags.length ? ' ' + config.claude.flags.map(shellQuoteArg).join(' ') : ''
       const claudeCmd = `claude${extraFlags} --resume ${entry.sessionId} --name ${JSON.stringify(entry.name)}`
       try {
         await openSession({ tabName: entry.name, dir: targetCwd, claudeCmd, workspaceQuery })
