@@ -281,6 +281,18 @@ cctabs restore ~/Dev/myapp        # restrict the search to one project dir
 
 If a session was started in a different `cwd` than the tab's current directory (common after `cd`-ing inside the tab), the global search still finds it via the recorded session metadata — no need to guess the right dir.
 
+### The "Resume from summary / full session" picker
+
+When `claude --resume` reattaches a large or old session, Claude first shows a blocking picker:
+
+```
+❯ 1. Resume from summary (recommended)
+  2. Resume full session as-is
+  3. Don't ask me again
+```
+
+**Always pick option 2, "Resume full session as-is."** The point of `restore` is to bring the conversation back intact — resuming from a summary discards the live context you're restoring for. `restore` auto-advances this picker for you (it moves down once to option 2 and confirms), so you normally never see it. If you ever do drive it manually (e.g. sending keys to a tab), send **↓ then Enter** — never the bare Enter that would accept the summary, and never option 3, which permanently silences the prompt in that session's config.
+
 ## Workflow: Moving sessions across machines
 
 Use `export` + `import` to migrate a tab (or a whole workspace) — and its underlying Claude conversation — from one machine to another, e.g. when switching laptops or sharing a debug session with a teammate.
