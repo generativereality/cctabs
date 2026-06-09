@@ -135,6 +135,13 @@ export class CctabsServer {
       return sendJson(res, 200, { uuid })
     }
 
+    if (method === 'POST' && path === '/api/tabs/reorder') {
+      const body = await readJsonBody(req)
+      const order: string[] = Array.isArray(body?.order) ? body.order.map(String) : []
+      this.reorderTabs(order)
+      return sendJson(res, 200, {})
+    }
+
     // /api/tabs/:uuid/...
     const match = /^\/api\/tabs\/([^/]+)(?:\/(.*))?$/.exec(path)
     if (match) {
@@ -273,15 +280,48 @@ export class CctabsServer {
       type: TerminalTabComponent,
       inputs: { profile },
     }
+    // Capture the active tab *before* opening — openNewTabRaw appends the new
+    // tab and makes it active, so we'd lose the reference otherwise.
+    const prevActive = this.app.activeTab
     const tab = this.app.openNewTabRaw(params)
     if (body?.title) {
       tab.customTitle = body.title
       tab.setTitle(body.title)
+    }
+    // `afterActive`: move the freshly-appended tab to sit right after the tab
+    // that was active when it was created (browser-style "open next to me"),
+    // instead of at the far end of the bar. Restore intentionally omits this
+    // and reorders the whole bar at the end via /api/tabs/reorder instead.
+    if (body?.afterActive && prevActive) {
+      const from = this.app.tabs.indexOf(tab)
+      const to = this.app.tabs.indexOf(prevActive) + 1
+      if (from >= 0 && to >= 0 && from !== to) {
+        this.app.tabs.splice(from, 1)
+        this.app.tabs.splice(from < to ? to - 1 : to, 0, tab)
+        this.app.emitTabsChanged()
+      }
     }
     // Force a tree walk so the new tab gets a UUID assigned.
     this.tabs.entries()
     const uuid = this.tabs.uuidOf(tab)
     if (!uuid) throw new Error('failed to register new tab')
     return uuid
+  }
+
+  /**
+   * Reorder app.tabs to match the given list of cctabs tab uuids. Tabs whose
+   * uuid isn't in `order` keep their relative order and sort after the listed
+   * ones (stable sort). Mirrors how Tabby's own moveSelectedTab* mutate
+   * app.tabs — splice/sort in place, then emitTabsChanged. Used by restore to
+   * rebuild the pre-reboot tab order after recreating dead tabs (which append).
+   */
+  private reorderTabs (order: string[]): void {
+    const rank = new Map(order.map((u, i) => [u, i] as const))
+    const rankOf = (t: BaseTabComponent): number => {
+      const u = this.tabs.uuidOf(t)
+      return u && rank.has(u) ? rank.get(u)! : Number.MAX_SAFE_INTEGER
+    }
+    this.app.tabs.sort((a, b) => rankOf(a) - rankOf(b))
+    this.app.emitTabsChanged()
   }
 }

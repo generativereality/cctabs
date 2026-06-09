@@ -59,6 +59,7 @@ export const forkCommand = define({
       tabName: newName,
       dir: openDir,
       claudeCmd: `claude --resume ${sessionId} --fork-session`,
+      afterActive: true,
     })
     consola.success(`Forked "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]`)
     consola.info(`session: ${sessionId}`)

@@ -18,6 +18,13 @@ interface OpenSessionOptions {
   /** If set, append `--model <name>` to the claude command */
   modelOverride?: string
   /**
+   * Insert the new tab right after the currently-active tab instead of at the
+   * end of the bar (Tabby openTabDirect path only). Used by single-tab opens
+   * (`new`/`fork`/`resume`) for browser-style "open next to me"; restore leaves
+   * it off and reorders the whole bar afterwards.
+   */
+  afterActive?: boolean
+  /**
    * Settle delay after the tab is created and the command sent, before
    * returning. Guards rapid back-to-back calls from racing on waitForNewBlock.
    * Defaults to 2000ms. Batch callers (e.g. restore) can lower this: by the
@@ -227,7 +234,7 @@ async function confirmResumePicker(adapter: TerminalAdapter, blockId: string): P
 }
 
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
-  const { tabName, claudeCmd, workspaceQuery, initialPromptFile, envVars, modelOverride } = opts
+  const { tabName, claudeCmd, workspaceQuery, initialPromptFile, envVars, modelOverride, afterActive } = opts
   const tailDelayMs = opts.tailDelayMs ?? 2000
   // Resuming an existing session can pop the "Resume from summary / full
   // session" picker, which blocks the tab until answered — auto-advance it.
@@ -288,6 +295,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
       title: tabName,
       command: shell,
       args: ['-l', '-i', '-c', launch],
+      afterActive,
     })
     mark('openTabDirect')
 
