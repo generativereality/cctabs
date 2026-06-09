@@ -5,6 +5,8 @@ page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
 ## 0.4.5 — 2026-06-09
 
+- **New tabs open right after the active tab (Tabby).** `new` / `fork` / `resume` previously dropped the new tab at the far end of the bar; it now lands immediately after the tab you created it from, browser-style. (Wave keeps append behaviour.)
+- **Restore rebuilds the pre-reboot tab order (Tabby).** Recreated dead tabs were appended, scrambling the original layout; restore now captures the pre-reboot order and reorders the bar to match once every tab is back. Both positioning changes need the rebuilt `tabby-cctabs` plugin to take effect — with an older plugin the CLI degrades gracefully (tabs append as before).
 - **Restore now auto-advances the "Resume from summary / full session" picker.** When `claude --resume` reattaches a large or old session it shows a blocking three-way picker; previously a `restore` left every such tab stuck on it (the auto-confirm logic only ran when seeding an initial prompt, which restore doesn't). `restore` now detects the picker and selects **option 2, "Resume full session as-is"** — the whole point of restore is to bring the conversation back intact, not a lossy summary. It moves the cursor down exactly once (never risking option 3, "Don't ask me again", which would permanently silence the prompt) and retries only the confirm.
 - **Restore no longer double-creates tabs that share a name.** After a reboot it's possible to have two dead tabs with the same name; restore was recreating each, spawning duplicate live tabs that both resumed the same (newest) session. Restore now keeps the first tab per name and closes the extras.
 
