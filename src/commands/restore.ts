@@ -379,8 +379,21 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
     )
 
     // Pass 3: queue recreates for confirmed-dead tabs; send to the rest.
+    // Dedup by tab name first: after a reboot it's possible to have two (or
+    // more) dead tabs with the same name — restoring each would spawn duplicate
+    // live tabs all resuming the *same* (newest) session. Keep the first one
+    // per name; close the extras so they don't linger or reappear next restore.
+    const claimedNames = new Set<string>()
     for (const r of resolved) {
       const { tab, sessionId, sessionDir } = r
+      if (claimedNames.has(tab.name)) {
+        const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
+        for (const bid of blockIds) adapter.deleteBlock(bid)
+        consola.log(`  ${tab.name} — duplicate dead tab, closing (already restoring one)`)
+        results.push({ name: tab.name, result: 'duplicate dead tab — closed' })
+        continue
+      }
+      claimedNames.add(tab.name)
       if (tab.status === 'unknown' && emptyById.get(tab.tabId)) {
         const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
         toRecreate.push({ name: tab.name, sessionId, sessionDir, blockIds, tabId: tab.tabId })

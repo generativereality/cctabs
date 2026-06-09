@@ -3,6 +3,11 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## 0.4.5 — 2026-06-09
+
+- **Restore now auto-advances the "Resume from summary / full session" picker.** When `claude --resume` reattaches a large or old session it shows a blocking three-way picker; previously a `restore` left every such tab stuck on it (the auto-confirm logic only ran when seeding an initial prompt, which restore doesn't). `restore` now detects the picker and selects **option 2, "Resume full session as-is"** — the whole point of restore is to bring the conversation back intact, not a lossy summary. It moves the cursor down exactly once (never risking option 3, "Don't ask me again", which would permanently silence the prompt) and retries only the confirm.
+- **Restore no longer double-creates tabs that share a name.** After a reboot it's possible to have two dead tabs with the same name; restore was recreating each, spawning duplicate live tabs that both resumed the same (newest) session. Restore now keeps the first tab per name and closes the extras.
+
 ## 0.4.0 — 2026-05-16
 
 - **`cctabs export` + `cctabs import` — move tabs and their Claude sessions between machines.** `cctabs export <tab>` (or `--all` for the whole workspace) bundles each tab's Claude conversation jsonl plus a small manifest into a `.tar.gz`. On the other machine, `cctabs import <archive>` extracts the jsonls into the local `~/.claude/projects/<target-slug>/` and opens a tab that `claude --resume`s each session. The target's Claude project slug is recomputed from the resolved target cwd, so cross-machine `$HOME` differences just work. Worktree-backed tabs (`cctabs new --worktree`) are handled correctly — export falls back to scanning `<cwd>/.claude/worktrees/*` when the direct slug lookup misses, and records the actual worktree path in the manifest so import recreates the right slug on the target.

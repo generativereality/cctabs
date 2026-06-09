@@ -172,9 +172,66 @@ async function sendInitialPrompt(
   consola.warn('Could not confirm the initial prompt was submitted — switch to the tab and press Enter to send it.')
 }
 
+/**
+ * Auto-advance Claude's "resume" picker that appears when `claude --resume <id>`
+ * reattaches a large/old session:
+ *
+ *   ❯ 1. Resume from summary (recommended)
+ *     2. Resume full session as-is
+ *     3. Don't ask me again
+ *
+ * It blocks the tab until you choose, which is why a plain `restore` leaves
+ * such tabs stuck. cctabs always wants the FULL session — the whole point of
+ * restore is to bring the conversation back intact, not a lossy summary — so we
+ * select option 2.
+ *
+ * Like the trust dialog, the picker has a brief not-ready window as it paints,
+ * so we poll for it to appear, settle, then navigate. The default highlight is
+ * option 1, so we move the cursor DOWN exactly once to reach option 2. We send
+ * ↓ only once on purpose: spamming it across retries could land on option 3
+ * ("Don't ask me again"), which permanently changes the user's config. The
+ * confirm is the part we retry — re-pressing Enter on the same row is safe, and
+ * if the single ↓ was ever dropped the worst case is a (still-usable) summary
+ * resume, never option 3.
+ */
+async function confirmResumePicker(adapter: TerminalAdapter, blockId: string): Promise<void> {
+  const stripped = (n: number) => adapter.scrollback(blockId, n).replace(/\s+/g, '')
+  const pickerVisible = (n: number) => {
+    const c = stripped(n)
+    return /Resumefromsummary/i.test(c) && /Resumefullsession/i.test(c)
+  }
+
+  // The picker renders before the session loads. Give it up to ~25s to appear;
+  // if it never does, the session was small enough to resume directly and there
+  // is nothing to confirm.
+  let appeared = false
+  for (let i = 0; i < 25; i++) {
+    if (pickerVisible(30)) { appeared = true; break }
+    await sleep(1000)
+  }
+  if (!appeared) return
+
+  // Let the picker's key handler attach before the one navigation press.
+  await sleep(1200)
+  await adapter.sendInput(blockId, '\x1b[B') // ↓ once → option 2 (full session)
+  await sleep(250)
+
+  // Confirm, retrying Enter only, until the picker scrolls out of the tail
+  // (the loaded session pushes new content past it).
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await adapter.sendInput(blockId, '\r')
+    await sleep(900)
+    if (!pickerVisible(8)) return
+  }
+  consola.warn('Could not confirm the resume picker was dismissed — switch to the tab and pick "Resume full session as-is".')
+}
+
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const { tabName, claudeCmd, workspaceQuery, initialPromptFile, envVars, modelOverride } = opts
   const tailDelayMs = opts.tailDelayMs ?? 2000
+  // Resuming an existing session can pop the "Resume from summary / full
+  // session" picker, which blocks the tab until answered — auto-advance it.
+  const isResume = /--resume\b/.test(claudeCmd)
   const dir = resolve(opts.dir.replace(/^~/, homedir()))
 
   if (!existsSync(dir)) {
@@ -234,6 +291,11 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     })
     mark('openTabDirect')
 
+    if (isResume) {
+      await confirmResumePicker(adapter, blockId)
+      mark('resumePicker')
+    }
+
     if (initialPromptFile) {
       await sendInitialPrompt(adapter, blockId, initialPromptFile)
     }
@@ -292,6 +354,11 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
   const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} ${claudeCmd.replace(/^claude\s*/, '')}${namePart}${modelPart}\r`
   await adapter.sendInput(blockId, cmd)
+
+  if (isResume) {
+    await confirmResumePicker(adapter, blockId)
+    mark('resumePicker')
+  }
 
   if (initialPromptFile) {
     await sendInitialPrompt(adapter, blockId, initialPromptFile)
