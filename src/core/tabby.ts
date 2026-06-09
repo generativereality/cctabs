@@ -259,6 +259,7 @@ export class TabbyAdapter implements TerminalAdapter {
     title: string
     command: string
     args: string[]
+    afterActive?: boolean
   }): Promise<{ blockId: string; tabId: string }> {
     this.ensureHealthy()
     const r = (await this.http('POST', '/api/tabs/new', {
@@ -266,10 +267,16 @@ export class TabbyAdapter implements TerminalAdapter {
       title: opts.title,
       command: opts.command,
       args: opts.args,
+      afterActive: opts.afterActive ?? false,
     })) as { uuid?: string } | null
     const uuid = r?.uuid
     if (!uuid) throw new Error('Tabby plugin did not return a tab uuid')
     return { blockId: uuid, tabId: uuid }
+  }
+
+  async reorderTabs(order: string[]): Promise<void> {
+    this.ensureHealthy()
+    await this.http('POST', '/api/tabs/reorder', { order })
   }
 
   async sendInput(blockId: string, text: string): Promise<unknown> {

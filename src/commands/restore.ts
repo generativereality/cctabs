@@ -287,8 +287,13 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
     status: string
   }> = []
 
+  // Full pre-reboot tab order (every tab, incl. the current one and live tabs),
+  // so we can rebuild it after recreating dead tabs — which append to the end.
+  const originalOrder: string[] = []
+
   for (const wsp of workspaces) {
     for (const tabId of wsp.workspacedata.tabids) {
+      originalOrder.push(tabId)
       if (tabId === currentTab) continue
       const blocks = (tabsById.get(tabId) ?? []).filter((b) => b.view === 'term')
       if (!blocks.length) continue
@@ -425,16 +430,22 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
 
     consola.info(`Recreating ${toRecreate.length} dead tab(s)…`)
 
+    // old (dead) tabId → new tabId, so we can rebuild the original tab order.
+    const recreatedIds = new Map<string, string>()
+
     const recreateOne = async (t: typeof toRecreate[number]) => {
       try {
         const newTabId = await openSession({
           tabName: t.name,
           dir: t.sessionDir,
           claudeCmd: `claude --resume ${t.sessionId} --name ${JSON.stringify(t.name)}`,
+          // Recreated tabs append; restore reorders the whole bar afterwards to
+          // restore the pre-reboot order, so don't insert after-active here.
           // waitForNewBlock already confirms each new block is visible before
           // returning, so the full 2s settle isn't needed between recreates.
           tailDelayMs: 500,
         })
+        recreatedIds.set(t.tabId, newTabId)
         const r = results.find((x) => x.name === t.name)!
         r.result = `✔ recreated [${newTabId.slice(0, 8)}]`
       } catch (err) {
@@ -460,6 +471,19 @@ async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promi
     for (const t of toRecreate) {
       await recreateOne(t)
       if (usesDirectSpawn) await new Promise((r) => setTimeout(r, SPAWN_SETTLE_MS))
+    }
+
+    // Recreated tabs were appended to the end of the bar; rebuild the pre-reboot
+    // order by mapping each original tabId to its replacement (live tabs and the
+    // current tab map to themselves). Best-effort — adapters without reorderTabs
+    // (Wave) just keep the append order.
+    if (recreatedIds.size && typeof adapter.reorderTabs === 'function') {
+      const desiredOrder = originalOrder.map((id) => recreatedIds.get(id) ?? id)
+      try {
+        await adapter.reorderTabs(desiredOrder)
+      } catch (err) {
+        consola.warn(`Could not restore tab order: ${(err as Error).message}`)
+      }
     }
   } else {
     adapter.closeSocket()

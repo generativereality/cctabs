@@ -41,16 +41,22 @@ export interface TerminalAdapter {
    * implement this; the rest leave it undefined and callers fall back to the
    * newTab()/waitForNewBlock() dance.
    *
-   * Because the id comes back deterministically (no block-diff to
-   * disambiguate), callers may invoke this concurrently to create many tabs in
-   * parallel.
+   * NOTE: do not invoke this concurrently to create many tabs at once. The
+   * backend makes each new tab the active one as it spawns, and a terminal tab
+   * only starts its command once it first becomes active — fire N in parallel
+   * and all but the last lose activation before they spawn. Create serially.
    */
   openTabDirect?(opts: {
     cwd: string
     title: string
     command: string
     args: string[]
+    /** Insert the new tab right after the currently-active tab, not at the end. */
+    afterActive?: boolean
   }): Promise<{ blockId: string; tabId: string }>
+
+  /** Reorder the tab bar to match `order` (tab ids); unlisted tabs keep order and sort after. */
+  reorderTabs?(order: string[]): Promise<void>
 
   // -- query helpers (pure data manipulation) --
   resolveTab(

@@ -145,6 +145,7 @@ export const resumeCommand = define({
             claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
             envVars,
             modelOverride: resolvedModel,
+            afterActive: true,
           })
           consola.success(`Tab "${name}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)`)
           return
@@ -185,6 +186,7 @@ export const resumeCommand = define({
         claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
         envVars,
         modelOverride: resolvedModel,
+        afterActive: true,
       })
       consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)`)
     } else {

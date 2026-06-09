@@ -94,6 +94,7 @@ export const newCommand = define({
       initialPromptFile,
       envVars,
       modelOverride: resolvedModel,
+      afterActive: true,
     })
     const wt = useWorktree ? ` (worktree: .claude/worktrees/${name})` : ''
     const be = backendName ? ` [backend: ${backendName}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''
