@@ -123,9 +123,18 @@ export const resumeCommand = define({
         process.exit(1)
       }
 
-      // Guard: don't send resume into a tab where Claude is already running
+      // The "is Claude running" guard exists to protect OTHER tabs — we don't
+      // want to spray `claude --resume…` into a tab where Claude is at its
+      // prompt. But for the current tab the guard misfires: the user is
+      // literally at a shell prompt (they just ran cctabs), and the detector
+      // is reading stale Claude UI out of scrollback. Skip the guard when
+      // we're invoked from a real shell in the target tab. Still honor it
+      // when cctabs is invoked from inside Claude itself (CLAUDECODE=1) —
+      // there sendInput would go to Claude's UI, not a shell.
+      const isCurrentTab = tabId === adapter.currentTabId()
+      const insideClaude = !!process.env.CLAUDECODE
       const status = adapter.detectSessionStatus(termBlock.blockid)
-      if (status === 'active' || status === 'idle') {
+      if ((status === 'active' || status === 'idle') && !(isCurrentTab && !insideClaude)) {
         adapter.closeSocket()
         consola.warn(`Claude is already running in tab "${name}" (${status}) — skipping resume`)
         process.exit(0)
@@ -158,6 +167,15 @@ export const resumeCommand = define({
       const modelPart = resolvedModel ? ` --model ${JSON.stringify(resolvedModel)}` : ''
       const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(name)}${modelPart}\r`
       await adapter.sendInput(termBlock.blockid, cmd)
+
+      // For the current tab the verification poll can't work: the resume
+      // command sits in the pty buffer until cctabs exits and the shell takes
+      // over, which happens *after* this function returns. Just queue it.
+      if (isCurrentTab) {
+        adapter.closeSocket()
+        consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (queued in this shell)`)
+        return
+      }
 
       // Verify Claude actually started (poll for up to 15s)
       let verified = false
