@@ -198,6 +198,52 @@ export function findSessionsByNameGlobally(name: string): Array<SessionMatch & {
 }
 
 /**
+ * Single-pass scan of every ~/.claude/projects/*\/*.jsonl: for each session,
+ * return its current customTitle (the LAST one in the file — sessions can be
+ * renamed) and its mtime. Used by `cctabs sort` to score tab activity.
+ *
+ * Returns Map<customTitle, latestMtimeMs>: when a title appears in multiple
+ * sessions (forks, restarts), we keep the most recent mtime.
+ */
+export function buildTitleActivityMap(): Map<string, number> {
+  const projectsRoot = join(homedir(), '.claude', 'projects')
+  const result = new Map<string, number>()
+  if (!existsSync(projectsRoot)) return result
+
+  for (const slug of readdirSync(projectsRoot)) {
+    const projectDir = join(projectsRoot, slug)
+    let isDir = false
+    try { isDir = statSync(projectDir).isDirectory() } catch { continue }
+    if (!isDir) continue
+
+    for (const f of readdirSync(projectDir)) {
+      if (extname(f) !== '.jsonl') continue
+      const fullPath = join(projectDir, f)
+      try {
+        const mtime = statSync(fullPath).mtimeMs
+        // Find the last customTitle by reading the file line-by-line.
+        // We can't shortcut by reading only the first line — sessions can be
+        // renamed mid-flight and the later entry wins.
+        const content = readFileSync(fullPath, 'utf-8')
+        let currentTitle = ''
+        for (const line of content.split('\n')) {
+          if (!line.trim()) continue
+          try {
+            const entry = JSON.parse(line)
+            if (entry.customTitle !== undefined) currentTitle = entry.customTitle
+          } catch { /* skip malformed lines */ }
+        }
+        if (!currentTitle) continue
+        const prev = result.get(currentTitle) ?? 0
+        if (mtime > prev) result.set(currentTitle, mtime)
+      } catch { /* skip unreadable files */ }
+    }
+  }
+
+  return result
+}
+
+/**
  * List all unique session names (customTitle) in a project directory.
  * Used to show available names when a resume lookup fails.
  */
