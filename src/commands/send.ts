@@ -18,7 +18,7 @@ export const sendCommand = define({
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     file: { type: 'string', short: 'f', description: 'Read text from file' },
     enter: { type: 'boolean', short: 'e', description: 'Append newline after text (default: true)' },
-    'wait-for-prompt': { type: 'boolean', short: 'w', description: 'Poll the buffer until a shell prompt ($, %, >, ❯) is visible before sending. Useful for freshly-spawned tabs.' },
+    'wait-for-prompt': { type: 'boolean', short: 'w', description: 'Poll the buffer until a ready prompt is visible before sending — a shell prompt ($, %, >) or a ready Claude TUI (❯ input line / "auto mode" footer). Useful for freshly-spawned tabs.' },
     'wait-timeout': { type: 'number', description: 'Timeout in seconds for --wait-for-prompt (default: 10)' },
   },
   async run(ctx) {
@@ -43,7 +43,11 @@ export const sendCommand = define({
       rawText = (await readStdin()).replace(/\n/g, '\r')
     }
 
-    if (appendEnter && !rawText.endsWith('\r')) rawText += '\r'
+    // The submit Enter is sent as its OWN event, separate from the body (see
+    // the send below). So strip any trailing CR off the body here and track
+    // whether to fire an Enter afterwards.
+    let sendEnter = appendEnter
+    if (rawText.endsWith('\r')) { rawText = rawText.replace(/\r+$/, ''); sendEnter = true }
 
     const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
@@ -77,24 +81,44 @@ export const sendCommand = define({
       const deadline = Date.now() + waitTimeoutSec * 1000
       let ready = false
       while (Date.now() < deadline) {
-        const tail = adapter.scrollback(blockId, 5)
+        const tail = adapter.scrollback(blockId, 8)
         const lastLine = tail.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
-        if (/[$%>❯]\s*$/.test(lastLine)) { ready = true; break }
+        const stripped = tail.replace(/\s+/g, '')
+        // Ready when we see EITHER a bare shell prompt at end-of-line ($ % >),
+        // OR Claude's TUI input line — which starts with ❯ but is usually
+        // followed by a "Try …" placeholder, so the glyph is NOT at end-of-line
+        // — OR Claude's input footer ("auto mode" / "for agents"). The old
+        // end-anchored `/[$%>❯]\s*$/` never matched a ready Claude TUI.
+        if (/[$%>]\s*$/.test(lastLine) || /^❯/.test(lastLine) || /automode|foragents/i.test(stripped)) {
+          ready = true; break
+        }
         await new Promise((r) => setTimeout(r, 250))
       }
       if (!ready) {
         adapter.closeSocket()
-        consola.error(`Timed out after ${waitTimeoutSec}s waiting for shell prompt in ${blockId.slice(0, 8)}`)
+        consola.error(`Timed out after ${waitTimeoutSec}s waiting for a ready prompt in ${blockId.slice(0, 8)}`)
         process.exit(1)
       }
     }
 
-    const resp = await adapter.sendInput(blockId, rawText)
+    // Send the body, then the submit Enter as a SEPARATE event. A Claude TUI
+    // treats a "text + \r" burst as one paste and absorbs the \r as a newline
+    // in the input box instead of submitting; a lone \r a beat later lands as a
+    // real Enter keypress. (Harmless for a plain shell — same as typing then
+    // pressing return.) Skip the body send when it's empty (a bare-Enter send).
+    let resp: unknown
+    if (rawText.length > 0) resp = await adapter.sendInput(blockId, rawText)
+    if (sendEnter) {
+      if (rawText.length > 0) await new Promise((r) => setTimeout(r, 200))
+      const enterResp = await adapter.sendInput(blockId, '\r')
+      resp ??= enterResp
+    }
     adapter.closeSocket()
     if (resp && (resp as Record<string, unknown>).error) {
       consola.error(String((resp as Record<string, unknown>).error)); process.exit(1)
     }
     const preview = rawText.slice(0, 80).replace(/\n/g, '↵').replace(/\t/g, '→')
-    consola.success(`Sent to ${blockId.slice(0, 8)}: ${JSON.stringify(preview)}${rawText.length > 80 ? '…' : ''}`)
+    const label = rawText.length > 0 ? `${JSON.stringify(preview)}${rawText.length > 80 ? '…' : ''}${sendEnter ? ' ⏎' : ''}` : '⏎'
+    consola.success(`Sent to ${blockId.slice(0, 8)}: ${label}`)
   },
 })

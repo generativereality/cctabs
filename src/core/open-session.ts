@@ -103,13 +103,23 @@ async function sendInitialPrompt(
   blockId: string,
   initialPromptFile: string,
 ): Promise<void> {
-  // The first `❯` only means the UI has rendered — treat it as a starting gun
-  // and verify the paste below rather than trusting the input is ready.
+  // The first ready signal only means the UI has rendered — treat it as a
+  // starting gun and verify the paste below rather than trusting the input is
+  // ready. Accept any of Claude's ready shapes: the prompt glyph, the welcome
+  // placeholder, or the input footer. Be patient: under heavy load (e.g. right
+  // after a large `restore`) Tabby's buffer-read for a brand-new tab can lag
+  // well past the old 30s window even though the tab is perfectly fine.
+  const readySignal = /❯|auto mode|for agents|Try ["'“]/
   try {
-    await waitForScrollbackMatch(adapter, blockId, '❯', 'Claude prompt', 30_000)
+    await waitForScrollbackMatch(adapter, blockId, readySignal, 'Claude prompt', 45_000)
   } catch {
-    adapter.closeSocket()
-    throw new Error('Claude prompt (❯) never appeared — not sending initial prompt. Check that claude started successfully.')
+    // Do NOT abort. The tab IS created and usable, and the readiness signal can
+    // simply be slow to surface rather than absent. Attempt the paste anyway —
+    // stage 1 below confirms the text actually landed (re-pasting if dropped)
+    // and degrades to a warning if it truly never does. Throwing here would
+    // fail the whole `cctabs new` (exit 1) and force the user to send the
+    // prompt by hand even though the session started fine.
+    consola.warn('Could not confirm Claude was ready within 45s — sending the prompt anyway (will verify it lands).')
   }
 
   // Auto-confirm Claude's "Do you trust the files in this folder?" dialog when
@@ -166,10 +176,14 @@ async function sendInitialPrompt(
     return
   }
 
-  // Stage 2: submit, confirm the turn started, re-send Enter if not.
-  for (let attempt = 0; attempt < 4; attempt++) {
+  // Stage 2: submit, confirm the turn started, re-send Enter if not. The input
+  // handler can still be settling right as the prompt lands, so the first
+  // Enter(s) get dropped — keep nudging for a few seconds. Re-pressing Enter is
+  // safe: once the turn starts we return immediately, and an extra Enter on an
+  // empty input box is a no-op in Claude.
+  for (let attempt = 0; attempt < 8; attempt++) {
     await adapter.sendInput(blockId, '\r')
-    await sleep(500)
+    await sleep(700)
     const tail = adapter.scrollback(blockId, 40)
     // Tabby's buffer can drop spaces between glyphs, so also check a
     // whitespace-stripped copy for the text hint.
