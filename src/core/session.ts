@@ -129,6 +129,109 @@ export function findSessionsByName(dir: string, name: string): SessionMatch[] {
   return matches.sort((a, b) => b.mtime - a.mtime)
 }
 
+interface TitleEntry { id: string; cwd: string; mtime: number }
+
+/**
+ * Per-project-dir cache of `customTitle → newest session`. Built once per
+ * project directory and reused, so callers that resolve many tabs (e.g.
+ * `cctabs sessions --json` over 40+ tabs sharing one repo's project dir)
+ * scan each directory a single time instead of once per tab.
+ *
+ * Cleared implicitly per process — cctabs commands are one-shot, so a stale
+ * cache is never a concern within a single invocation.
+ */
+const titleIndexCache = new Map<string, Map<string, TitleEntry>>()
+
+function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
+  const cached = titleIndexCache.get(projectDir)
+  if (cached) return cached
+
+  const index = new Map<string, TitleEntry>()
+  if (!existsSync(projectDir)) {
+    titleIndexCache.set(projectDir, index)
+    return index
+  }
+
+  for (const f of readdirSync(projectDir)) {
+    if (extname(f) !== '.jsonl') continue
+    const full = join(projectDir, f)
+    let title = ''
+    let cwd = ''
+    try {
+      const content = readFileSync(full, 'utf-8')
+      for (const line of content.split('\n')) {
+        // Cheap pre-filter: only the rare line carrying a customTitle / cwd is
+        // worth JSON.parse-ing. Most lines are message content — skipping them
+        // is what keeps a 40-tab `sessions --json` from taking minutes.
+        const hasTitle = line.includes('"customTitle"')
+        const hasCwd = !cwd && line.includes('"cwd"')
+        if (!hasTitle && !hasCwd) continue
+        try {
+          const e = JSON.parse(line)
+          if (e.customTitle !== undefined) title = e.customTitle // last wins (renames)
+          if (!cwd && typeof e.cwd === 'string') cwd = e.cwd // first wins
+        } catch { /* skip malformed line */ }
+      }
+    } catch { continue }
+
+    if (!title) continue
+    let mtime = 0
+    try { mtime = statSync(full).mtimeMs } catch { /* keep 0 */ }
+    const id = basename(f, '.jsonl')
+    const prev = index.get(title)
+    if (!prev || mtime > prev.mtime) index.set(title, { id, cwd, mtime })
+  }
+
+  titleIndexCache.set(projectDir, index)
+  return index
+}
+
+/**
+ * Resolve the Claude session a *tab* is running, given the tab's shell cwd and
+ * its name. Crucially worktree-aware: a tab opened with `--worktree <name>`
+ * keeps its shell cwd at the repo root, but Claude runs inside
+ * `<repo>/.claude/worktrees/<name>` — so its session lives under that
+ * worktree's project slug, NOT the repo-root slug. Resolving by the repo-root
+ * cwd alone (as a naive name lookup does) finds an older same-named session in
+ * the repo root, or nothing — the exact bug that made restore resume the wrong
+ * conversation for worktree tabs.
+ *
+ * Returns the matched session id AND the directory Claude must be launched from
+ * to resume it (the worktree path for worktree tabs), or null if none matches.
+ */
+export function resolveTabSession(
+  cwd: string,
+  name: string,
+  projectsRoot: string = join(homedir(), '.claude', 'projects'),
+): { id: string; dir: string } | null {
+  // 1. Strongest signal: a worktree named exactly after the tab. A
+  //    `--worktree <name>` launch lands at .claude/worktrees/<name>, so a
+  //    name-matched session there is definitively this tab's — prefer it even
+  //    if a stale repo-root session of the same name has a newer mtime.
+  const namedWtPath = join(cwd, '.claude', 'worktrees', name)
+  const namedHit = buildTitleIndex(join(projectsRoot, pathToProjectSlug(namedWtPath))).get(name)
+  if (namedHit) return { id: namedHit.id, dir: namedHit.cwd || namedWtPath }
+
+  // 2. Otherwise: newest name-match across the cwd's own project dir and any
+  //    other worktree project dirs under it.
+  const candidates = [join(projectsRoot, pathToProjectSlug(cwd))]
+  const worktreesDir = join(cwd, '.claude', 'worktrees')
+  if (existsSync(worktreesDir)) {
+    for (const entry of readdirSync(worktreesDir)) {
+      candidates.push(join(projectsRoot, pathToProjectSlug(join(worktreesDir, entry))))
+    }
+  }
+
+  let best: { id: string; dir: string; mtime: number } | null = null
+  for (const projectDir of candidates) {
+    const hit = buildTitleIndex(projectDir).get(name)
+    if (hit && (!best || hit.mtime > best.mtime)) {
+      best = { id: hit.id, dir: hit.cwd || cwd, mtime: hit.mtime }
+    }
+  }
+  return best ? { id: best.id, dir: best.dir } : null
+}
+
 /**
  * Like findSessionsByName, but searches every project directory under
  * ~/.claude/projects. Each match carries the cwd recorded in the session.
