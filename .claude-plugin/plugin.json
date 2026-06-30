@@ -1,7 +1,7 @@
 {
   "name": "cctabs",
   "description": "Claude Code tab manager. Terminal tabs as the UI, no tmux. Claude can orchestrate its own sibling sessions.",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "author": {
     "name": "generativereality",
     "url": "https://cctabs.com"
