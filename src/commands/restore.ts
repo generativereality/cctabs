@@ -6,7 +6,7 @@ import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByName, findSessionsByNameGlobally, expandSessionId } from '../core/session.js'
+import { findSessionsByName, findSessionsByNameGlobally, expandSessionId, resolveTabSession } from '../core/session.js'
 import { shellQuoteArg } from '../core/shell.js'
 
 /**
@@ -151,20 +151,34 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
   for (const entry of entries) {
     // Resolve session ID (expand prefix or validate). Falls back to the entry's value.
     let resolvedSessionId: string | undefined = entry.session_id
+    let resolvedDir = entry.dir
     if (entry.session_id) {
       const expanded = expandSessionId(entry.session_id, entry.dir) ?? expandSessionId(entry.session_id)
       if (expanded) resolvedSessionId = expanded
     } else {
-      // Try to infer from name+dir
-      const sessions = findSessionsByName(entry.dir, entry.name)
-      if (sessions.length === 1) {
-        resolvedSessionId = sessions[0].id
-      } else if (sessions.length > 1) {
-        resolvedSessionId = sessions[0].id // newest
+      // Infer from the name — worktree-aware, so a --worktree tab resolves to
+      // its worktree session (and the dir Claude must launch from), not an
+      // older same-named session sitting in the repo-root project dir.
+      const resolved = resolveTabSession(entry.dir, entry.name)
+      if (resolved) {
+        resolvedSessionId = resolved.id
+        resolvedDir = resolved.dir
       }
     }
 
-    const matchingTabs = adapter.resolveTab(entry.name, tabsById, tabNames).filter((tid) => wsTabIds.has(tid) && tid !== currentTab)
+    // The current tab can't be replaced (we're running inside it). Filtering it
+    // out below would make an entry that names the current tab look "missing",
+    // so --create-missing would spawn a DUPLICATE of it (the classic
+    // restore-the-coordination-tab-twice bug). Detect and skip: the current tab
+    // already satisfies this entry.
+    const allMatches = adapter.resolveTab(entry.name, tabsById, tabNames).filter((tid) => wsTabIds.has(tid))
+    if (allMatches.length === 1 && allMatches[0] === currentTab) {
+      consola.log(`  ${entry.name} — current tab, already present`)
+      results.push({ name: entry.name, result: 'current tab — already present' })
+      continue
+    }
+
+    const matchingTabs = allMatches.filter((tid) => tid !== currentTab)
 
     if (matchingTabs.length > 1) {
       consola.log(`  ${entry.name} — multiple matching tabs, skipping`)
@@ -197,7 +211,7 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
         continue
       }
       consola.log(`  ${entry.name} → resuming ${resolvedSessionId.slice(0, 8)}… in existing tab`)
-      const cmd = `cd ${JSON.stringify(entry.dir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${resolvedSessionId} --name ${JSON.stringify(entry.name)}\r`
+      const cmd = `cd ${JSON.stringify(resolvedDir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${resolvedSessionId} --name ${JSON.stringify(entry.name)}\r`
       await adapter.sendInput(termBlock.blockid, cmd)
       await new Promise((r) => setTimeout(r, 500))
       results.push({ name: entry.name, result: 'sent' })
@@ -212,11 +226,11 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
     }
     if (dryRun) {
       const sid = resolvedSessionId ? `${resolvedSessionId.slice(0, 8)}…` : 'fresh'
-      consola.log(`  ${entry.name} → would spawn new tab in ${entry.dir} (${sid})`)
+      consola.log(`  ${entry.name} → would spawn new tab in ${resolvedDir} (${sid})`)
       results.push({ name: entry.name, result: `dry run: spawn (${sid})` })
       continue
     }
-    toSpawn.push({ ...entry, session_id: resolvedSessionId })
+    toSpawn.push({ ...entry, dir: resolvedDir, session_id: resolvedSessionId })
   }
 
   // Verify any "sent" entries after a brief delay (matches existing restore UX)

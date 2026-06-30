@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { requireAdapter } from '../core/adapter.js'
-import { findSessionsByName } from '../core/session.js'
+import { resolveTabSession } from '../core/session.js'
 
 export const sessionsCommand = define({
   name: 'sessions',
@@ -57,11 +57,19 @@ export const sessionsCommand = define({
           const tail = adapter.scrollback(b.blockid, 5)
           const lastLine = tail.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
 
+          // Worktree-aware resolution: returns the session id AND the directory
+          // Claude must launch from to resume it. For a --worktree tab that dir
+          // is the worktree path (not the repo-root shell cwd), so the emitted
+          // manifest round-trips through `restore` and resumes the right session.
           let sessionId: string | null = null
+          let sessionDir = cwd
           if (cwd) {
             try {
-              const matches = findSessionsByName(cwd, tabName)
-              if (matches.length) sessionId = matches[0].id
+              const resolved = resolveTabSession(cwd, tabName)
+              if (resolved) {
+                sessionId = resolved.id
+                sessionDir = resolved.dir
+              }
             } catch {
               // ignore — best-effort lookup
             }
@@ -71,7 +79,7 @@ export const sessionsCommand = define({
             block_id: b.blockid,
             tab_id: tabId,
             name: tabName,
-            cwd,
+            cwd: sessionDir,
             current: tabId === currentTab,
             status,
             last_line: lastLine.slice(0, 200),
