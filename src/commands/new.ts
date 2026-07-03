@@ -4,6 +4,7 @@ import { writeFileSync, existsSync } from 'fs'
 import { tmpdir, homedir } from 'os'
 import { join, resolve } from 'path'
 import { openSession } from '../core/open-session.js'
+import { loadConfig, applyPrefix } from '../core/config.js'
 import { resolveBackend, listBackends } from '../core/backends.js'
 import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 import { setupWorktree } from '../core/worktree.js'
@@ -33,6 +34,10 @@ export const newCommand = define({
     const backendName = ctx.values.backend as string | undefined
     const modelOverride = ctx.values.model as string | undefined
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
+
+    // Prefix (if configured) rides on the tab title + `claude --name` only —
+    // the raw `name` still drives the worktree branch/dir so those stay clean.
+    const displayName = applyPrefix(name, loadConfig().defaults.prefix)
 
     if (resumeId && (promptText || promptFile)) {
       consola.error('--resume cannot be combined with --prompt or --file (you cannot send an initial prompt to a resumed session via this path).')
@@ -107,13 +112,13 @@ export const newCommand = define({
 
     let claudeCmd: string
     if (resolvedSessionId) {
-      claudeCmd = `claude --resume ${resolvedSessionId} --name ${JSON.stringify(name)}`
+      claudeCmd = `claude --resume ${resolvedSessionId} --name ${JSON.stringify(displayName)}`
     } else {
       claudeCmd = 'claude'
     }
 
     const tabId = await openSession({
-      tabName: name,
+      tabName: displayName,
       dir: sessionDir,
       claudeCmd,
       workspaceQuery: workspace,
@@ -125,6 +130,6 @@ export const newCommand = define({
     const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
     const be = backendName ? ` [backend: ${backendName}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''
     const rs = resolvedSessionId ? ` --resume ${resolvedSessionId.slice(0, 8)}…` : ''
-    consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude${rs} at ${dir}${wt}${be}`)
+    consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude${rs} at ${dir}${wt}${be}`)
   },
 })

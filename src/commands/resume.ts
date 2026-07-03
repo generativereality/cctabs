@@ -2,7 +2,7 @@ import { resolve } from 'path'
 import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { loadConfig } from '../core/config.js'
+import { loadConfig, applyPrefix } from '../core/config.js'
 import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
@@ -44,6 +44,12 @@ export const resumeCommand = define({
     const dir = resolve((ctx.positionals[2] ?? process.cwd()).replace(/^~/, homedir()))
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
 
+    // On a prefixed install everything this machine minted is "<prefix><name>",
+    // so resume resolves the tab, looks up the session, and re-launches
+    // `--name` all in prefixed-name space. Empty prefix → displayName === name,
+    // i.e. unchanged behaviour.
+    const displayName = applyPrefix(name, loadConfig().defaults.prefix)
+
     const explicitSession = ctx.values.session as string | undefined
     const backendName = ctx.values.backend as string | undefined
     const modelOverride = ctx.values.model as string | undefined
@@ -71,9 +77,9 @@ export const resumeCommand = define({
       }
       sessionId = expanded
     } else {
-      const sessions = findSessionsByName(dir, name)
+      const sessions = findSessionsByName(dir, displayName)
       if (sessions.length === 0) {
-        consola.error(`No session named "${name}" in ${dir}`)
+        consola.error(`No session named "${displayName}" in ${dir}`)
         const available = listSessionNames(dir)
         if (available.length) {
           consola.info('Available session names:')
@@ -87,7 +93,7 @@ export const resumeCommand = define({
       } else if (sessions.length === 1) {
         sessionId = sessions[0].id
       } else {
-        consola.error(`Multiple "${name}" sessions found. Use --session <id> to pick one:\n`)
+        consola.error(`Multiple "${displayName}" sessions found. Use --session <id> to pick one:\n`)
         for (const s of sessions) {
           consola.log(`  ${s.id}  ${formatAge(s.mtime)}  ${formatSize(s.size)}`)
           if (s.firstPrompt) consola.log(`    start: "${s.firstPrompt}"`)
@@ -99,10 +105,10 @@ export const resumeCommand = define({
 
     const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
-    const matchingTabs = adapter.resolveTab(name, tabsById, tabNames)
+    const matchingTabs = adapter.resolveTab(displayName, tabsById, tabNames)
 
     if (matchingTabs.length > 1) {
-      consola.error(`Multiple tabs match '${name}':`)
+      consola.error(`Multiple tabs match '${displayName}':`)
       for (const tid of matchingTabs) {
         consola.error(`  "${tabNames.get(tid)}"  [${tid.slice(0, 8)}]`)
       }
@@ -112,14 +118,14 @@ export const resumeCommand = define({
     if (matchingTabs.length === 1) {
       // Reuse existing tab
       if (!sessionId) {
-        consola.error(`Tab "${name}" exists but no Claude session found to resume in ${dir}`)
+        consola.error(`Tab "${displayName}" exists but no Claude session found to resume in ${dir}`)
         process.exit(1)
       }
       const tabId = matchingTabs[0]
       const blocks = tabsById.get(tabId) ?? []
       const termBlock = blocks.find((b) => b.view === 'term')
       if (!termBlock) {
-        consola.error(`No terminal block found in tab '${name}'`)
+        consola.error(`No terminal block found in tab '${displayName}'`)
         process.exit(1)
       }
 
@@ -136,7 +142,7 @@ export const resumeCommand = define({
       const status = adapter.detectSessionStatus(termBlock.blockid)
       if ((status === 'active' || status === 'idle') && !(isCurrentTab && !insideClaude)) {
         adapter.closeSocket()
-        consola.warn(`Claude is already running in tab "${name}" (${status}) — skipping resume`)
+        consola.warn(`Claude is already running in tab "${displayName}" (${status}) — skipping resume`)
         process.exit(0)
       }
 
@@ -145,18 +151,18 @@ export const resumeCommand = define({
       if (status === 'unknown') {
         const stillEmpty = await adapter.confirmScrollbackEmpty(termBlock.blockid)
         if (stillEmpty) {
-          consola.info(`Tab "${name}" has no live shell (empty scrollback) — recreating`)
+          consola.info(`Tab "${displayName}" has no live shell (empty scrollback) — recreating`)
           for (const b of blocks) adapter.deleteBlock(b.blockid)
           adapter.closeSocket()
           const newTabId = await openSession({
-            tabName: name,
+            tabName: displayName,
             dir,
-            claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
+            claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(displayName)}`,
             envVars,
             modelOverride: resolvedModel,
             afterActive: true,
           })
-          consola.success(`Tab "${name}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)`)
+          consola.success(`Tab "${displayName}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)`)
           return
         }
       }
@@ -165,7 +171,7 @@ export const resumeCommand = define({
       const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
       const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
       const modelPart = resolvedModel ? ` --model ${JSON.stringify(resolvedModel)}` : ''
-      const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(name)}${modelPart}\r`
+      const cmd = `cd ${JSON.stringify(dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(displayName)}${modelPart}\r`
       await adapter.sendInput(termBlock.blockid, cmd)
 
       // For the current tab the verification poll can't work: the resume
@@ -173,7 +179,7 @@ export const resumeCommand = define({
       // over, which happens *after* this function returns. Just queue it.
       if (isCurrentTab) {
         adapter.closeSocket()
-        consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (queued in this shell)`)
+        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (queued in this shell)`)
         return
       }
 
@@ -191,33 +197,33 @@ export const resumeCommand = define({
 
       adapter.closeSocket()
       if (verified) {
-        consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir}`)
+        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir}`)
       } else {
-        consola.warn(`Tab "${name}" [${tabId.slice(0, 8)}] — command sent but Claude may not have started (scrollback check inconclusive)`)
+        consola.warn(`Tab "${displayName}" [${tabId.slice(0, 8)}] — command sent but Claude may not have started (scrollback check inconclusive)`)
       }
     } else if (sessionId) {
       // No existing tab but session found — create a new tab and resume
       adapter.closeSocket()
       const tabId = await openSession({
-        tabName: name,
+        tabName: displayName,
         dir,
-        claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(name)}`,
+        claudeCmd: `claude --resume ${sessionId} --name ${JSON.stringify(displayName)}`,
         envVars,
         modelOverride: resolvedModel,
         afterActive: true,
       })
-      consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)`)
+      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)`)
     } else {
       // No existing tab and no session — create a new tab with a fresh claude session
       adapter.closeSocket()
       const tabId = await openSession({
-        tabName: name,
+        tabName: displayName,
         dir,
         claudeCmd: 'claude',
         envVars,
         modelOverride: resolvedModel,
       })
-      consola.success(`Tab "${name}" [${tabId.slice(0, 8)}] → claude at ${dir} (new tab, no prior session found)`)
+      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude at ${dir} (new tab, no prior session found)`)
     }
   },
 })

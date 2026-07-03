@@ -7,7 +7,7 @@ export const CONFIG_PATH = join(homedir(), '.config', 'cctabs', 'config.toml')
 
 const DEFAULT_CONFIG: Config = {
   claude: { flags: ['--allow-dangerously-skip-permissions'] },
-  defaults: { workspace: '' },
+  defaults: { workspace: '', prefix: '' },
 }
 
 const DEFAULT_CONFIG_FILE = `# cctabs configuration
@@ -20,6 +20,12 @@ flags = ["--allow-dangerously-skip-permissions"]
 [defaults]
 # Default Wave workspace to open new sessions in.
 # workspace = ""
+
+# Prefix prepended to every new tab title AND \`claude --name\` (the claude.ai
+# remote-control session name) minted by \`new\`/\`resume\`/\`fork\`. Use it to
+# disambiguate this machine's sessions when several machines share one
+# remote-control list, e.g. "mbp18-". Empty (no prefix) by default.
+# prefix = ""
 `
 
 function parseToml(text: string): Partial<Record<string, Record<string, unknown>>> {
@@ -72,6 +78,18 @@ export function loadConfig(): Config {
   }
 
   return config
+}
+
+/**
+ * Prepend the configured `prefix` to a freshly-minted tab/session name so the
+ * Tabby title and the `claude --name` (→ claude.ai remote-control name) both
+ * carry it. Idempotent: an empty prefix or a name that already starts with the
+ * prefix is returned unchanged, so callers never double-prefix (and an
+ * explicitly-typed full name like "mbp18-auth" stays as-is).
+ */
+export function applyPrefix(name: string, prefix: string): string {
+  if (!prefix || name.startsWith(prefix)) return name
+  return `${prefix}${name}`
 }
 
 export function ensureConfigExists(): string {

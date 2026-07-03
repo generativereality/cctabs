@@ -22,6 +22,11 @@ export interface Config {
   }
   defaults: {
     workspace: string
+    /**
+     * Prepended to every freshly-minted tab title AND `claude --name` (the
+     * claude.ai remote-control session name). Per-install, empty by default.
+     */
+    prefix: string
   }
 }
 
