@@ -4,6 +4,7 @@ import { join } from 'path'
 import { requireAdapter } from '../core/adapter.js'
 import { findLatestSessionId, pathToProjectSlug } from '../core/session.js'
 import { openSession } from '../core/open-session.js'
+import { loadConfig, applyPrefix } from '../core/config.js'
 
 /** If dir is inside .claude/worktrees/<name>, return the repo root instead */
 function resolveSessionDir(dir: string): { sessionLookupDir: string; openDir: string } {
@@ -41,7 +42,10 @@ export const forkCommand = define({
 
     const tabId = matches[0]
     const tabName = tabNames.get(tabId) ?? tabId.slice(0, 8)
-    const newName = customName ?? `${tabName}-fork`
+    // Prefix the freshly-minted fork name so its tab title + `claude --name`
+    // (RC name) match this machine's convention. Idempotent, so a default of
+    // `<already-prefixed-source>-fork` isn't prefixed twice.
+    const newName = applyPrefix(customName ?? `${tabName}-fork`, loadConfig().defaults.prefix)
     const termBlocks = (tabsById.get(tabId) ?? []).filter((b) => b.view === 'term')
     if (!termBlocks.length) { consola.error(`Tab "${tabName}" has no terminal block`); process.exit(1) }
 
@@ -58,7 +62,10 @@ export const forkCommand = define({
     const newTabId = await openSession({
       tabName: newName,
       dir: openDir,
-      claudeCmd: `claude --resume ${sessionId} --fork-session`,
+      // `--name` names the forked RC session to match the new tab (previously a
+      // fork left the session unnamed) so it's distinguishable — and prefixed —
+      // on claude.ai.
+      claudeCmd: `claude --resume ${sessionId} --fork-session --name ${JSON.stringify(newName)}`,
       afterActive: true,
     })
     consola.success(`Forked "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]`)

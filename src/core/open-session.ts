@@ -297,6 +297,11 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   // (`-l -i -c` sources both ~/.profile and ~/.bashrc on Linux).
   if (adapter.openTabDirect) {
     const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
+    // `tabName` is used verbatim for both the tab title and `--name`. Any
+    // configured `defaults.prefix` is already baked in by the minting command
+    // (`new`/`resume`/`fork`); `restore`/`import` pass the session's existing
+    // recorded name and must NOT be re-prefixed, so the prefix lives there, not
+    // here.
     const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
     const modelPart = modelOverride ? ` --model ${JSON.stringify(modelOverride)}` : ''
     const envPrefix = envVars ? shellQuoteEnv(envVars) : ''

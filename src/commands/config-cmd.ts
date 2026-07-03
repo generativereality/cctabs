@@ -12,7 +12,8 @@ export const configCommand = define({
 
     consola.info(`Config: ${CONFIG_PATH}`)
     console.log()
-    console.log(`claude.flags    = ${config.claude.flags.length ? JSON.stringify(config.claude.flags) : '(none)'}`)
+    console.log(`claude.flags       = ${config.claude.flags.length ? JSON.stringify(config.claude.flags) : '(none)'}`)
     console.log(`defaults.workspace = ${config.defaults.workspace || '(none)'}`)
+    console.log(`defaults.prefix    = ${config.defaults.prefix || '(none)'}`)
   },
 })
