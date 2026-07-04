@@ -3,7 +3,12 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.4.7 — 2026-07-04
+
+- **Drive a remote Tabby over SSH.** cctabs can now open / list / close / send tabs on **another machine's** Tabby over SSH. Over SSH the parent terminal never exports `TERM_PROGRAM`, so cctabs previously refused with "unrecognised terminal" even though the target host's cctabs plugin was running and reachable on `127.0.0.1:3300`. It now (a) auto-falls back to probing that plugin when environment detection comes up empty — so a bare `ssh host 'cctabs new foo "~"'` just works when the remote plugin is up — and (b) honours an explicit `CCTABS_TERMINAL=tabby` (alias `CCTABS_BACKEND`) override to force the backend regardless of `TERM_PROGRAM`. `cctabs doctor` reports the resolved backend and how it got there (override vs plugin probe). The probe only runs when detection is otherwise unknown, so a recognised local terminal never pays the network round-trip.
+- **Per-install name prefix for new sessions.** A new `defaults.prefix` config setting (empty by default) is prepended to **both** the Tabby/Wave tab title **and** the `claude --name` for every name minted by `new`, `resume`, and `fork`. Set it to disambiguate a machine when several share one claude.ai remote-control session list, where unprefixed names otherwise collide.
+
+## 0.4.6 — 2026-06-30
 
 - **Fix: `cctabs new --worktree` no longer spawns at the wrong commit.** Previously cctabs delegated worktree creation to `claude --worktree <name>`, which can branch from the upstream tracking ref (or another unexpected commit) when local commits aren't pushed — silently producing a worktree at a stale base. Now cctabs runs `git worktree add` itself, explicitly anchored to the target dir's current HEAD, then launches plain `claude` inside the worktree. The success line prints the base SHA so you can verify it's what you expect. If a branch named `worktree-<name>` already exists, cctabs checks it out at its existing tip and warns when that differs from HEAD.
 
