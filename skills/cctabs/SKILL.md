@@ -494,7 +494,7 @@ cctabs close e5f6a7b8                  # close by block ID prefix
 Every session actually carries **two independent names**, and it's easy to change one while assuming you changed both:
 
 1. **Tabby/Wave tab title** — the text on the terminal tab. Set by `cctabs new`/`resume`/`fork`, and changeable with `cctabs rename`.
-2. **The claude session name** — the **remote-control (RC) session name shown on claude.ai** when you control the session from the web/mobile app. Its source, in priority order, is: the **launch `--name`** (what cctabs passes), then a live `/rename`, then the last message, then an auto-generated `host-word-word`.
+2. **The claude session name** — the **remote-control (RC) session name shown on claude.ai** when you control the session from the web/mobile app. It mirrors the session's **current local name**, which is *initialized* from the launch `--name` (what cctabs passes) and thereafter changed by `/rename`.
 
 `cctabs rename <tab> <newName>` changes **only the tab title**. It does **not** touch the running claude session, so the claude.ai RC name is unchanged. To rename the **live** claude session (and therefore its RC name), send Claude Code's `/rename` slash command into the tab:
 
@@ -505,7 +505,7 @@ cctabs send mytab "/rename new-title"          # live claude session + RC name (
 
 Use both together when you want the tab title and the RC name to stay in sync on an already-running session.
 
-> **`/rename` is a patch, not a durable fix for the RC name.** It updates the RC title live, but the name is anchored to the **launch `--name`**: if the remote-control bridge disconnects and re-registers (it gets a new `bridgeSessionId`), it re-derives the name from the launch `--name` and **reverts**, discarding the `/rename`. The durable fix is to have the desired name in the launch `--name` — i.e. set the `prefix` config (below) so *new* sessions launch prefixed, and **restart/resume** an existing session (`cctabs resume <prefixed-name>`, whose tab title is already prefixed) to bake the prefix into its launch name. A session that keeps reverting in the RC list has never been relaunched with the prefixed name.
+> **How the RC name behaves (validated by controlled test).** The RC name tracks the session's **current local name** — *not* the launch `--name`. Launch `--name` only sets the *initial* name; a `/rename` changes it, and the change **persists across reconnects** — both a manual `/remote-control` toggle and an automatic (network-drop) reconnect re-register under the *current local name*, so **reconnect does NOT revert to the launch name**. The one catch: `/rename` only reaches the RC list **while the session is connected**. If you `/rename` a session whose remote-control bridge is **disconnected**, the local name changes but the RC list keeps showing the last-registered name until the session **reconnects**, at which point it syncs. So a session showing a stale name in the RC list is almost always one that was renamed **while disconnected** (or never renamed) — reconnect it, or `/rename` it once it's connected (`cctabs sessions` shows which are live). The zero-fuss option is to launch prefixed in the first place via the `prefix` config below, so the name is right from the first registration and there's nothing to re-apply.
 
 ### The `prefix` config setting
 
@@ -539,7 +539,11 @@ cctabs send   auth "/rename mbp18-auth"        # 2. live claude session + RC nam
 
 Order that's safe: **`send` the `/rename` first (matches the current title), then `cctabs rename` the tab title.** Claude acknowledges each `/rename` with "Session renamed to: …". After this one-time sweep, set `prefix` in config so all *future* tabs carry it automatically.
 
-**Caveat (see the note above):** the `/rename` half only *patches* the RC name — a bridge reconnect reverts it to the unprefixed launch name. To make a session's prefix survive reconnects, `cctabs resume <prefixed-name>` it once (idle sessions only — this relaunches claude with the prefixed `--name`). New sessions started after `prefix` is set are durable from birth and need none of this.
+**The `/rename` only reaches the RC list for sessions that are currently connected** (see the note above — RC tracks the current local name, and `/rename` pushes it only over a live bridge). So:
+- **Connected sessions:** `/rename` updates RC and the change survives reconnects. Done.
+- **Disconnected sessions** (`cctabs sessions` shows them as `terminal`/not live): `/rename` changes the local name but RC won't reflect it until the session reconnects. Either reconnect it (it then registers under the now-prefixed local name) or `cctabs resume mbp18-<name>` it to relaunch with the prefixed `--name`.
+
+New sessions started after `prefix` is set are correct from their first RC registration and need none of this.
 
 ## Tab Naming Conventions
 
