@@ -10,7 +10,7 @@ import {
   removeOrphanTabIds,
   type OrphanReport,
 } from '../core/wave-db.js'
-import { detectTerminal, type KnownTerminal } from '../core/terminal.js'
+import { detectTerminal, resolveTerminal, type KnownTerminal } from '../core/terminal.js'
 
 type CheckStatus = 'ok' | 'warn' | 'fail' | 'skip'
 
@@ -39,15 +39,16 @@ function printResult (r: CheckResult): void {
 // Individual checks
 // ---------------------------------------------------------------------------
 
-function checkTerminal (terminal: KnownTerminal): CheckResult {
+function checkTerminal (terminal: KnownTerminal, note?: string): CheckResult {
   if (terminal === 'wave' || terminal === 'tabby') {
-    return { name: 'Terminal', status: 'ok', detail: terminal }
+    return { name: 'Terminal', status: 'ok', detail: note ? `${terminal} (${note})` : terminal }
   }
   return {
     name: 'Terminal',
     status: 'fail',
     detail: terminal === 'unknown' ? 'unrecognised' : terminal,
-    hint: 'cctabs supports Wave Terminal and Tabby. Switch to one of those.',
+    hint: 'cctabs supports Wave Terminal and Tabby. Switch to one of those, or ' +
+      'set CCTABS_TERMINAL=tabby (e.g. over SSH) if the Tabby plugin is running on this host.',
   }
 }
 
@@ -271,7 +272,18 @@ export const doctorCommand = define({
     const yes = Boolean(ctx.values.yes)
     const fix = Boolean(ctx.values.fix) || yes
 
-    const terminal = detectTerminal()
+    // detectTerminal() is env-only; resolveTerminal() adds the plugin-probe
+    // fallback so an SSH session (empty TERM_PROGRAM) whose Tabby plugin is
+    // reachable reports as usable Tabby rather than a hard ✘.
+    const detected = detectTerminal()
+    const terminal = resolveTerminal()
+    const overrideSet = Boolean(process.env.CCTABS_TERMINAL || process.env.CCTABS_BACKEND)
+    const terminalNote =
+      overrideSet && (terminal === 'wave' || terminal === 'tabby')
+        ? 'via CCTABS_TERMINAL override'
+        : detected === 'unknown' && terminal !== 'unknown'
+          ? 'via plugin probe — TERM_PROGRAM unset (SSH?)'
+          : undefined
 
     console.log('cctabs doctor — environment checks')
     console.log('─'.repeat(40))
@@ -279,7 +291,7 @@ export const doctorCommand = define({
     const results: CheckResult[] = []
     let waveDb: WaveDbCheck | null = null
 
-    results.push(checkTerminal(terminal))
+    results.push(checkTerminal(terminal, terminalNote))
 
     // Useful regardless of terminal: every cctabs-spawned tab needs `node` on
     // PATH for the CLI itself and for plugin MCPs that invoke `npx`.

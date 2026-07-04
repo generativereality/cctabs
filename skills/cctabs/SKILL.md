@@ -110,6 +110,35 @@ If the user prefers, point them at Tabby → **Settings → Plugins**, search "c
 
 Do not assume "no Wave detected → cctabs unusable" — Tabby is fully supported.
 
+### Driving a remote Tabby over SSH
+
+cctabs can open/list/close/send tabs on **another machine's** Tabby over SSH,
+as long as that machine's cctabs plugin is running. The plugin listens on
+`127.0.0.1:3300`, and an SSH session on the same host reaches it fine.
+
+The only wrinkle: over SSH the parent terminal never exports `TERM_PROGRAM`,
+so cctabs can't sniff the terminal from the environment. Two ways it copes:
+
+- **Auto-fallback (usually nothing to do):** when env detection comes up
+  `unknown`, cctabs probes the Tabby plugin on `127.0.0.1:3300` and, if it
+  answers, treats the session as Tabby. So a bare
+  `ssh host 'cctabs new foo "~"'` just works when the remote plugin is up.
+- **Explicit override:** set `CCTABS_TERMINAL=tabby` (alias `CCTABS_BACKEND`)
+  to force the Tabby backend regardless of `TERM_PROGRAM` — belt-and-braces
+  when you don't want to rely on the probe, or to force a specific backend.
+
+```bash
+# Open a tab on the other Mac's Tabby, from here:
+ssh motin@motin-mbp21.local 'cctabs new mbp21-task "~/Dev/proj"'
+# Force the backend explicitly if you prefer:
+ssh motin@motin-mbp21.local 'CCTABS_TERMINAL=tabby cctabs new mbp21-task "~/Dev/proj"'
+```
+
+Tabs are still **per-machine** — each host has its own Tabby + plugin, so a tab
+opened via SSH lives on the remote machine. Verify a remote host is ready with
+`ssh host 'cctabs doctor'`: it reports `Terminal — tabby (via plugin probe …)`
+when the fallback is in play.
+
 ---
 
 Each Claude Code session runs in its own **terminal tab**. `cctabs` lets you — and other Claude Code sessions — introspect and orchestrate the full session fleet.

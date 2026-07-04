@@ -1,5 +1,7 @@
 // Terminal detection and unsupported-terminal messaging
 
+import { spawnSync } from 'child_process'
+
 export type KnownTerminal =
   | 'wave'
   | 'tabby'
@@ -14,6 +16,16 @@ export type KnownTerminal =
   | 'unknown'
 
 export function detectTerminal(): KnownTerminal {
+  // Explicit override wins over env sniffing. Essential over SSH, where the
+  // parent terminal never exported TERM_PROGRAM into our session even though a
+  // real, reachable terminal (e.g. Tabby with the cctabs plugin) is running on
+  // this host. CCTABS_TERMINAL is the documented name; CCTABS_BACKEND is
+  // accepted as an alias for people who think in "backend" terms.
+  const override = (process.env.CCTABS_TERMINAL ?? process.env.CCTABS_BACKEND ?? '')
+    .trim()
+    .toLowerCase()
+  if (override && isKnownTerminal(override)) return override
+
   const prog = process.env.TERM_PROGRAM ?? ''
   const term = process.env.TERM ?? ''
 
@@ -35,6 +47,59 @@ export function detectTerminal(): KnownTerminal {
   if (term === 'alacritty') return 'alacritty'
 
   return 'unknown'
+}
+
+const ALL_TERMINALS: readonly KnownTerminal[] = [
+  'wave',
+  'tabby',
+  'iterm2',
+  'ghostty',
+  'warp',
+  'kitty',
+  'vscode',
+  'hyper',
+  'alacritty',
+  'apple-terminal',
+  'unknown',
+]
+
+function isKnownTerminal(v: string): v is KnownTerminal {
+  return (ALL_TERMINALS as readonly string[]).includes(v)
+}
+
+/**
+ * Like {@link detectTerminal} but, when env sniffing yields 'unknown', probes
+ * the Tabby cctabs plugin on this host and resolves to 'tabby' if it answers.
+ *
+ * The probe only fires in the unknown case — a session with a recognised
+ * TERM_PROGRAM (or an explicit CCTABS_TERMINAL override) never pays for the
+ * network round-trip. This is the path that lets `ssh host 'cctabs …'` drive a
+ * running Tabby: over SSH TERM_PROGRAM is empty, but the plugin is still
+ * listening on 127.0.0.1:3300. Synchronous (a short curl) so it can slot into
+ * the existing sync adapter/doctor code without rippling async through every
+ * caller; keep it out of hot loops.
+ */
+export function resolveTerminal(): KnownTerminal {
+  const t = detectTerminal()
+  if (t !== 'unknown') return t
+  return tabbyPluginResponds() ? 'tabby' : 'unknown'
+}
+
+/** True if the Tabby cctabs plugin answers /api/health with {ok:true}. */
+export function tabbyPluginResponds(): boolean {
+  const host = process.env.CCTABS_TABBY_HOST ?? '127.0.0.1'
+  const port = Number(process.env.CCTABS_TABBY_PORT ?? '3300')
+  const r = spawnSync(
+    'curl',
+    ['-fsS', '--max-time', '2', `http://${host}:${port}/api/health`],
+    { encoding: 'utf-8' },
+  )
+  if (r.status !== 0 || !r.stdout) return false
+  try {
+    return Boolean((JSON.parse(r.stdout) as { ok?: boolean }).ok)
+  } catch {
+    return false
+  }
 }
 
 const TERMINAL_NAMES: Record<KnownTerminal, string> = {

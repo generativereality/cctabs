@@ -1,5 +1,5 @@
 import type { AllData, Block, SessionStatus, Workspace } from '../types/index.js'
-import { detectTerminal, printUnsupportedTerminalError } from './terminal.js'
+import { resolveTerminal, printUnsupportedTerminalError } from './terminal.js'
 import { WaveAdapter } from './wave.js'
 import { TabbyAdapter } from './tabby.js'
 
@@ -83,7 +83,10 @@ export interface TerminalAdapter {
 /** Returns the adapter that matches the running terminal. Exits with a clear
  * error message if none is supported. */
 export function requireAdapter(): TerminalAdapter {
-  const terminal = detectTerminal()
+  // resolveTerminal() (not detectTerminal()) so an SSH session whose
+  // TERM_PROGRAM is empty still resolves to Tabby when the plugin answers on
+  // this host — the probe only runs in the otherwise-unknown case.
+  const terminal = resolveTerminal()
   if (terminal === 'wave') {
     return new WaveAdapter()
   }
