@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { pathToProjectSlug, resolveTabSession } from './session.js'
+import { pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally } from './session.js'
 
 /**
  * Write a fake Claude session .jsonl under the project slug for `dirForSlug`,
@@ -20,6 +20,30 @@ function writeSession(
     [
       JSON.stringify({ type: 'summary', customTitle: opts.title }),
       JSON.stringify({ type: 'user', cwd: opts.cwd, message: { role: 'user', content: 'hello' } }),
+    ].join('\n') + '\n'
+  writeFileSync(file, content)
+  utimesSync(file, opts.mtimeSec, opts.mtimeSec)
+}
+
+/**
+ * Like writeSession, but the recorded cwd changes partway through — simulating
+ * a session that started in one directory (e.g. a worktree) and was later
+ * resumed from another (e.g. the repo root, after the worktree was deleted).
+ */
+function writeSessionWithCwdChange(
+  projectsRoot: string,
+  dirForSlug: string,
+  opts: { id: string; title: string; firstCwd: string; laterCwd: string; mtimeSec: number },
+): void {
+  const projectDir = join(projectsRoot, pathToProjectSlug(dirForSlug))
+  mkdirSync(projectDir, { recursive: true })
+  const file = join(projectDir, `${opts.id}.jsonl`)
+  const content =
+    [
+      JSON.stringify({ type: 'summary', customTitle: opts.title }),
+      JSON.stringify({ type: 'user', cwd: opts.firstCwd, message: { role: 'user', content: 'hello' } }),
+      JSON.stringify({ type: 'assistant', cwd: opts.firstCwd, message: { role: 'assistant', content: 'hi' } }),
+      JSON.stringify({ type: 'user', cwd: opts.laterCwd, message: { role: 'user', content: 'still here' } }),
     ].join('\n') + '\n'
   writeFileSync(file, content)
   utimesSync(file, opts.mtimeSec, opts.mtimeSec)
@@ -107,5 +131,53 @@ describe('resolveTabSession', () => {
       mtimeSec: 1000,
     })
     expect(resolveTabSession(repo, 'nonexistent', projectsRoot)).toBeNull()
+  })
+
+  it('resolves to the LAST recorded cwd, not the first, when a session moved directories mid-life', () => {
+    // Session started in a worktree that has since been deleted, then was
+    // manually resumed from the repo root — the exact scenario that made
+    // restore try to relaunch into a directory that no longer exists.
+    const wtPath = join(repo, '.claude', 'worktrees', 'synced-docs')
+    writeSessionWithCwdChange(projectsRoot, repo, {
+      id: '33333333-3333-3333-3333-333333333333',
+      title: 'synced-docs',
+      firstCwd: wtPath,
+      laterCwd: repo,
+      mtimeSec: 1000,
+    })
+
+    const r = resolveTabSession(repo, 'synced-docs', projectsRoot)
+    expect(r?.id).toBe('33333333-3333-3333-3333-333333333333')
+    expect(r?.dir).toBe(repo)
+  })
+})
+
+describe('findSessionsByNameGlobally', () => {
+  let projectsRoot: string
+  let repo: string
+
+  beforeEach(() => {
+    projectsRoot = mkdtempSync(join(tmpdir(), 'cctabs-projects-'))
+    repo = mkdtempSync(join(tmpdir(), 'cctabs-repo-'))
+  })
+
+  afterEach(() => {
+    rmSync(projectsRoot, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('resolves to the LAST recorded cwd, not the first, when a session moved directories mid-life', () => {
+    const wtPath = join(repo, '.claude', 'worktrees', 'synced-docs')
+    writeSessionWithCwdChange(projectsRoot, repo, {
+      id: '44444444-4444-4444-4444-444444444444',
+      title: 'synced-docs',
+      firstCwd: wtPath,
+      laterCwd: repo,
+      mtimeSec: 1000,
+    })
+
+    const matches = findSessionsByNameGlobally('synced-docs', projectsRoot)
+    expect(matches).toHaveLength(1)
+    expect(matches[0].dir).toBe(repo)
   })
 })

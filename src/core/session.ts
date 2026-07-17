@@ -159,18 +159,32 @@ function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
     let cwd = ''
     try {
       const content = readFileSync(full, 'utf-8')
-      for (const line of content.split('\n')) {
-        // Cheap pre-filter: only the rare line carrying a customTitle / cwd is
-        // worth JSON.parse-ing. Most lines are message content — skipping them
-        // is what keeps a 40-tab `sessions --json` from taking minutes.
-        const hasTitle = line.includes('"customTitle"')
-        const hasCwd = !cwd && line.includes('"cwd"')
-        if (!hasTitle && !hasCwd) continue
+      const lines = content.split('\n')
+
+      // Cheap pre-filter: only the rare line carrying a customTitle is worth
+      // JSON.parse-ing here. Most lines are message content — skipping them
+      // is what keeps a 40-tab `sessions --json` from taking minutes.
+      for (const line of lines) {
+        if (!line.includes('"customTitle"')) continue
         try {
           const e = JSON.parse(line)
           if (e.customTitle !== undefined) title = e.customTitle // last wins (renames)
-          if (!cwd && typeof e.cwd === 'string') cwd = e.cwd // first wins
         } catch { /* skip malformed line */ }
+      }
+
+      // cwd can change mid-session — e.g. a worktree gets deleted and the
+      // session is later resumed from the repo root instead — so the most
+      // recent cwd is where it must be relaunched from, not wherever it
+      // happened to start. cwd appears on nearly every line (unlike
+      // customTitle), so scan from the end and stop at the first hit: that
+      // finds the LAST occurrence while still parsing only one line.
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const line = lines[i]
+        if (!line || !line.includes('"cwd"')) continue
+        try {
+          const e = JSON.parse(line)
+          if (typeof e.cwd === 'string') { cwd = e.cwd; break }
+        } catch { /* try an earlier line */ }
       }
     } catch { continue }
 
@@ -237,8 +251,10 @@ export function resolveTabSession(
  * ~/.claude/projects. Each match carries the cwd recorded in the session.
  * Used by `cctabs restore` so callers don't have to guess the right dir.
  */
-export function findSessionsByNameGlobally(name: string): Array<SessionMatch & { dir: string }> {
-  const projectsRoot = join(homedir(), '.claude', 'projects')
+export function findSessionsByNameGlobally(
+  name: string,
+  projectsRoot: string = join(homedir(), '.claude', 'projects'),
+): Array<SessionMatch & { dir: string }> {
   if (!existsSync(projectsRoot)) return []
 
   const matches: Array<SessionMatch & { dir: string }> = []
@@ -266,7 +282,11 @@ export function findSessionsByNameGlobally(name: string): Array<SessionMatch & {
           try {
             const entry = JSON.parse(line)
             if (entry.customTitle !== undefined) currentTitle = entry.customTitle
-            if (!cwd && typeof entry.cwd === 'string') cwd = entry.cwd
+            // Last wins, not first: a session's cwd can change mid-life (e.g.
+            // a worktree gets deleted and the session is later resumed from
+            // the repo root instead) — the most recent cwd is where it must
+            // be relaunched from, not wherever it happened to start.
+            if (typeof entry.cwd === 'string') cwd = entry.cwd
             if (!firstPrompt && entry.type === 'user' && entry.message?.content) {
               const text = typeof entry.message.content === 'string'
                 ? entry.message.content
