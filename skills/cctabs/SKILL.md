@@ -173,8 +173,9 @@ cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
 cctabs new <name> [dir] -b <preset>      # new tab on a non-Anthropic backend (Ollama)
-cctabs resume <name> [dir]               # resume last session (reuses tab or creates one)
-cctabs restore [dir] [--dry]             # resume every dead tab (e.g. after a reboot)
+cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one)
+cctabs restore [dir] [--dry]             # resume every dead tab by name search (e.g. after a reboot)
+cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id} list — accepts `cctabs sessions --json` directly
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the TAB TITLE only (not the live claude/RC name — see "Two names")
@@ -310,6 +311,34 @@ cctabs restore ~/Dev/myapp        # restrict the search to one project dir
 
 If a session was started in a different `cwd` than the tab's current directory (common after `cd`-ing inside the tab), the global search still finds it via the recorded session metadata — no need to guess the right dir.
 
+### Manifest-driven restore (precise, scriptable bulk resume)
+
+When you already know exactly which sessions to bring back — e.g. you deliberately closed a batch of tabs, or you're recreating a fleet from a snapshot — skip the by-name search and drive `restore` from an explicit manifest instead:
+
+```bash
+cctabs sessions --json > snapshot.json          # capture {name, cwd, session_id} for every live tab
+cctabs restore --manifest snapshot.json --dry   # preview first
+cctabs restore --manifest snapshot.json --create-missing   # spawn tabs for entries with none
+```
+
+`--manifest -` reads from stdin, so `cctabs sessions --json | cctabs restore --manifest - --create-missing` works as a one-liner. Entries for tabs that are already running are reported as "already running, skipping" — safe to re-run.
+
+**Dedupe by `session_id` before restoring.** A manifest can contain two entries with the same name pointing at the *same* `session_id` — this happens when a crash or an earlier restart leaves a stale duplicate tab behind. `restore` does not dedupe: it will happily spawn two separate tabs racing to be the active worker for one conversation, which shows up as Remote Control "this connection is no longer the active worker for the session (code 4090)" errors. Filter the manifest to one entry per `session_id` first.
+
+**Bulk-restore reliability limit (hard-won).** Spawning ~35+ tabs in a single `restore --manifest --create-missing` call overwhelmed Tabby's tab-creation automation in practice: only 1-2 tabs actually got their `claude --resume …` command launched, while the rest registered in Tabby (visible in `cctabs list`) but sat as empty shells indefinitely — `cctabs sessions` showed them stuck at `? unknown` status with no `cwd`. Don't trust "✔ spawned" in the restore summary as proof the process is actually running. Verify with:
+
+```bash
+ps aux | grep "claude --allow" | grep -c -- "--resume"   # should match your tab count
+```
+
+If it's low, fall back to resuming the stragglers **one at a time** — this is slow (each call can take 10-20s right after a mass-spawn while Tabby is still catching up) but reliable:
+
+```bash
+cctabs resume <name> "<dir>" -s <session_id>   # repeat per straggler; run sequentially, not concurrently
+```
+
+`cctabs resume` detects an empty/dead tab itself ("has no live shell (empty scrollback) — recreating") and relaunches into it, so this is safe to run against tabs `restore` already registered.
+
 ### The "Resume from summary / full session" picker
 
 When `claude --resume` reattaches a large or old session, Claude first shows a blocking picker:
@@ -418,6 +447,33 @@ cctabs send auth --file ~/prompts/task.txt   # send a full prompt from file
 echo "do the thing" | cctabs send auth       # pipe via stdin
 ```
 
+## Workflow: Remote Control status across the fleet
+
+Claude Code's Remote Control (`/rc`, controls a session from claude.ai/code or the mobile app) is a per-process feature — cctabs doesn't manage it directly, but since it manages the tabs *running* those processes, it's the fastest way to audit or repair RC across many sessions at once.
+
+**Check status via scrollback**, not `cctabs sessions` (which only reports terminal/claude liveness, not RC):
+
+```bash
+cctabs scrollback auth --lines 8 | grep -iE "rc active|reconnect|disconnect|jwt|401|oauth"
+```
+
+Footer/output signatures to look for:
+- `/rc active` — connected, healthy.
+- `/rc reconnecting` — transient, usually self-heals within seconds.
+- `Remote Control disconnected · JWT refresh failed after 401`, `OAuth token refresh failed — re-authenticate`, `Transport closed: auth token expired (code 401)` — the shared Claude Code login credential (one Keychain entry, machine-wide) has expired. This affects **every** session at once, not just the one you're looking at. Fix once with `/login` in any single session — the rest reconnect automatically once the credential refreshes, no per-tab action needed.
+- `Transport closed: this connection is no longer the active worker for the session (code 4090)` — two processes are both claiming the same underlying session (see the duplicate-`session_id` gotcha under manifest restore, above). Close one of the duplicates.
+
+**Enable RC automatically for every future session** (skips the manual `/remote-control` toggle per tab): set `"remoteControlAtStartup": true` in `~/.claude/settings.json` (or scope it to a project's `.claude/settings.json`). Re-running `/remote-control` inside a session that's *already* connected is non-destructive in the CLI — it opens a status panel, it does not disconnect (that toggle-to-disconnect behavior is VS-Code-specific).
+
+**Sweep the whole fleet in one loop:**
+
+```bash
+for t in $(cctabs sessions --json | python3 -c "import json,sys; [print(s['name']) for w in json.load(sys.stdin)['workspaces'] for s in w['sessions'] if s.get('session_id')]"); do
+  err=$(cctabs scrollback "$t" --lines 6 | grep -iE "reconnect|disconnect|jwt refresh|401|oauth token")
+  [ -n "$err" ] && echo "ISSUE: $t -> $err"
+done
+```
+
 ## Workflow: Worktrees
 
 **Always point tabs at the repo root — never at a manually-created worktree directory.** Claude Code manages worktrees itself via `claude --worktree <name>`, which creates `.claude/worktrees/<name>/` inside the repo and handles branch creation and cleanup automatically.
@@ -454,6 +510,24 @@ cctabs new feature ~/Dev/myapp --worktree
 **Why:** Manually created worktree dirs placed outside the repo confuse Claude Code's session tracking, project memory lookup (`.claude/` is in the main repo), and CLAUDE.md resolution. Claude Code's built-in worktree support keeps everything co-located under `.claude/worktrees/` and handles cleanup on session exit.
 
 **Worktree base commit:** cctabs anchors the new worktree at the target dir's current HEAD (it runs `git worktree add` explicitly rather than delegating to `claude --worktree`), so un-pushed local commits *are* visible to the child session. The success line prints the base SHA — confirm it matches what you expect, especially if you reuse a worktree name and see a "branch already existed" warning.
+
+### Recovering a session after its worktree directory is gone
+
+Claude Code keys each session transcript to the exact `cwd` it was started in — `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` — not to the repo. If a worktree directory is deleted (branch merged and cleaned up, disk cleanup, `git worktree remove`) but you still want that conversation, `cctabs resume <name> <repo-root> -s <session-id>` fails with `No conversation found with session ID: …` even though the transcript still exists — it's just filed under the now-gone worktree path, not the repo root.
+
+Fix: copy the transcript (and its `subagents/` sidecar dir, if present) into the repo root's project folder before resuming:
+
+```bash
+SRC=~/.claude/projects/-Users-you-Dev-myapp--claude-worktrees-feature-name   # old worktree-cwd slug
+DST=~/.claude/projects/-Users-you-Dev-myapp                                   # repo-root slug
+SID=<session-id>
+cp -n "$SRC/$SID.jsonl" "$DST/$SID.jsonl"
+cp -Rn "$SRC/$SID/subagents" "$DST/$SID/" 2>/dev/null
+
+cctabs resume feature-name ~/Dev/myapp -s "$SID"   # now resolves with full history intact
+```
+
+Both slugs are just the absolute path with `/` → `-`; list `~/.claude/projects/` to find the exact old one if unsure.
 
 ## Handling `cctabs new` Timeout Errors
 
