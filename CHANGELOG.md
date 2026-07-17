@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **Fix: `restore` could try to relaunch a session into a directory that no longer exists.** Session cwd was resolved from the *first* recorded location in a session's transcript, not the most recent one. That's wrong once a session's working directory has changed mid-life — most commonly: a `--worktree` tab's worktree gets deleted, and the session is later manually resumed from the repo root instead. A subsequent `cctabs restore` (plain or `--manifest`) would then try to `cd` back into the deleted worktree path, ignoring the relocation. Both `resolveTabSession` and `findSessionsByNameGlobally` now track the *last* recorded cwd, matching the existing last-wins handling for renamed sessions (`customTitle`).
+
 ## 0.4.7 — 2026-07-04
 
 - **Drive a remote Tabby over SSH.** cctabs can now open / list / close / send tabs on **another machine's** Tabby over SSH. Over SSH the parent terminal never exports `TERM_PROGRAM`, so cctabs previously refused with "unrecognised terminal" even though the target host's cctabs plugin was running and reachable on `127.0.0.1:3300`. It now (a) auto-falls back to probing that plugin when environment detection comes up empty — so a bare `ssh host 'cctabs new foo "~"'` just works when the remote plugin is up — and (b) honours an explicit `CCTABS_TERMINAL=tabby` (alias `CCTABS_BACKEND`) override to force the backend regardless of `TERM_PROGRAM`. `cctabs doctor` reports the resolved backend and how it got there (override vs plugin probe). The probe only runs when detection is otherwise unknown, so a recognised local terminal never pays the network round-trip.

@@ -529,6 +529,8 @@ cctabs resume feature-name ~/Dev/myapp -s "$SID"   # now resolves with full hist
 
 Both slugs are just the absolute path with `/` → `-`; list `~/.claude/projects/` to find the exact old one if unsure.
 
+**This manual copy is still needed as the one-time first recovery** — before it, the session has no cwd data pointing anywhere but the dead worktree path, so nothing can infer the right target. But it only needs doing once: `restore`'s cwd resolution now tracks the *last* recorded location in a session's transcript (fixed upstream — see CHANGELOG), not the first, so once you've manually relocated a session by resuming it from the repo root, subsequent `cctabs restore` runs correctly keep resuming it there instead of regressing back to the deleted worktree path. Do NOT leave a stale worktree-slug project directory lying around after this fix — `resolveTabSession` treats *any* worktree-named project directory under `~/.claude/projects/` as a strong signal that the real worktree still exists, so a leftover stale one will shadow the correctly-relocated session again. Archive it outside `~/.claude/projects/` (e.g. `~/.claude/projects-archive/`) once you've copied what you need, not merely rename it in place — a rename that still contains the session's `customTitle` inside the file is found regardless of the directory's name.
+
 ## Handling `cctabs new` Timeout Errors
 
 `cctabs new` may occasionally fail with "Timed out waiting for new terminal block" (or, on Tabby, "Shell prompt never appeared in new tab"). This does **NOT** mean you have too many tabs or that the terminal has hit a limit.
