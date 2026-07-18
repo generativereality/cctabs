@@ -100,7 +100,7 @@ export const restoreCommand = define({
       consola.warn('--create-missing has no effect without --manifest; ignoring.')
     }
 
-    await runLegacyMode(ctx.positionals[1], !!dryRun)
+    await runNameScanMode(ctx.positionals[1], !!dryRun)
   },
 })
 
@@ -145,6 +145,12 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
 
   const results: Array<{ name: string; result: string }> = []
   const toSpawn: Array<ManifestEntry> = []
+  // entry → its final tab id (an existing matched tab, the current tab, or a
+  // freshly spawned one). Used to rebuild the tab bar in manifest order once all
+  // spawns are done — the manifest carries the pre-restore order (e.g. straight
+  // from `cctabs sessions --json`), but without this the recreated tabs just
+  // append and the bar comes back scrambled.
+  const orderedTabId = new Map<ManifestEntry, string>()
   const config = loadConfig()
   const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
 
@@ -175,6 +181,7 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
     if (allMatches.length === 1 && allMatches[0] === currentTab) {
       consola.log(`  ${entry.name} — current tab, already present`)
       results.push({ name: entry.name, result: 'current tab — already present' })
+      orderedTabId.set(entry, currentTab)
       continue
     }
 
@@ -189,6 +196,9 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
     if (matchingTabs.length === 1) {
       // Existing tab — attach (use existing dead-tab logic)
       const tabId = matchingTabs[0]
+      // Record its position regardless of outcome (running / sent / attached):
+      // an existing tab keeps its manifest slot in the rebuilt order.
+      orderedTabId.set(entry, tabId)
       const termBlock = (tabsById.get(tabId) ?? []).find((b) => b.view === 'term')
       if (!termBlock) {
         results.push({ name: entry.name, result: 'no terminal block in tab' })
@@ -268,6 +278,7 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
         claudeCmd,
         tailDelayMs: 500,
       })
+      orderedTabId.set(entry, newTabId)
       const sid = entry.session_id ? entry.session_id.slice(0, 8) + '…' : 'fresh'
       results.push({ name: entry.name, result: `✔ spawned [${newTabId.slice(0, 8)}] (${sid})` })
     } catch (err) {
@@ -281,13 +292,37 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
     for (const entry of toSpawn) await spawnOne(entry)
   }
 
+  // Rebuild the tab bar in manifest order. Kept as a separate final step (rather
+  // than spawning serially in order) so the fast parallel spawn above is
+  // untouched — reordering by id afterwards is independent of the order the tabs
+  // were created in. Best-effort: adapters without reorderTabs (Wave) keep the
+  // append order, and reorderTabs leaves any tab not named in the manifest in
+  // its existing relative slot (sorted after the listed ones).
+  if (!dryRun && typeof adapter.reorderTabs === 'function') {
+    const desiredOrder = entries.map((e) => orderedTabId.get(e)).filter((id): id is string => !!id)
+    if (desiredOrder.length) {
+      try {
+        await adapter.reorderTabs(desiredOrder)
+      } catch (err) {
+        consola.warn(`Could not restore tab order: ${(err as Error).message}`)
+      }
+    }
+  }
+
   console.log('\nRestore summary:')
   for (const r of results) {
     console.log(`  ${r.name}: ${r.result}`)
   }
 }
 
-async function runLegacyMode(rawDir: string | undefined, dryRun: boolean): Promise<void> {
+/**
+ * No-manifest restore: scan the current window's tabs, find each dead tab's
+ * session by name, and resume it in place (recreating truly-dead tabs). This is
+ * the default `cctabs restore [dir]` path — not deprecated, and until manifest
+ * mode gained its own reorder step it was the only path that rebuilt the
+ * pre-reboot tab order.
+ */
+async function runNameScanMode(rawDir: string | undefined, dryRun: boolean): Promise<void> {
   const scopedDir = rawDir ? resolve(rawDir.replace(/^~/, homedir())) : null
 
   const adapter = requireAdapter()
