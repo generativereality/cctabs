@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally } from './session.js'
+import { pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally, findSessionFileById, persistSessionTitle } from './session.js'
+import { readFileSync } from 'fs'
 
 /**
  * Write a fake Claude session .jsonl under the project slug for `dirForSlug`,
@@ -179,5 +180,79 @@ describe('findSessionsByNameGlobally', () => {
     const matches = findSessionsByNameGlobally('synced-docs', projectsRoot)
     expect(matches).toHaveLength(1)
     expect(matches[0].dir).toBe(repo)
+  })
+})
+
+describe('rename persistence (findSessionFileById + persistSessionTitle)', () => {
+  let projectsRoot: string
+  let repo: string
+
+  beforeEach(() => {
+    projectsRoot = mkdtempSync(join(tmpdir(), 'cctabs-projects-'))
+    repo = mkdtempSync(join(tmpdir(), 'cctabs-repo-'))
+  })
+
+  afterEach(() => {
+    rmSync(projectsRoot, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('locates a session file in the cwd project dir', () => {
+    writeSession(projectsRoot, repo, {
+      id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      title: 'old-name',
+      cwd: repo,
+      mtimeSec: 1000,
+    })
+    const file = findSessionFileById('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', [repo], projectsRoot)
+    expect(file).toBe(
+      join(projectsRoot, pathToProjectSlug(repo), 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl'),
+    )
+  })
+
+  it('locates a worktree session by its launch dir even if the physical worktree is gone', () => {
+    // The worktree dir under `repo` is intentionally never created — only its
+    // project slug dir exists, mirroring a deleted worktree whose session
+    // remains resumable. Deriving the slug from the dir must still find it.
+    const wtPath = join(repo, '.claude', 'worktrees', 'feature-x')
+    writeSession(projectsRoot, wtPath, {
+      id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      title: 'feature-x',
+      cwd: wtPath,
+      mtimeSec: 1000,
+    })
+    // First candidate (repo) has no such file; second (the worktree launch dir) does.
+    const file = findSessionFileById('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', [repo, wtPath], projectsRoot)
+    expect(file).toBe(
+      join(projectsRoot, pathToProjectSlug(wtPath), 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl'),
+    )
+  })
+
+  it('returns null when no file matches the id', () => {
+    expect(findSessionFileById('no-such-id', [repo], projectsRoot)).toBeNull()
+  })
+
+  it('appends a custom-title line so resolveTabSession picks up the new name', () => {
+    const id = 'cccccccc-cccc-cccc-cccc-cccccccccccc'
+    writeSession(projectsRoot, repo, { id, title: 'old-name', cwd: repo, mtimeSec: 1000 })
+
+    // Before: only the old name resolves.
+    expect(resolveTabSession(repo, 'old-name', projectsRoot)?.id).toBe(id)
+    expect(resolveTabSession(repo, 'new-name', projectsRoot)).toBeNull()
+
+    const file = findSessionFileById(id, [repo], projectsRoot)!
+    persistSessionTitle(file, id, 'new-name')
+
+    // The appended line is a well-formed custom-title entry on its own line.
+    const lines = readFileSync(file, 'utf-8').trimEnd().split('\n')
+    const last = JSON.parse(lines[lines.length - 1])
+    expect(last).toEqual({ type: 'custom-title', customTitle: 'new-name', sessionId: id })
+
+    // After (fresh module cache via a distinct projectsRoot would be needed for
+    // resolveTabSession, but findSessionsByNameGlobally is cache-free): the new
+    // name now wins as the last customTitle.
+    const byNew = findSessionsByNameGlobally('new-name', projectsRoot)
+    expect(byNew.map((m) => m.id)).toContain(id)
+    expect(findSessionsByNameGlobally('old-name', projectsRoot)).toHaveLength(0)
   })
 })

@@ -74,7 +74,7 @@ cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by
 cctabs resume <name> [dir]               open tab, run claude --continue
 cctabs fork <tab> [-n new-name]          fork a session into a new tab
 cctabs close <tab>                       close a tab
-cctabs rename <tab> <new-name>           rename a tab
+cctabs rename <tab> <new-name>           rename a tab (+ on-disk title, so `resume` finds it)
 cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines)
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
 cctabs restore [--manifest <file|->] [--create-missing]   reattach or spawn from a manifest

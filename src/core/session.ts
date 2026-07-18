@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs'
+import { readdirSync, readFileSync, statSync, existsSync, appendFileSync, openSync, readSync, closeSync } from 'fs'
 import { homedir } from 'os'
 import { join, basename, extname } from 'path'
 import { resolve } from 'path'
@@ -318,6 +318,61 @@ export function findSessionsByNameGlobally(
   }
 
   return matches.sort((a, b) => b.mtime - a.mtime)
+}
+
+/**
+ * Locate the on-disk .jsonl for a session id. `dirs` are the directories whose
+ * project slugs to check, in priority order — typically the launch dir that
+ * resolveTabSession returned (the worktree path for a worktree tab, so this
+ * finds the session under the worktree slug rather than the repo-root slug) plus
+ * the tab's shell cwd as a fallback. Deriving the slug from the dir means this
+ * works even when the physical worktree has since been deleted. Returns the
+ * absolute file path, or null if no candidate exists.
+ */
+export function findSessionFileById(
+  sessionId: string,
+  dirs: string[],
+  projectsRoot: string = join(homedir(), '.claude', 'projects'),
+): string | null {
+  for (const d of dirs) {
+    if (!d) continue
+    const file = join(projectsRoot, pathToProjectSlug(d), `${sessionId}.jsonl`)
+    if (existsSync(file)) return file
+  }
+  return null
+}
+
+/** True if `file` is empty or ends with a newline — i.e. appending a fresh line
+ * won't glue onto a partial last line (a jsonl always ends with \n, but a crash
+ * mid-write could leave one dangling). */
+function endsWithNewline(file: string): boolean {
+  const size = statSync(file).size
+  if (size === 0) return true
+  const fd = openSync(file, 'r')
+  try {
+    const buf = Buffer.alloc(1)
+    readSync(fd, buf, 0, 1, size - 1)
+    return buf[0] === 0x0a
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/**
+ * Persist a new title for a session by appending a `custom-title` entry to its
+ * .jsonl — the SAME line shape Claude Code writes when launched with `--name`.
+ * cctabs' name resolution reads the LAST customTitle, so after this
+ * `cctabs resume <newTitle>` finds the session.
+ *
+ * This exists because neither Claude's in-session `/rename` nor a bare terminal
+ * tab-title change touches disk — both only relabel the ephemeral tab / live RC
+ * session — so a rename is otherwise invisible to resume-by-name. Append-only;
+ * never rewrites existing lines.
+ */
+export function persistSessionTitle(file: string, sessionId: string, newTitle: string): void {
+  const line = JSON.stringify({ type: 'custom-title', customTitle: newTitle, sessionId })
+  const prefix = endsWithNewline(file) ? '' : '\n'
+  appendFileSync(file, `${prefix}${line}\n`)
 }
 
 /**
