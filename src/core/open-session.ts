@@ -214,37 +214,95 @@ async function sendInitialPrompt(
  * confirm is the part we retry — re-pressing Enter on the same row is safe, and
  * if the single ↓ was ever dropped the worst case is a (still-usable) summary
  * resume, never option 3.
+ *
+ * Two robustness properties, both learned from a real 47-session restore where
+ * one tab hung on the picker and another landed on a stray info overlay:
+ *
+ *   - Adaptive appear-poll. Under heavy load (right after a large `restore`)
+ *     the picker can be slow to paint, so we stay patient the same way
+ *     sendInitialPrompt waits up to 45s for Claude's prompt. But we early-exit
+ *     the wait the instant a FORWARD signal proves the session already loaded
+ *     WITHOUT a picker — the input footer ("auto mode" / "for agents" / the
+ *     `Try "…"` placeholder) or the mobile-app overlay below. That keeps the
+ *     common no-picker resume fast instead of always burning the full window.
+ *
+ *   - Mobile-app overlay sweep. After the session loads, Claude can paint a
+ *     remote-control info overlay ("Continue coding in the Claude mobile app …
+ *     Enter/Esc to close") that steals the keypress focus and leaves the tab on
+ *     an overlay rather than a clean prompt. We detect it (whitespace-stripped,
+ *     because Tabby's buffer drops spaces between glyphs) and Esc it closed.
+ *     Idempotent: when the overlay never appears the poll simply expires as a
+ *     no-op. It can appear on a direct resume too, so the sweep runs even when
+ *     no picker was seen.
  */
-async function confirmResumePicker(adapter: TerminalAdapter, blockId: string): Promise<void> {
+export async function confirmResumePicker(
+  adapter: TerminalAdapter,
+  blockId: string,
+  deps: { sleep?: (ms: number) => Promise<void> } = {},
+): Promise<void> {
+  const nap = deps.sleep ?? sleep
   const stripped = (n: number) => adapter.scrollback(blockId, n).replace(/\s+/g, '')
   const pickerVisible = (n: number) => {
     const c = stripped(n)
     return /Resumefromsummary/i.test(c) && /Resumefullsession/i.test(c)
   }
+  const rcOverlayVisible = (n: number) => {
+    const c = stripped(n)
+    return /Continuecoding.*mobileapp/i.test(c) || /Enter\/Esctoclose/i.test(c)
+  }
+  // A forward signal that the session has finished loading (so no picker will
+  // come). Deliberately the input footer / placeholder rather than a bare ❯:
+  // the picker and trust menu also draw ❯, whereas these strings appear only on
+  // the live chat input. The RC overlay counts too — it only shows post-load.
+  const sessionLoaded = (n: number) =>
+    /automode|foragents|Try["'“]/i.test(stripped(n)) || rcOverlayVisible(n)
 
-  // The picker renders before the session loads. Give it up to ~25s to appear;
-  // if it never does, the session was small enough to resume directly and there
-  // is nothing to confirm.
+  // The picker renders before the session loads. Stay patient (~45s) for it to
+  // appear under heavy load, but bail early once the session is demonstrably
+  // loaded without one — nothing to confirm on the picker in that case.
   let appeared = false
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 45; i++) {
     if (pickerVisible(30)) { appeared = true; break }
-    await sleep(1000)
+    if (sessionLoaded(30)) break
+    await nap(1000)
   }
-  if (!appeared) return
 
-  // Let the picker's key handler attach before the one navigation press.
-  await sleep(1200)
-  await adapter.sendInput(blockId, '\x1b[B') // ↓ once → option 2 (full session)
-  await sleep(250)
+  if (appeared) {
+    // Let the picker's key handler attach before the one navigation press.
+    await nap(1200)
+    await adapter.sendInput(blockId, '\x1b[B') // ↓ once → option 2 (full session)
+    await nap(250)
 
-  // Confirm, retrying Enter only, until the picker scrolls out of the tail
-  // (the loaded session pushes new content past it).
-  for (let attempt = 0; attempt < 8; attempt++) {
-    await adapter.sendInput(blockId, '\r')
-    await sleep(900)
-    if (!pickerVisible(8)) return
+    // Confirm, retrying Enter only, until the picker scrolls out of the tail
+    // (the loaded session pushes new content past it). More attempts than the
+    // original 8 so a slow load under heavy restore load still clears.
+    let dismissed = false
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await adapter.sendInput(blockId, '\r')
+      await nap(900)
+      if (!pickerVisible(8)) { dismissed = true; break }
+    }
+    if (!dismissed) {
+      consola.warn('Could not confirm the resume picker was dismissed — switch to the tab and pick "Resume full session as-is".')
+      return
+    }
   }
-  consola.warn('Could not confirm the resume picker was dismissed — switch to the tab and pick "Resume full session as-is".')
+
+  // Sweep for the mobile-app info overlay and Esc it closed. Runs whether we
+  // came through the picker or resumed directly; a no-op when absent.
+  let sawOverlay = false
+  for (let i = 0; i < 8; i++) {
+    if (rcOverlayVisible(20)) { sawOverlay = true; break }
+    await nap(400)
+  }
+  if (!sawOverlay) return
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await adapter.sendInput(blockId, '\x1b') // Esc closes the overlay
+    await nap(500)
+    if (!rcOverlayVisible(20)) return
+  }
+  consola.warn('Could not confirm the mobile-app info overlay was dismissed — switch to the tab and press Esc.')
 }
 
 export async function openSession(opts: OpenSessionOptions): Promise<string> {
