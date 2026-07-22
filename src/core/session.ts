@@ -152,6 +152,11 @@ function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
     return index
   }
 
+  // The slug this directory corresponds to — used below to filter out cwd
+  // values that don't actually belong to this file's storage location (see
+  // the note near the backward cwd scan).
+  const expectedSlug = basename(projectDir)
+
   for (const f of readdirSync(projectDir)) {
     if (extname(f) !== '.jsonl') continue
     const full = join(projectDir, f)
@@ -172,18 +177,29 @@ function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
         } catch { /* skip malformed line */ }
       }
 
-      // cwd can change mid-session — e.g. a worktree gets deleted and the
-      // session is later resumed from the repo root instead — so the most
-      // recent cwd is where it must be relaunched from, not wherever it
-      // happened to start. cwd appears on nearly every line (unlike
-      // customTitle), so scan from the end and stop at the first hit: that
-      // finds the LAST occurrence while still parsing only one line.
+      // cwd can change mid-session in two different ways, and only one of
+      // them is safe to resume into: (a) the session was actually relaunched
+      // from a new directory (e.g. a worktree got deleted and it was later
+      // resumed from the repo root) — the transcript itself lives at that
+      // new location, so relaunching there is correct; (b) the agent just
+      // ran `cd <subdir>` via the Bash tool mid-session — Claude Code's
+      // per-message cwd tracks that logical drift, but the transcript file
+      // never moves, so relaunching from the drifted directory 404s with
+      // "No conversation found". The two are indistinguishable by cwd value
+      // alone, so only accept a recorded cwd whose own project slug matches
+      // the directory this file physically lives in — that's guaranteed
+      // resumable; anything else is Bash-drift and gets skipped in favor of
+      // an earlier, matching entry. Scan from the end so the common case
+      // (no drift) still costs one parse, not a full-file scan.
       for (let i = lines.length - 1; i >= 0; i--) {
         const line = lines[i]
         if (!line || !line.includes('"cwd"')) continue
         try {
           const e = JSON.parse(line)
-          if (typeof e.cwd === 'string') { cwd = e.cwd; break }
+          if (typeof e.cwd === 'string' && pathToProjectSlug(e.cwd) === expectedSlug) {
+            cwd = e.cwd
+            break
+          }
         } catch { /* try an earlier line */ }
       }
     } catch { continue }
@@ -282,11 +298,18 @@ export function findSessionsByNameGlobally(
           try {
             const entry = JSON.parse(line)
             if (entry.customTitle !== undefined) currentTitle = entry.customTitle
-            // Last wins, not first: a session's cwd can change mid-life (e.g.
-            // a worktree gets deleted and the session is later resumed from
-            // the repo root instead) — the most recent cwd is where it must
-            // be relaunched from, not wherever it happened to start.
-            if (typeof entry.cwd === 'string') cwd = entry.cwd
+            // Last wins, not first — but only among cwd values that actually
+            // belong to THIS file's storage location (slug match against the
+            // directory being scanned). A session's cwd can legitimately
+            // change mid-life (e.g. a worktree gets deleted and the session
+            // is later resumed from the repo root instead) and the transcript
+            // moves with it — but it can also just drift from the agent
+            // running `cd <subdir>` via the Bash tool, which changes the
+            // per-message cwd without the transcript ever moving. Accepting
+            // a drifted cwd sends `restore` into a directory with no
+            // matching session at all ("No conversation found"). Only a cwd
+            // whose slug matches `slug` is guaranteed resumable.
+            if (typeof entry.cwd === 'string' && pathToProjectSlug(entry.cwd) === slug) cwd = entry.cwd
             if (!firstPrompt && entry.type === 'user' && entry.message?.content) {
               const text = typeof entry.message.content === 'string'
                 ? entry.message.content

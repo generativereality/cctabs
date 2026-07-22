@@ -151,6 +151,26 @@ describe('resolveTabSession', () => {
     expect(r?.id).toBe('33333333-3333-3333-3333-333333333333')
     expect(r?.dir).toBe(repo)
   })
+
+  it('ignores a cwd that drifted via `cd <subdir>` mid-session — the transcript never moved', () => {
+    // The agent ran `cd website-clerkai` via the Bash tool partway through the
+    // session. Claude Code's per-message cwd tracks that logical drift, but
+    // the transcript file is still physically stored under repo's own slug —
+    // there is no session file at all under the subdirectory's slug. Trusting
+    // the drifted cwd made `restore` fail with "No conversation found".
+    const subdir = join(repo, 'website-clerkai')
+    writeSessionWithCwdChange(projectsRoot, repo, {
+      id: '55555555-5555-5555-5555-555555555555',
+      title: 'rt',
+      firstCwd: repo,
+      laterCwd: subdir,
+      mtimeSec: 1000,
+    })
+
+    const r = resolveTabSession(repo, 'rt', projectsRoot)
+    expect(r?.id).toBe('55555555-5555-5555-5555-555555555555')
+    expect(r?.dir).toBe(repo)
+  })
 })
 
 describe('findSessionsByNameGlobally', () => {
@@ -178,6 +198,21 @@ describe('findSessionsByNameGlobally', () => {
     })
 
     const matches = findSessionsByNameGlobally('synced-docs', projectsRoot)
+    expect(matches).toHaveLength(1)
+    expect(matches[0].dir).toBe(repo)
+  })
+
+  it('ignores a cwd that drifted via `cd <subdir>` mid-session — the transcript never moved', () => {
+    const subdir = join(repo, 'website-clerkai')
+    writeSessionWithCwdChange(projectsRoot, repo, {
+      id: '66666666-6666-6666-6666-666666666666',
+      title: 'rt',
+      firstCwd: repo,
+      laterCwd: subdir,
+      mtimeSec: 1000,
+    })
+
+    const matches = findSessionsByNameGlobally('rt', projectsRoot)
     expect(matches).toHaveLength(1)
     expect(matches[0].dir).toBe(repo)
   })
