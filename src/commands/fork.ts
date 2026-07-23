@@ -5,6 +5,7 @@ import { requireAdapter } from '../core/adapter.js'
 import { findLatestSessionId, pathToProjectSlug } from '../core/session.js'
 import { openSession } from '../core/open-session.js'
 import { loadConfig, applyPrefix } from '../core/config.js'
+import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 
 /** If dir is inside .claude/worktrees/<name>, return the repo root instead */
 function resolveSessionDir(dir: string): { sessionLookupDir: string; openDir: string } {
@@ -23,11 +24,27 @@ export const forkCommand = define({
   args: {
     tab: { type: 'positional', description: 'Source tab name or ID prefix' },
     name: { type: 'string', short: 'n', description: 'Name for the new tab' },
+    backend: { type: 'string', short: 'b', description: 'Backend preset. Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
   },
   async run(ctx) {
     const sourceQuery = ctx.positionals[1]
     const customName = ctx.values.name
     if (!sourceQuery) { consola.error('Source tab name is required'); process.exit(1) }
+
+    const explicitBackend = ctx.values.backend as string | undefined
+    const backendName = resolveBackendName(explicitBackend)
+    let envVars: Record<string, string> | undefined
+    if (backendName) {
+      const backend = resolveBackend(backendName)
+      if (!backend) {
+        consola.error(`Unknown backend "${backendName}". Available:`)
+        for (const b of listBackends()) consola.log(`  ${b.name.padEnd(22)} ${b.description}`)
+        process.exit(1)
+      }
+      envVars = backendEnvWithMarker(backendName, backend)
+    }
+    const inheritedBackend = !explicitBackend && !!backendName
+    const be = backendName ? ` [backend: ${backendName}${inheritedBackend ? ' (inherited)' : ''}]` : ''
 
     const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
@@ -66,9 +83,10 @@ export const forkCommand = define({
       // fork left the session unnamed) so it's distinguishable — and prefixed —
       // on claude.ai.
       claudeCmd: `claude --resume ${sessionId} --fork-session --name ${JSON.stringify(newName)}`,
+      envVars,
       afterActive: true,
     })
-    consola.success(`Forked "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]`)
+    consola.success(`Forked "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]${be}`)
     consola.info(`session: ${sessionId}`)
   },
 })

@@ -6,7 +6,7 @@ import { loadConfig, applyPrefix } from '../core/config.js'
 import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
-import { resolveBackend, listBackends } from '../core/backends.js'
+import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import { shellQuoteArg } from '../core/shell.js'
 
 function shellQuoteEnv(env: Record<string, string>): string {
@@ -36,7 +36,7 @@ export const resumeCommand = define({
     name: { type: 'positional', description: 'Tab / session name' },
     dir: { type: 'positional', description: 'Working directory (default: cwd)' },
     session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
-    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Run `cctabs backends` to list.' },
+    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude).' },
   },
   async run(ctx) {
@@ -51,7 +51,8 @@ export const resumeCommand = define({
     const displayName = applyPrefix(name, loadConfig().defaults.prefix)
 
     const explicitSession = ctx.values.session as string | undefined
-    const backendName = ctx.values.backend as string | undefined
+    const explicitBackend = ctx.values.backend as string | undefined
+    const backendName = resolveBackendName(explicitBackend)
     const modelOverride = ctx.values.model as string | undefined
 
     let envVars: Record<string, string> | undefined
@@ -63,9 +64,11 @@ export const resumeCommand = define({
         for (const b of listBackends()) consola.log(`  ${b.name.padEnd(22)} ${b.description}`)
         process.exit(1)
       }
-      envVars = backend.env
+      envVars = backendEnvWithMarker(backendName, backend)
       resolvedModel ??= backend.model || undefined
     }
+    const inheritedBackend = !explicitBackend && !!backendName
+    const be = backendName ? ` [backend: ${backendName}${inheritedBackend ? ' (inherited)' : ''}]` : ''
 
     let sessionId: string | undefined
 
@@ -162,7 +165,7 @@ export const resumeCommand = define({
             modelOverride: resolvedModel,
             afterActive: true,
           })
-          consola.success(`Tab "${displayName}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)`)
+          consola.success(`Tab "${displayName}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)${be}`)
           return
         }
       }
@@ -179,7 +182,7 @@ export const resumeCommand = define({
       // over, which happens *after* this function returns. Just queue it.
       if (isCurrentTab) {
         adapter.closeSocket()
-        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (queued in this shell)`)
+        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (queued in this shell)${be}`)
         return
       }
 
@@ -197,7 +200,7 @@ export const resumeCommand = define({
 
       adapter.closeSocket()
       if (verified) {
-        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir}`)
+        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir}${be}`)
       } else {
         consola.warn(`Tab "${displayName}" [${tabId.slice(0, 8)}] — command sent but Claude may not have started (scrollback check inconclusive)`)
       }
@@ -212,7 +215,7 @@ export const resumeCommand = define({
         modelOverride: resolvedModel,
         afterActive: true,
       })
-      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)`)
+      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)${be}`)
     } else {
       // No existing tab and no session — create a new tab with a fresh claude session
       adapter.closeSocket()
@@ -223,7 +226,7 @@ export const resumeCommand = define({
         envVars,
         modelOverride: resolvedModel,
       })
-      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude at ${dir} (new tab, no prior session found)`)
+      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude at ${dir} (new tab, no prior session found)${be}`)
     }
   },
 })

@@ -5,7 +5,7 @@ import { tmpdir, homedir } from 'os'
 import { join, resolve } from 'path'
 import { openSession } from '../core/open-session.js'
 import { loadConfig, applyPrefix } from '../core/config.js'
-import { resolveBackend, listBackends } from '../core/backends.js'
+import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 import { setupWorktree } from '../core/worktree.js'
 
@@ -20,7 +20,7 @@ export const newCommand = define({
     file: { type: 'string', short: 'f', description: 'Send initial prompt from file once Claude is ready' },
     prompt: { type: 'string', short: 'p', description: 'Send initial prompt text once Claude is ready' },
     resume: { type: 'string', short: 'r', description: 'Resume an existing Claude session ID (passes --resume <id> to claude). Mutually exclusive with --prompt/--file.' },
-    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Run `cctabs backends` to list.' },
+    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
   },
   async run(ctx) {
@@ -31,7 +31,9 @@ export const newCommand = define({
     const promptFile = ctx.values.file as string | undefined
     const promptText = ctx.values.prompt as string | undefined
     const resumeId = ctx.values.resume as string | undefined
-    const backendName = ctx.values.backend as string | undefined
+    const explicitBackend = ctx.values.backend as string | undefined
+    const backendName = resolveBackendName(explicitBackend)
+    const inheritedBackend = !explicitBackend && !!backendName
     const modelOverride = ctx.values.model as string | undefined
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
 
@@ -71,7 +73,7 @@ export const newCommand = define({
         for (const b of listBackends()) consola.log(`  ${b.name.padEnd(22)} ${b.description}`)
         process.exit(1)
       }
-      envVars = backend.env
+      envVars = backendEnvWithMarker(backendName, backend)
       resolvedModel ??= backend.model || undefined
     }
 
@@ -128,7 +130,7 @@ export const newCommand = define({
       afterActive: true,
     })
     const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
-    const be = backendName ? ` [backend: ${backendName}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''
+    const be = backendName ? ` [backend: ${backendName}${inheritedBackend ? ' (inherited)' : ''}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''
     const rs = resolvedSessionId ? ` --resume ${resolvedSessionId.slice(0, 8)}…` : ''
     consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude${rs} at ${dir}${wt}${be}`)
   },

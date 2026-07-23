@@ -198,3 +198,22 @@ export function listBackends(): { name: string; description: string }[] {
     description: spec.description ?? '',
   }))
 }
+
+/**
+ * A tab launched with `-b <name>` gets CCTABS_ACTIVE_BACKEND=<name> injected
+ * into its claude process's env alongside the preset's own vars. Because
+ * `new`/`resume`/`fork` run as child processes of that claude process (they're
+ * invoked from inside a running Claude Code session, e.g. via its Bash tool),
+ * they inherit this var — which is how `--backend` can default to "whatever
+ * backend the current session is running under" instead of always falling
+ * back to plain `anthropic`. Distinct from CCTABS_BACKEND (terminal.ts), which
+ * is an unrelated terminal-detection override alias for CCTABS_TERMINAL.
+ */
+export function resolveBackendName(explicit: string | undefined): string | undefined {
+  return explicit || process.env.CCTABS_ACTIVE_BACKEND || undefined
+}
+
+/** Build the env map for a launch: the preset's own vars plus the marker above. */
+export function backendEnvWithMarker(name: string, backend: BackendSpec): Record<string, string> {
+  return { ...backend.env, CCTABS_ACTIVE_BACKEND: name }
+}
