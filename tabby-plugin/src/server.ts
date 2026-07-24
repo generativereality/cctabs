@@ -12,6 +12,22 @@ import { bufferLines } from './buffer'
 const PLUGIN_VERSION = '0.1.1'
 
 /**
+ * Capability tokens advertised on /api/health so the CLI can feature-detect
+ * instead of version-sniffing (a user's installed plugin is often older than
+ * the CLI talking to it).
+ *
+ * `spawn-waits-for-pty` — POST /api/tabs/new serialises concurrent creates and
+ * does not answer until the new tab's PTY has actually spawned. Callers may
+ * fire creates in parallel only when this is present; without it they must
+ * create tabs one at a time with a settle gap. See openNewTab().
+ */
+const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty']
+
+function sleep (ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
  * True when the given command path looks like a shell that supports the `-l`
  * login-shell flag (zsh, bash, sh, dash, ash, ksh). We err on the side of not
  * adding `-l` for unfamiliar commands — passing flags an interpreter doesn't
@@ -114,7 +130,7 @@ export class CctabsServer {
     const method = req.method ?? 'GET'
 
     if (method === 'GET' && path === '/api/health') {
-      return sendJson(res, 200, { ok: true, version: PLUGIN_VERSION })
+      return sendJson(res, 200, { ok: true, version: PLUGIN_VERSION, capabilities: PLUGIN_CAPABILITIES })
     }
 
     if (method === 'GET' && path === '/api/tabs') {
@@ -251,7 +267,75 @@ export class CctabsServer {
     return out
   }
 
-  private async openNewTab (body: any): Promise<string> {
+  /**
+   * Tail of the serialised tab-creation chain. See openNewTab().
+   */
+  private openTabQueue: Promise<unknown> = Promise.resolve()
+
+  /**
+   * Create a tab, one at a time, and don't answer until its PTY is running.
+   *
+   * Both halves matter, and they exist because of how a terminal tab actually
+   * reaches the point of spawning its process:
+   *
+   *   TerminalTabComponent.onFrontendReady() → initializeSession() → PTY spawn
+   *
+   * onFrontendReady only fires once the xterm frontend has attached, and
+   * BaseTerminalTabComponent.ngOnInit defers that attach into a setImmediate
+   * that either attaches straight away (if the tab already hasFocus) or else
+   * waits on `focused$.pipe(first())`. Meanwhile AppService.addTabRaw() →
+   * selectTab() blurs the outgoing tab *synchronously* but emits focus via
+   * `setImmediate(() => this._activeTab?.emitFocused())` — reading _activeTab
+   * at callback time, not at schedule time.
+   *
+   * So two creates landing in the same event-loop turn interleave as:
+   * ngOnInit(A) (queues attach-on-focus), selectTab(A) (queues focus),
+   * ngOnInit(B), selectTab(B) — and when A's deferred emitFocused finally runs,
+   * `_activeTab` is already B. Tab A is never focused, never attaches, and
+   * therefore *never spawns a PTY at all* — it just sits there blank until you
+   * click it. That is the race that forced callers into serial-with-settle.
+   *
+   * Serialising here plus waiting for `session.open` removes it at the source:
+   * concurrent callers queue up, and each create is finished — process running,
+   * not merely "tab exists" — before the next one can steal activation.
+   * Advertised as the `spawn-waits-for-pty` capability.
+   */
+  private openNewTab (body: any): Promise<string> {
+    const run = (): Promise<string> => this.openNewTabNow(body)
+    // Chain off both fulfilment and rejection so one failed create doesn't
+    // wedge every subsequent one.
+    const result = this.openTabQueue.then(run, run)
+    this.openTabQueue = result.then(() => {}, () => {})
+    return result
+  }
+
+  /**
+   * Wait until a freshly created terminal tab has actually spawned its process.
+   *
+   * Nudges with selectTab() if the PTY hasn't appeared: when the tab is still
+   * active that re-emits `focused$` (selectTab's same-tab early return), which
+   * is precisely the signal a tab that missed its focus event is blocked on;
+   * when something else took over in the meantime it brings the tab back so it
+   * can attach. Returns false on timeout — the tab is still usable, so the
+   * caller reports it rather than failing the create.
+   */
+  private async waitForSessionStart (tab: BaseTabComponent, timeoutMs = 20_000): Promise<boolean> {
+    if (!(tab instanceof BaseTerminalTabComponent)) return true
+    const deadline = Date.now() + timeoutMs
+    let nextNudge = Date.now() + 750
+    while (Date.now() < deadline) {
+      if ((tab as any).session?.open) return true
+      if (Date.now() >= nextNudge) {
+        this.app.selectTab(tab)
+        nextNudge = Date.now() + 1500
+      }
+      await sleep(50)
+    }
+    this.logger.warn(`tab ${this.tabs.uuidOf(tab) ?? '?'} did not start its process within ${timeoutMs}ms`)
+    return false
+  }
+
+  private async openNewTabNow (body: any): Promise<string> {
     // tabby-local's TerminalTabComponent expects { profile: LocalProfile }
     // where the profile carries { options: { command, args, cwd, env } }.
     //
@@ -305,6 +389,8 @@ export class CctabsServer {
     this.tabs.entries()
     const uuid = this.tabs.uuidOf(tab)
     if (!uuid) throw new Error('failed to register new tab')
+    // Hold the response until the process is up — see openNewTab().
+    await this.waitForSessionStart(tab)
     return uuid
   }
 

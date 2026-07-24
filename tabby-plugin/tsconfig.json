@@ -12,6 +12,11 @@
     "noImplicitAny": false,
     "skipLibCheck": true,
     "lib": ["DOM", "ES2019", "ES2021"],
+    // Pin the ambient type packages. Without this TS auto-loads every @types/*
+    // it can walk up to — including the CLI's @types/bun, whose .d.ts uses
+    // syntax (`const` type parameters) that Tabby's bundled TypeScript can't
+    // parse, failing the plugin build with 100+ errors from files we don't own.
+    "types": ["node"],
     "baseUrl": "src",
     "outDir": "dist",
     "paths": {
