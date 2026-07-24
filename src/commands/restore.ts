@@ -200,7 +200,12 @@ async function runRestore(req: RestoreRequest): Promise<void> {
     (p) => p.action === 'attach' || p.action === 'recreate' || p.action === 'spawn',
   )
   consola.info(`${actionable.length} tab(s) to restore${dryRun ? ' (dry run)' : ''}:`)
-  for (const p of plan) consola.log(`  ${p.entry.name} ${describeDecision(p, dryRun)}`)
+  for (const p of plan) {
+    // Already-running tabs are covered by the one-line list above; repeating
+    // them here buries the entries that actually need a decision.
+    if (p.action === 'already-running') continue
+    consola.log(`  ${p.entry.name} ${describeDecision(p, dryRun)}`)
+  }
 
   const results = new Map<PlannedEntry, string>(plan.map((p) => [p, summarizeDecision(p, dryRun)]))
 
