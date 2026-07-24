@@ -4,26 +4,37 @@ import { readFileSync, existsSync } from 'fs'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
-import { requireAdapter } from '../core/adapter.js'
+import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByName, findSessionsByNameGlobally, expandSessionId, resolveTabSession } from '../core/session.js'
+import { findSessionsByNameGlobally, expandSessionId, resolveTabSession } from '../core/session.js'
+import { parseManifest } from '../core/manifest.js'
+import {
+  planRestore,
+  buildDesiredOrder,
+  type PlanDeps,
+  type PlannedEntry,
+  type RestoreEntry,
+  type ResolvedSession,
+} from '../core/restore-plan.js'
+import type { Block } from '../types/index.js'
 import { shellQuoteArg } from '../core/shell.js'
 
 /**
- * Settle after each direct-spawn (Tabby) recreate, before creating the next
- * tab. A freshly created tab spawns its PTY only once it becomes the active
- * tab, and each new tab steals activation from the previous one — so without
- * this gap only the last-created tab actually launches Claude. One second is
- * comfortably longer than a PTY fork + shell exec, while keeping a full restore
- * snappy.
+ * Settle after each direct-spawn recreate when the backend can't guarantee the
+ * new tab's process has started before it answers (see the
+ * `spawn-waits-for-pty` capability). A freshly created tab only spawns its PTY
+ * once it has been the active tab long enough for its terminal frontend to
+ * attach, and each new tab steals activation from the previous one — so without
+ * this gap the tabs that lose the race never launch Claude at all. One second
+ * is comfortably longer than a PTY fork + shell exec.
+ *
+ * Backends that DO advertise the capability serialise and confirm the spawn
+ * themselves, so restore skips both the settle and the serialisation.
  */
 const SPAWN_SETTLE_MS = 1000
 
-interface ManifestEntry {
-  name: string
-  dir: string
-  session_id?: string
-}
+/** Backend capability that makes parallel tab creation safe. */
+const CAP_SPAWN_WAITS_FOR_PTY = 'spawn-waits-for-pty'
 
 function readStdinSync(): string {
   // Synchronous stdin read; restore is one-shot CLI so this is acceptable.
@@ -36,48 +47,6 @@ function readStdinSync(): string {
   }
 }
 
-function parseManifest(raw: string): ManifestEntry[] {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch (err) {
-    throw new Error(`Manifest is not valid JSON: ${(err as Error).message}`)
-  }
-
-  // Accept three shapes:
-  //   1. Plain array of entries:                [{name, dir, session_id?}, ...]
-  //   2. Object with sessions array:            {sessions: [...]}
-  //   3. `cctabs sessions --json` output:       {workspaces: [{sessions: [...]}, ...]}
-  const collected: unknown[] = []
-  if (Array.isArray(parsed)) {
-    collected.push(...parsed)
-  } else if (parsed && typeof parsed === 'object') {
-    const p = parsed as Record<string, unknown>
-    if (Array.isArray(p.sessions)) {
-      collected.push(...p.sessions)
-    }
-    if (Array.isArray(p.workspaces)) {
-      for (const ws of p.workspaces) {
-        if (ws && typeof ws === 'object' && Array.isArray((ws as Record<string, unknown>).sessions)) {
-          collected.push(...((ws as Record<string, unknown>).sessions as unknown[]))
-        }
-      }
-    }
-  }
-
-  const entries: ManifestEntry[] = []
-  for (const item of collected) {
-    if (!item || typeof item !== 'object') continue
-    const it = item as Record<string, unknown>
-    const name = typeof it.name === 'string' ? it.name : null
-    const dir = typeof it.dir === 'string' ? it.dir : typeof it.cwd === 'string' ? it.cwd : null
-    if (!name || !dir) continue
-    const sid = typeof it.session_id === 'string' ? it.session_id : undefined
-    entries.push({ name, dir: resolve(dir.replace(/^~/, homedir())), session_id: sid })
-  }
-  return entries
-}
-
 export const restoreCommand = define({
   name: 'restore',
   description: 'Resume Claude sessions in terminal-state tabs (e.g. after a reboot). With --manifest, drive from an explicit list and optionally spawn missing tabs.',
@@ -87,12 +56,17 @@ export const restoreCommand = define({
     'create-missing': { type: 'boolean', short: 'c', description: 'When using --manifest, spawn new tabs for entries that have no existing tab' },
   },
   async run(ctx) {
-    const dryRun = ctx.values.dry as boolean | undefined
+    const dryRun = !!(ctx.values.dry as boolean | undefined)
     const manifestPath = ctx.values.manifest as string | undefined
     const createMissing = (ctx.values['create-missing'] as boolean | undefined) ?? false
 
     if (manifestPath) {
-      await runManifestMode(manifestPath, createMissing, !!dryRun)
+      await runRestore({
+        manifest: readManifestOrExit(manifestPath),
+        scopedDir: null,
+        createMissing,
+        dryRun,
+      })
       return
     }
 
@@ -100,11 +74,17 @@ export const restoreCommand = define({
       consola.warn('--create-missing has no effect without --manifest; ignoring.')
     }
 
-    await runNameScanMode(ctx.positionals[1], !!dryRun)
+    const rawDir = ctx.positionals[1]
+    await runRestore({
+      manifest: null,
+      scopedDir: rawDir ? resolve(rawDir.replace(/^~/, homedir())) : null,
+      createMissing: false,
+      dryRun,
+    })
   },
 })
 
-async function runManifestMode(manifestPath: string, createMissing: boolean, dryRun: boolean): Promise<void> {
+function readManifestOrExit(manifestPath: string): RestoreEntry[] {
   let raw: string
   if (manifestPath === '-') {
     raw = readStdinSync()
@@ -120,7 +100,7 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
     raw = readFileSync(manifestPath, 'utf-8')
   }
 
-  let entries: ManifestEntry[]
+  let entries: RestoreEntry[]
   try {
     entries = parseManifest(raw)
   } catch (err) {
@@ -131,175 +111,343 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
     consola.error('Manifest contained no usable entries (need at minimum {name, dir} per entry).')
     process.exit(1)
   }
-
   consola.info(`Manifest: ${entries.length} entry/entries`)
+  return entries
+}
 
+interface RestoreRequest {
+  /** Manifest entries, or null to scan the window's own tabs. */
+  manifest: RestoreEntry[] | null
+  /** Scan mode: restrict session lookups to this directory. */
+  scopedDir: string | null
+  createMissing: boolean
+  dryRun: boolean
+}
+
+/**
+ * The one restore implementation.
+ *
+ * Manifest mode and the bare `cctabs restore [dir]` scan differ only in where
+ * their entries come from — everything downstream (resolve → attach → spawn →
+ * reorder → summary) is shared, so the two can't drift apart again.
+ *
+ * `--dry` stops immediately after planning. Planning itself performs no
+ * mutations, so a dry run reports exactly the decisions a real run would act on.
+ */
+async function runRestore(req: RestoreRequest): Promise<void> {
+  const { dryRun } = req
   const adapter = requireAdapter()
   const { tabsById, tabNames, workspaces } = await adapter.getAllData()
-  const currentWs = adapter.currentWorkspaceId()
   const currentTab = adapter.currentTabId()
 
-  // Scope to current workspace
-  const currentWsData = workspaces.find((w) => w.workspacedata.oid === currentWs)
-  const wsTabIds = currentWsData ? new Set(currentWsData.workspacedata.tabids) : new Set<string>(tabsById.keys())
+  // Manifest mode restores into the current workspace. The scan restores what
+  // it can see, which on Wave spans every open workspace.
+  let scopeTabIds: Set<string>
+  let entries: RestoreEntry[]
+  let baseOrder: string[] | undefined
 
-  const results: Array<{ name: string; result: string }> = []
-  const toSpawn: Array<ManifestEntry> = []
-  // entry → its final tab id (an existing matched tab, the current tab, or a
-  // freshly spawned one). Used to rebuild the tab bar in manifest order once all
-  // spawns are done — the manifest carries the pre-restore order (e.g. straight
-  // from `cctabs sessions --json`), but without this the recreated tabs just
-  // append and the bar comes back scrambled.
-  const orderedTabId = new Map<ManifestEntry, string>()
+  if (req.manifest) {
+    const currentWs = adapter.currentWorkspaceId()
+    const currentWsData = workspaces.find((w) => w.workspacedata.oid === currentWs)
+    scopeTabIds = currentWsData
+      ? new Set(currentWsData.workspacedata.tabids)
+      : new Set<string>(tabsById.keys())
+    entries = req.manifest
+  } else {
+    // Scan: one entry per terminal tab, in bar order, each bound to its tab.
+    // Live tabs are included so they're reported and so they claim their name
+    // against a same-named dead tab elsewhere in the bar.
+    scopeTabIds = new Set<string>()
+    entries = []
+    baseOrder = []
+    for (const wsp of workspaces) {
+      for (const tabId of wsp.workspacedata.tabids) {
+        baseOrder.push(tabId)
+        scopeTabIds.add(tabId)
+        if (tabId === currentTab) continue
+        if (!(tabsById.get(tabId) ?? []).some((b) => b.view === 'term')) continue
+        entries.push({
+          name: tabNames.get(tabId) ?? tabId.slice(0, 8),
+          dir: req.scopedDir ?? undefined,
+          tabId,
+        })
+      }
+    }
+    if (!entries.length) {
+      consola.info('No tabs to restore.')
+      adapter.closeSocket()
+      return
+    }
+  }
+
+  const plan = await planRestore(
+    entries,
+    buildPlanDeps(adapter, {
+      tabsById,
+      tabNames,
+      scopeTabIds,
+      currentTabId: currentTab,
+      createMissing: req.createMissing,
+    }),
+  )
+
+  const running = plan.filter((p) => p.action === 'already-running')
+  if (running.length) {
+    consola.info(`Already running: ${running.map((p) => p.entry.name).join(', ')}`)
+  }
+
+  const actionable = plan.filter(
+    (p) => p.action === 'attach' || p.action === 'recreate' || p.action === 'spawn',
+  )
+  consola.info(`${actionable.length} tab(s) to restore${dryRun ? ' (dry run)' : ''}:`)
+  for (const p of plan) consola.log(`  ${p.entry.name} ${describeDecision(p, dryRun)}`)
+
+  const results = new Map<PlannedEntry, string>(plan.map((p) => [p, summarizeDecision(p, dryRun)]))
+
+  if (!dryRun) {
+    await executePlan(adapter, plan, results, {
+      baseOrder,
+      blocksOf: (tabId) => (tabsById.get(tabId) ?? []).map((b) => b.blockid),
+    })
+  }
+
+  adapter.closeSocket()
+
+  console.log('\nRestore summary:')
+  for (const p of plan) {
+    console.log(`  ${p.entry.name}: ${results.get(p)}`)
+  }
+}
+
+/**
+ * Wire an adapter up as the planner's read-only view of the terminal.
+ *
+ * Every dependency here is a read. Dry and real runs share this wiring
+ * verbatim, which is what makes `--dry` faithful: the same lookups, the same
+ * status probes, the same empty-scrollback confirmations, the same decisions —
+ * a dry run simply stops before anything is executed.
+ */
+export function buildPlanDeps(
+  adapter: TerminalAdapter,
+  opts: {
+    tabsById: Map<string, Block[]>
+    tabNames: Map<string, string>
+    scopeTabIds: Set<string>
+    currentTabId: string
+    createMissing: boolean
+  },
+): PlanDeps {
+  return {
+    currentTabId: opts.currentTabId,
+    scopeTabIds: opts.scopeTabIds,
+    // Exact-name only: a longer-named live tab (`gapminder-login`) must never
+    // be taken as proof that `gapminder`'s tab already exists.
+    matchTabs: (name) => adapter.resolveTab(name, opts.tabsById, opts.tabNames, { exact: true }),
+    termBlockOf: (tabId) => (opts.tabsById.get(tabId) ?? []).find((b) => b.view === 'term')?.blockid,
+    statusOf: (blockId) => adapter.detectSessionStatus(blockId),
+    confirmEmpty: (blockId) => adapter.confirmScrollbackEmpty(blockId),
+    resolveSession: (entry) => resolveEntrySession(entry),
+    createMissing: opts.createMissing,
+  }
+}
+
+/**
+ * Find the session an entry should resume.
+ *
+ * Three shapes, in descending order of confidence:
+ *   - an explicit id from a manifest (expanded from a prefix if needed);
+ *   - a directory, which resolves worktree-aware and newest-first, so a
+ *     `--worktree` tab picks its worktree session over a stale repo-root one;
+ *   - name only, which searches every project and takes the newest match.
+ */
+function resolveEntrySession(entry: RestoreEntry): ResolvedSession | null {
+  if (entry.sessionId) {
+    const expanded =
+      expandSessionId(entry.sessionId, entry.dir) ?? expandSessionId(entry.sessionId)
+    return { id: expanded ?? entry.sessionId, dir: entry.dir ?? process.cwd() }
+  }
+
+  if (entry.dir) {
+    const hit = resolveTabSession(entry.dir, entry.name)
+    return hit ? { id: hit.id, dir: hit.dir } : null
+  }
+
+  const sessions = findSessionsByNameGlobally(entry.name)
+  if (!sessions.length) return null
+  if (sessions.length > 1) {
+    consola.log(`  ${entry.name} — multiple sessions across projects, picking newest (${sessions[0].dir})`)
+  }
+  return { id: sessions[0].id, dir: sessions[0].dir }
+}
+
+export const shortId = (id?: string) => (id ? `${id.slice(0, 8)}…` : 'fresh')
+
+/** The per-entry decision line, worded for a dry run or a real one. */
+export function describeDecision(p: PlannedEntry, dry: boolean): string {
+  switch (p.action) {
+    case 'current-tab':
+      return '— current tab, already present'
+    case 'already-running':
+      return '— already running, skipping'
+    case 'ambiguous':
+      return '— multiple matching tabs, skipping'
+    case 'no-terminal':
+      return '— no terminal block in tab, skipping'
+    case 'no-session':
+      return `— no session found${p.entry.dir ? ` in ${p.entry.dir}` : ''}, skipping`
+    case 'attach':
+      return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab`
+    case 'recreate':
+      return `→ ${dry ? 'would recreate' : 'recreating'} dead tab with ${shortId(p.sessionId)} in ${p.dir}`
+    case 'duplicate':
+      return p.closeTabId
+        ? `— duplicate dead tab, ${dry ? 'would close' : 'closing'} (already restoring one)`
+        : '— duplicate entry, skipping (already restoring one)'
+    case 'spawn':
+      return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})`
+    case 'missing':
+      return '— no existing tab; pass --create-missing to spawn one'
+  }
+}
+
+/** Initial summary text. Execution overwrites it for entries it acts on. */
+export function summarizeDecision(p: PlannedEntry, dry: boolean): string {
+  switch (p.action) {
+    case 'current-tab':
+      return 'current tab — already present'
+    case 'already-running':
+      return 'already running'
+    case 'ambiguous':
+      return 'ambiguous (multiple tabs)'
+    case 'no-terminal':
+      return 'no terminal block in tab'
+    case 'no-session':
+      return 'no matching session'
+    case 'attach':
+      return dry ? `dry run: attach ${shortId(p.sessionId)}` : 'sent'
+    case 'recreate':
+      return dry ? `dry run: recreate (${shortId(p.sessionId)})` : 'queued for recreate'
+    case 'duplicate':
+      return p.closeTabId
+        ? dry ? 'dry run: close duplicate dead tab' : 'duplicate dead tab — closed'
+        : 'duplicate entry — skipped'
+    case 'spawn':
+      return dry ? `dry run: spawn (${shortId(p.sessionId)})` : 'queued for spawn'
+    case 'missing':
+      return 'missing (skipped, no --create-missing)'
+  }
+}
+
+/** Carry out a plan. Only ever called for a real (non-dry) run. */
+async function executePlan(
+  adapter: TerminalAdapter,
+  plan: PlannedEntry[],
+  results: Map<PlannedEntry, string>,
+  ctx: {
+    /** Scan mode: the full pre-restore tab order to rebuild. */
+    baseOrder: string[] | undefined
+    /** Every block in a tab, from the snapshot taken before planning. */
+    blocksOf: (tabId: string) => string[]
+  },
+): Promise<void> {
   const config = loadConfig()
   const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
 
-  for (const entry of entries) {
-    // Resolve session ID (expand prefix or validate). Falls back to the entry's value.
-    let resolvedSessionId: string | undefined = entry.session_id
-    let resolvedDir = entry.dir
-    if (entry.session_id) {
-      const expanded = expandSessionId(entry.session_id, entry.dir) ?? expandSessionId(entry.session_id)
-      if (expanded) resolvedSessionId = expanded
-    } else {
-      // Infer from the name — worktree-aware, so a --worktree tab resolves to
-      // its worktree session (and the dir Claude must launch from), not an
-      // older same-named session sitting in the repo-root project dir.
-      const resolved = resolveTabSession(entry.dir, entry.name)
-      if (resolved) {
-        resolvedSessionId = resolved.id
-        resolvedDir = resolved.dir
-      }
-    }
+  // Probe before any socket teardown; adapters without the notion report none.
+  const capabilities = adapter.backendCapabilities ? await adapter.backendCapabilities() : []
+  const spawnWaitsForPty = capabilities.includes(CAP_SPAWN_WAITS_FOR_PTY)
 
-    // The current tab can't be replaced (we're running inside it). Filtering it
-    // out below would make an entry that names the current tab look "missing",
-    // so --create-missing would spawn a DUPLICATE of it (the classic
-    // restore-the-coordination-tab-twice bug). Detect and skip: the current tab
-    // already satisfies this entry.
-    const allMatches = adapter.resolveTab(entry.name, tabsById, tabNames).filter((tid) => wsTabIds.has(tid))
-    if (allMatches.length === 1 && allMatches[0] === currentTab) {
-      consola.log(`  ${entry.name} — current tab, already present`)
-      results.push({ name: entry.name, result: 'current tab — already present' })
-      orderedTabId.set(entry, currentTab)
-      continue
-    }
-
-    const matchingTabs = allMatches.filter((tid) => tid !== currentTab)
-
-    if (matchingTabs.length > 1) {
-      consola.log(`  ${entry.name} — multiple matching tabs, skipping`)
-      results.push({ name: entry.name, result: 'ambiguous (multiple tabs)' })
-      continue
-    }
-
-    if (matchingTabs.length === 1) {
-      // Existing tab — attach (use existing dead-tab logic)
-      const tabId = matchingTabs[0]
-      // Record its position regardless of outcome (running / sent / attached):
-      // an existing tab keeps its manifest slot in the rebuilt order.
-      orderedTabId.set(entry, tabId)
-      const termBlock = (tabsById.get(tabId) ?? []).find((b) => b.view === 'term')
-      if (!termBlock) {
-        results.push({ name: entry.name, result: 'no terminal block in tab' })
-        continue
-      }
-      const status = adapter.detectSessionStatus(termBlock.blockid)
-      if (status === 'active' || status === 'idle') {
-        consola.log(`  ${entry.name} — already running, skipping`)
-        results.push({ name: entry.name, result: 'already running' })
-        continue
-      }
-      if (!resolvedSessionId) {
-        consola.log(`  ${entry.name} — no session ID and none found in ${entry.dir}, skipping`)
-        results.push({ name: entry.name, result: 'no matching session' })
-        continue
-      }
-      if (dryRun) {
-        consola.log(`  ${entry.name} → would resume ${resolvedSessionId.slice(0, 8)}… in existing tab`)
-        results.push({ name: entry.name, result: `dry run: attach ${resolvedSessionId.slice(0, 8)}…` })
-        continue
-      }
-      consola.log(`  ${entry.name} → resuming ${resolvedSessionId.slice(0, 8)}… in existing tab`)
-      const cmd = `cd ${JSON.stringify(resolvedDir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${resolvedSessionId} --name ${JSON.stringify(entry.name)}\r`
-      await adapter.sendInput(termBlock.blockid, cmd)
-      await new Promise((r) => setTimeout(r, 500))
-      results.push({ name: entry.name, result: 'sent' })
-      continue
-    }
-
-    // No matching tab
-    if (!createMissing) {
-      consola.log(`  ${entry.name} — no existing tab; pass --create-missing to spawn one`)
-      results.push({ name: entry.name, result: 'missing (skipped, no --create-missing)' })
-      continue
-    }
-    if (dryRun) {
-      const sid = resolvedSessionId ? `${resolvedSessionId.slice(0, 8)}…` : 'fresh'
-      consola.log(`  ${entry.name} → would spawn new tab in ${resolvedDir} (${sid})`)
-      results.push({ name: entry.name, result: `dry run: spawn (${sid})` })
-      continue
-    }
-    toSpawn.push({ ...entry, dir: resolvedDir, session_id: resolvedSessionId })
+  // old tab id → the tab that replaced it, or null when it just went away.
+  const replacements = new Map<string, string | null>()
+  const finalTabId = new Map<PlannedEntry, string>()
+  for (const p of plan) {
+    if (p.tabId && p.action !== 'recreate' && p.action !== 'duplicate') finalTabId.set(p, p.tabId)
   }
 
-  // Verify any "sent" entries after a brief delay (matches existing restore UX)
-  if (!dryRun) {
-    const sent = results.filter((r) => r.result === 'sent')
-    if (sent.length) {
-      consola.info('Waiting for sessions to start…')
-      await new Promise((r) => setTimeout(r, 10_000))
-      for (const r of sent) {
-        const tabIds = adapter.resolveTab(r.name, tabsById, tabNames).filter((tid) => wsTabIds.has(tid) && tid !== currentTab)
-        const tabId = tabIds[0]
-        const termBlock = tabId ? (tabsById.get(tabId) ?? []).find((b) => b.view === 'term') : undefined
-        if (!termBlock) { r.result = '? tab disappeared'; continue }
-        const status = adapter.detectSessionStatus(termBlock.blockid)
-        if (status === 'active' || status === 'idle') r.result = '✔ running'
-        else if (status === 'unknown') r.result = '? scrollback unavailable'
-        else r.result = '✘ may not have started'
-      }
+  // -- attach: send the resume into tabs that still have a live shell --
+  const attached = plan.filter((p) => p.action === 'attach')
+  for (const p of attached) {
+    const cmd = `cd ${JSON.stringify(p.dir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}\r`
+    await adapter.sendInput(p.blockId!, cmd)
+    await sleep(500)
+  }
+
+  // -- close the tabs we're replacing or dropping --
+  for (const p of plan) {
+    if (!p.closeTabId) continue
+    for (const b of ctx.blocksOf(p.closeTabId)) adapter.deleteBlock(b)
+    replacements.set(p.closeTabId, null)
+  }
+
+  // -- verify the attaches actually started Claude --
+  if (attached.length) {
+    consola.info('Waiting for sessions to start…')
+    await sleep(10_000)
+    for (const p of attached) {
+      const status = adapter.detectSessionStatus(p.blockId!)
+      if (status === 'active' || status === 'idle') results.set(p, '✔ running')
+      else if (status === 'unknown') results.set(p, '? scrollback unavailable')
+      else results.set(p, '✘ may not have started')
     }
   }
 
   adapter.closeSocket()
 
-  // Spawn new tabs. Adapters with openTabDirect (Tabby) return the new tab id
-  // directly, so there is no block-diff race — spawn them all at once. The
-  // osascript path (Wave) must stay serial.
-  const spawnOne = async (entry: ManifestEntry) => {
-    try {
-      const claudeCmd = entry.session_id
-        ? `claude --resume ${entry.session_id} --name ${JSON.stringify(entry.name)}`
-        : 'claude'
-      const newTabId = await openSession({
-        tabName: entry.name,
-        dir: entry.dir,
-        claudeCmd,
-        tailDelayMs: 500,
-      })
-      orderedTabId.set(entry, newTabId)
-      const sid = entry.session_id ? entry.session_id.slice(0, 8) + '…' : 'fresh'
-      results.push({ name: entry.name, result: `✔ spawned [${newTabId.slice(0, 8)}] (${sid})` })
-    } catch (err) {
-      results.push({ name: entry.name, result: `✘ spawn failed: ${(err as Error).message}` })
+  // -- spawn: recreated dead tabs and brand-new ones, in plan order --
+  const toSpawn = plan.filter((p) => p.action === 'recreate' || p.action === 'spawn')
+  if (toSpawn.length) {
+    const recreates = toSpawn.filter((p) => p.action === 'recreate').length
+    if (recreates) consola.info(`Recreating ${recreates} dead tab(s)…`)
+
+    const spawnOne = async (p: PlannedEntry) => {
+      try {
+        const claudeCmd = p.sessionId
+          ? `claude --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}`
+          : 'claude'
+        const newTabId = await openSession({
+          tabName: p.entry.name,
+          dir: p.dir!,
+          claudeCmd,
+          // Spawned tabs append; the whole bar is reordered below, so don't
+          // insert after-active here.
+          tailDelayMs: 500,
+        })
+        finalTabId.set(p, newTabId)
+        if (p.closeTabId) replacements.set(p.closeTabId, newTabId)
+        const verb = p.action === 'recreate' ? 'recreated' : 'spawned'
+        results.set(p, `✔ ${verb} [${newTabId.slice(0, 8)}] (${shortId(p.sessionId)})`)
+      } catch (err) {
+        results.set(p, `✘ ${p.action} failed: ${(err as Error).message}`)
+      }
+    }
+
+    if (spawnWaitsForPty) {
+      // The backend serialises creates and doesn't answer until each tab's
+      // process is running, so firing them all at once is safe and much faster.
+      await Promise.all(toSpawn.map(spawnOne))
+    } else {
+      // Create one at a time. On the direct-spawn path a new tab needs to stay
+      // active long enough to attach its frontend and fork its PTY before the
+      // next one steals activation (see SPAWN_SETTLE_MS). The osascript path
+      // must be serial regardless — concurrent Cmd+T keystrokes would land in
+      // the wrong tab — and self-paces via waitForNewBlock, so it needs no gap.
+      const usesDirectSpawn = typeof adapter.openTabDirect === 'function'
+      for (const p of toSpawn) {
+        await spawnOne(p)
+        if (usesDirectSpawn) await sleep(SPAWN_SETTLE_MS)
+      }
     }
   }
 
-  if (typeof adapter.openTabDirect === 'function') {
-    await Promise.all(toSpawn.map(spawnOne))
-  } else {
-    for (const entry of toSpawn) await spawnOne(entry)
-  }
-
-  // Rebuild the tab bar in manifest order. Kept as a separate final step (rather
-  // than spawning serially in order) so the fast parallel spawn above is
-  // untouched — reordering by id afterwards is independent of the order the tabs
-  // were created in. Best-effort: adapters without reorderTabs (Wave) keep the
-  // append order, and reorderTabs leaves any tab not named in the manifest in
-  // its existing relative slot (sorted after the listed ones).
-  if (!dryRun && typeof adapter.reorderTabs === 'function') {
-    const desiredOrder = entries.map((e) => orderedTabId.get(e)).filter((id): id is string => !!id)
+  // -- rebuild the tab bar --
+  // Best-effort: adapters without reorderTabs (Wave) keep the append order, and
+  // reorderTabs leaves unlisted tabs in their relative slot, sorted after.
+  if (typeof adapter.reorderTabs === 'function') {
+    const desiredOrder = buildDesiredOrder(
+      plan.map((p) => finalTabId.get(p)),
+      replacements,
+      ctx.baseOrder,
+    )
     if (desiredOrder.length) {
       try {
         await adapter.reorderTabs(desiredOrder)
@@ -308,251 +456,6 @@ async function runManifestMode(manifestPath: string, createMissing: boolean, dry
       }
     }
   }
-
-  console.log('\nRestore summary:')
-  for (const r of results) {
-    console.log(`  ${r.name}: ${r.result}`)
-  }
 }
 
-/**
- * No-manifest restore: scan the current window's tabs, find each dead tab's
- * session by name, and resume it in place (recreating truly-dead tabs). This is
- * the default `cctabs restore [dir]` path — not deprecated, and until manifest
- * mode gained its own reorder step it was the only path that rebuilt the
- * pre-reboot tab order.
- */
-async function runNameScanMode(rawDir: string | undefined, dryRun: boolean): Promise<void> {
-  const scopedDir = rawDir ? resolve(rawDir.replace(/^~/, homedir())) : null
-
-  const adapter = requireAdapter()
-  const { tabsById, workspaces, tabNames } = await adapter.getAllData()
-  const currentTab = adapter.currentTabId()
-
-  const tabs: Array<{
-    tabId: string
-    name: string
-    blockId: string
-    status: string
-  }> = []
-
-  // Full pre-reboot tab order (every tab, incl. the current one and live tabs),
-  // so we can rebuild it after recreating dead tabs — which append to the end.
-  const originalOrder: string[] = []
-
-  for (const wsp of workspaces) {
-    for (const tabId of wsp.workspacedata.tabids) {
-      originalOrder.push(tabId)
-      if (tabId === currentTab) continue
-      const blocks = (tabsById.get(tabId) ?? []).filter((b) => b.view === 'term')
-      if (!blocks.length) continue
-      const name = tabNames.get(tabId) ?? tabId.slice(0, 8)
-      const status = adapter.detectSessionStatus(blocks[0].blockid)
-      tabs.push({ tabId, name, blockId: blocks[0].blockid, status })
-    }
-  }
-
-  const toResume = tabs.filter((t) => t.status === 'terminal' || t.status === 'unknown')
-  const alreadyActive = tabs.filter((t) => t.status === 'active' || t.status === 'idle')
-
-  if (alreadyActive.length) {
-    consola.info(`Already running: ${alreadyActive.map((t) => t.name).join(', ')}`)
-  }
-
-  if (!toResume.length) {
-    consola.info('No terminal-state tabs to restore.')
-    adapter.closeSocket()
-    return
-  }
-
-  consola.info(`Found ${toResume.length} tab(s) to restore:`)
-
-  const config = loadConfig()
-  const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
-  const results: Array<{ name: string; result: string }> = []
-
-  const toRecreate: Array<{ name: string; sessionId: string; sessionDir: string; blockIds: string[]; tabId: string }> = []
-
-  // Pass 1 (sync): resolve each tab's session. Defer the slow per-tab
-  // confirmScrollbackEmpty / sendInput work so the empty-checks can be batched.
-  interface Resolved { tab: typeof toResume[number]; sessionId: string; sessionDir: string }
-  const resolved: Resolved[] = []
-
-  for (const tab of toResume) {
-    let sessionId: string | null = null
-    let sessionDir: string | null = null
-
-    if (scopedDir) {
-      const sessions = findSessionsByName(scopedDir, tab.name)
-      if (sessions.length === 0) {
-        consola.log(`  ${tab.name} — no session named "${tab.name}" found in ${scopedDir}, skipping`)
-        results.push({ name: tab.name, result: 'no matching session' })
-        continue
-      }
-      if (sessions.length > 1) {
-        consola.log(`  ${tab.name} — multiple sessions found, skipping (use cctabs resume --session to pick one)`)
-        results.push({ name: tab.name, result: 'ambiguous (multiple sessions)' })
-        continue
-      }
-      sessionId = sessions[0].id
-      sessionDir = scopedDir
-    } else {
-      const sessions = findSessionsByNameGlobally(tab.name)
-      if (sessions.length === 0) {
-        consola.log(`  ${tab.name} — no session named "${tab.name}" found in any project, skipping`)
-        results.push({ name: tab.name, result: 'no matching session' })
-        continue
-      }
-      if (sessions.length > 1) {
-        consola.log(`  ${tab.name} — multiple sessions found across projects, picking newest (${sessions[0].dir})`)
-      }
-      sessionId = sessions[0].id
-      sessionDir = sessions[0].dir
-    }
-
-    if (dryRun) {
-      const mode = tab.status === 'unknown' ? 'recreate' : 'send'
-      consola.log(`  ${tab.name} → would ${mode} session ${sessionId.slice(0, 8)}… in ${sessionDir}`)
-      results.push({ name: tab.name, result: `dry run: ${sessionId.slice(0, 8)}…` })
-      continue
-    }
-
-    resolved.push({ tab, sessionId, sessionDir })
-  }
-
-  if (!dryRun) {
-    // Pass 2 (parallel): confirm the 'unknown'-status tabs really are dead.
-    // confirmScrollbackEmpty awaits sleeps between polls; running them
-    // concurrently lets those sleeps overlap (~1s total instead of ~1s × N).
-    const unknownTabs = resolved.filter((r) => r.tab.status === 'unknown')
-    const emptyById = new Map<string, boolean>()
-    await Promise.all(
-      unknownTabs.map(async (r) => {
-        emptyById.set(r.tab.tabId, await adapter.confirmScrollbackEmpty(r.tab.blockId))
-      }),
-    )
-
-    // Pass 3: queue recreates for confirmed-dead tabs; send to the rest.
-    // Dedup by tab name first: after a reboot it's possible to have two (or
-    // more) dead tabs with the same name — restoring each would spawn duplicate
-    // live tabs all resuming the *same* (newest) session. Keep the first one
-    // per name; close the extras so they don't linger or reappear next restore.
-    const claimedNames = new Set<string>()
-    for (const r of resolved) {
-      const { tab, sessionId, sessionDir } = r
-      if (claimedNames.has(tab.name)) {
-        const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
-        for (const bid of blockIds) adapter.deleteBlock(bid)
-        consola.log(`  ${tab.name} — duplicate dead tab, closing (already restoring one)`)
-        results.push({ name: tab.name, result: 'duplicate dead tab — closed' })
-        continue
-      }
-      claimedNames.add(tab.name)
-      if (tab.status === 'unknown' && emptyById.get(tab.tabId)) {
-        const blockIds = (tabsById.get(tab.tabId) ?? []).map((b) => b.blockid)
-        toRecreate.push({ name: tab.name, sessionId, sessionDir, blockIds, tabId: tab.tabId })
-        results.push({ name: tab.name, result: 'queued for recreate' })
-        continue
-      }
-
-      consola.log(`  ${tab.name} → resuming session ${sessionId.slice(0, 8)}… in ${sessionDir} (send)`)
-      const cmd = `cd ${JSON.stringify(sessionDir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${sessionId} --name ${JSON.stringify(tab.name)}\r`
-      await adapter.sendInput(tab.blockId, cmd)
-
-      await new Promise((r) => setTimeout(r, 500))
-      results.push({ name: tab.name, result: 'sent' })
-    }
-  }
-
-  if (!dryRun) {
-    const sent = results.filter((r) => r.result === 'sent')
-    if (sent.length) {
-      consola.info('Waiting for sessions to start…')
-      await new Promise((r) => setTimeout(r, 10_000))
-
-      for (const r of sent) {
-        const tab = toResume.find((t) => t.name === r.name)!
-        const status = adapter.detectSessionStatus(tab.blockId)
-        if (status === 'active' || status === 'idle') {
-          r.result = '✔ running'
-        } else if (status === 'unknown') {
-          r.result = '? scrollback unavailable'
-        } else {
-          r.result = '✘ may not have started'
-        }
-      }
-    }
-  }
-
-  if (!dryRun && toRecreate.length) {
-    for (const t of toRecreate) {
-      for (const bid of t.blockIds) adapter.deleteBlock(bid)
-    }
-    adapter.closeSocket()
-
-    consola.info(`Recreating ${toRecreate.length} dead tab(s)…`)
-
-    // old (dead) tabId → new tabId, so we can rebuild the original tab order.
-    const recreatedIds = new Map<string, string>()
-
-    const recreateOne = async (t: typeof toRecreate[number]) => {
-      try {
-        const newTabId = await openSession({
-          tabName: t.name,
-          dir: t.sessionDir,
-          claudeCmd: `claude --resume ${t.sessionId} --name ${JSON.stringify(t.name)}`,
-          // Recreated tabs append; restore reorders the whole bar afterwards to
-          // restore the pre-reboot order, so don't insert after-active here.
-          // waitForNewBlock already confirms each new block is visible before
-          // returning, so the full 2s settle isn't needed between recreates.
-          tailDelayMs: 500,
-        })
-        recreatedIds.set(t.tabId, newTabId)
-        const r = results.find((x) => x.name === t.name)!
-        r.result = `✔ recreated [${newTabId.slice(0, 8)}]`
-      } catch (err) {
-        const r = results.find((x) => x.name === t.name)!
-        r.result = `✘ recreate failed: ${(err as Error).message}`
-      }
-    }
-
-    // Recreate serially. There's no block-diff to race on the openTabDirect
-    // (Tabby) path, but there IS a spawn-on-activation race: Tabby's plugin
-    // builds each tab via openNewTabRaw, which makes the new tab the *active*
-    // one, and a terminal tab spawns its PTY (our `exec claude`) only once it
-    // first becomes active. Firing recreates concurrently means every tab but
-    // the last loses activation before it spawns — only the final tab created
-    // ever starts Claude. Creating them one at a time, with a short settle so
-    // each tab stays active long enough to spawn before the next steals focus,
-    // is exactly what makes a single `cctabs resume` reliable. The Wave
-    // osascript path must stay serial too — concurrent Cmd+T keystrokes would
-    // land in the wrong tab and waitForNewBlock could not disambiguate the new
-    // blocks — and self-paces via its internal waitForNewBlock + shell-prompt
-    // wait, so it needs no extra settle.
-    const usesDirectSpawn = typeof adapter.openTabDirect === 'function'
-    for (const t of toRecreate) {
-      await recreateOne(t)
-      if (usesDirectSpawn) await new Promise((r) => setTimeout(r, SPAWN_SETTLE_MS))
-    }
-
-    // Recreated tabs were appended to the end of the bar; rebuild the pre-reboot
-    // order by mapping each original tabId to its replacement (live tabs and the
-    // current tab map to themselves). Best-effort — adapters without reorderTabs
-    // (Wave) just keep the append order.
-    if (recreatedIds.size && typeof adapter.reorderTabs === 'function') {
-      const desiredOrder = originalOrder.map((id) => recreatedIds.get(id) ?? id)
-      try {
-        await adapter.reorderTabs(desiredOrder)
-      } catch (err) {
-        consola.warn(`Could not restore tab order: ${(err as Error).message}`)
-      }
-    }
-  } else {
-    adapter.closeSocket()
-  }
-
-  console.log('\nRestore summary:')
-  for (const r of results) {
-    console.log(`  ${r.name}: ${r.result}`)
-  }
-}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
