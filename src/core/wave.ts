@@ -7,6 +7,7 @@ import type { Block, Workspace, AllData } from '../types/index.js'
 import { detectTerminal, printUnsupportedTerminalError } from './terminal.js'
 import { findOrphanTabIds, WSH_ORPHAN_TABID_PATTERN, type OrphanReport } from './wave-db.js'
 import type { TerminalAdapter } from './adapter.js'
+import { matchTabsByName, type TabMatchOptions } from './tab-match.js'
 
 export class WaveOrphanTabidError extends Error {
   reports: OrphanReport[]
@@ -392,17 +393,9 @@ export class WaveAdapter implements TerminalAdapter {
     query: string,
     tabsById: Map<string, Block[]>,
     tabNames: Map<string, string>,
+    opts?: TabMatchOptions,
   ): string[] {
-    const q = query.toLowerCase()
-    const ids = [...tabsById.keys()]
-    const exact = ids.filter(
-      (tid) => (tabNames.get(tid) ?? '').toLowerCase() === q,
-    )
-    if (exact.length > 0) return exact
-    return ids.filter((tid) => {
-      const name = tabNames.get(tid) ?? ''
-      return tid.startsWith(query) || name.toLowerCase().startsWith(q)
-    })
+    return matchTabsByName(query, [...tabsById.keys()], tabNames, opts)
   }
 
   resolveBlock(query: string, blocks: Block[]): Block[] {

@@ -2,6 +2,7 @@ import type { AllData, Block, SessionStatus, Workspace } from '../types/index.js
 import { resolveTerminal, printUnsupportedTerminalError } from './terminal.js'
 import { WaveAdapter } from './wave.js'
 import { TabbyAdapter } from './tabby.js'
+import type { TabMatchOptions } from './tab-match.js'
 
 /**
  * The shared shape every backend adapter (Wave, Tabby, …) presents to the
@@ -41,10 +42,12 @@ export interface TerminalAdapter {
    * implement this; the rest leave it undefined and callers fall back to the
    * newTab()/waitForNewBlock() dance.
    *
-   * NOTE: do not invoke this concurrently to create many tabs at once. The
-   * backend makes each new tab the active one as it spawns, and a terminal tab
-   * only starts its command once it first becomes active — fire N in parallel
-   * and all but the last lose activation before they spawn. Create serially.
+   * CONCURRENCY: only safe to call in parallel when the backend advertises
+   * `spawn-waits-for-pty` via backendCapabilities(). Otherwise the backend
+   * makes each new tab the active one as it spawns, and a terminal tab only
+   * starts its command once it first becomes active — fire N in parallel and
+   * the ones that lose activation before their frontend attaches never spawn a
+   * process at all. Without that capability, create serially with a settle gap.
    */
   openTabDirect?(opts: {
     cwd: string
@@ -58,11 +61,27 @@ export interface TerminalAdapter {
   /** Reorder the tab bar to match `order` (tab ids); unlisted tabs keep order and sort after. */
   reorderTabs?(order: string[]): Promise<void>
 
+  /**
+   * Capability tokens advertised by the backend, for feature detection.
+   *
+   * Users routinely run a CLI that is newer than the terminal-side plugin it
+   * talks to, so behaviour that depends on a backend fix has to be probed, not
+   * assumed. Adapters with no notion of capabilities leave this undefined;
+   * callers must treat that as "none".
+   *
+   * Known tokens:
+   *   `spawn-waits-for-pty` — openTabDirect serialises concurrent creates and
+   *     only resolves once the new tab's process is actually running, making
+   *     parallel spawning safe.
+   */
+  backendCapabilities?(): Promise<string[]>
+
   // -- query helpers (pure data manipulation) --
   resolveTab(
     query: string,
     tabsById: Map<string, Block[]>,
     tabNames: Map<string, string>,
+    opts?: TabMatchOptions,
   ): string[]
   resolveBlock(query: string, blocks: Block[]): Block[]
   resolveWorkspace(

@@ -108,7 +108,11 @@ export const resumeCommand = define({
 
     const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
-    const matchingTabs = adapter.resolveTab(displayName, tabsById, tabNames)
+    // Exact-name only. The prefix fallback is for hand-typed lookups; here the
+    // question is "does THIS session's tab already exist?", and a longer-named
+    // neighbour (`gapminder-login` for `gapminder`) answering yes makes resume
+    // refuse with "already running" for a tab that isn't even open.
+    const matchingTabs = adapter.resolveTab(displayName, tabsById, tabNames, { exact: true })
 
     if (matchingTabs.length > 1) {
       consola.error(`Multiple tabs match '${displayName}':`)

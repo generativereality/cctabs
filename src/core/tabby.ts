@@ -7,6 +7,7 @@ import type {
   WorkspaceData,
 } from '../types/index.js'
 import type { TerminalAdapter } from './adapter.js'
+import { matchTabsByName, type TabMatchOptions } from './tab-match.js'
 
 /**
  * Thrown when the cctabs Tabby plugin's HTTP API is unreachable.
@@ -51,6 +52,7 @@ export class TabbyAdapter implements TerminalAdapter {
   private host: string
   private port: number
   private cachedSelfUuid: string | null = null
+  private cachedCapabilities: string[] | null = null
   private healthChecked = false
 
   constructor() {
@@ -274,6 +276,24 @@ export class TabbyAdapter implements TerminalAdapter {
     return { blockId: uuid, tabId: uuid }
   }
 
+  /**
+   * Capabilities from /api/health. Plugins predating capability reporting
+   * simply omit the field, which correctly reads as "none" — the CLI then
+   * falls back to serial spawning.
+   */
+  async backendCapabilities(): Promise<string[]> {
+    if (this.cachedCapabilities) return this.cachedCapabilities
+    try {
+      const r = (await this.http('GET', '/api/health')) as { capabilities?: unknown } | null
+      const caps = Array.isArray(r?.capabilities) ? r!.capabilities.map(String) : []
+      this.cachedCapabilities = caps
+      return caps
+    } catch {
+      this.cachedCapabilities = []
+      return []
+    }
+  }
+
   async reorderTabs(order: string[]): Promise<void> {
     this.ensureHealthy()
     await this.http('POST', '/api/tabs/reorder', { order })
@@ -322,23 +342,14 @@ export class TabbyAdapter implements TerminalAdapter {
     query: string,
     tabsById: Map<string, Block[]>,
     tabNames: Map<string, string>,
+    opts?: TabMatchOptions,
   ): string[] {
-    const q = query.toLowerCase()
-
     if (query === '.' || query === 'self') {
       const self = this.identifySelf()
       return self ? [self] : []
     }
 
-    const ids = [...tabsById.keys()]
-    const exact = ids.filter(
-      (tid) => (tabNames.get(tid) ?? '').toLowerCase() === q,
-    )
-    if (exact.length > 0) return exact
-    return ids.filter((tid) => {
-      const name = tabNames.get(tid) ?? ''
-      return tid.startsWith(query) || name.toLowerCase().startsWith(q)
-    })
+    return matchTabsByName(query, [...tabsById.keys()], tabNames, opts)
   }
 
   resolveBlock(query: string, blocks: Block[]): Block[] {
