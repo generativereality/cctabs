@@ -26,6 +26,10 @@ export const sessionsCommand = define({
         status: string
         last_line: string
         session_id: string | null
+        /** Backend preset owning this session's Claude config dir, if any. */
+        backend?: string
+        /** Non-default CLAUDE_CONFIG_DIR the session lives in, if any. */
+        config_dir?: string
       }
       type WorkspaceRow = {
         id: string
@@ -63,12 +67,19 @@ export const sessionsCommand = define({
           // manifest round-trips through `restore` and resumes the right session.
           let sessionId: string | null = null
           let sessionDir = cwd
+          // Which Claude account the session belongs to. Emitted so the
+          // manifest round-trips: a session living in a backend's own
+          // CLAUDE_CONFIG_DIR can't be resumed without it.
+          let backend: string | undefined
+          let configDir: string | undefined
           if (cwd) {
             try {
               const resolved = resolveTabSession(cwd, tabName)
               if (resolved) {
                 sessionId = resolved.id
                 sessionDir = resolved.dir
+                backend = resolved.backend
+                configDir = resolved.configDir
               }
             } catch {
               // ignore — best-effort lookup
@@ -84,6 +95,8 @@ export const sessionsCommand = define({
             status,
             last_line: lastLine.slice(0, 200),
             session_id: sessionId,
+            ...(backend ? { backend } : {}),
+            ...(configDir ? { config_dir: configDir } : {}),
           })
         }
 

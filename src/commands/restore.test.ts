@@ -1,8 +1,14 @@
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import type { TerminalAdapter } from '../core/adapter.js'
 import type { AllData, Block, SessionStatus } from '../types/index.js'
-import { planRestore, type PlannedEntry, type RestoreAction } from '../core/restore-plan.js'
-import { buildPlanDeps, describeDecision, summarizeDecision } from './restore.js'
+import { planRestore, type PlannedEntry, type RestoreAction, type RestoreEntry } from '../core/restore-plan.js'
+import { DEFAULT_CONFIG_ROOT, type ClaudeConfigDir } from '../core/config-dirs.js'
+import { launchEnvFor } from '../core/backends.js'
+import { pathToProjectSlug } from '../core/session.js'
+import { buildPlanDeps, buildResumeCommand, describeDecision, summarizeDecision } from './restore.js'
 
 /**
  * An adapter that answers reads and throws on every mutation.
@@ -159,5 +165,143 @@ describe('restore output parity', () => {
   it('names the session it would resume', () => {
     expect(describeDecision(planned('attach'), true)).toContain('abcdef01…')
     expect(describeDecision(planned('spawn', { sessionId: undefined }), true)).toContain('fresh')
+  })
+})
+
+/**
+ * End-to-end through restore's own session resolution: a manifest that carries
+ * nothing but a session id must still relaunch that session in the Claude
+ * config dir it actually lives in. Getting this wrong is silent — the id isn't
+ * in the default config dir, so `claude --resume` opens a fresh conversation.
+ */
+describe('restore session origin', () => {
+  let defaultRoot: string
+  let altRoot: string
+  let repo: string
+  let dirs: ClaudeConfigDir[]
+  const SESSION_ID = 'c1ae54cf-728b-40e5-a4a1-c34ac017968b'
+
+  beforeEach(() => {
+    defaultRoot = mkdtempSync(join(tmpdir(), 'cctabs-default-'))
+    altRoot = mkdtempSync(join(tmpdir(), 'cctabs-alt-'))
+    repo = mkdtempSync(join(tmpdir(), 'cctabs-repo-'))
+    dirs = [
+      { root: DEFAULT_CONFIG_ROOT, projectsRoot: join(defaultRoot, 'projects') },
+      // A preset name deliberately absent from any real config.toml, so the
+      // assertions below don't depend on this machine's presets.
+      { root: altRoot, projectsRoot: join(altRoot, 'projects'), backend: 'test-account' },
+    ]
+  })
+
+  afterEach(() => {
+    for (const d of [defaultRoot, altRoot, repo]) rmSync(d, { recursive: true, force: true })
+  })
+
+  function writeSession(projectsRoot: string, id: string, title: string): void {
+    const projectDir = join(projectsRoot, pathToProjectSlug(repo))
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(
+      join(projectDir, `${id}.jsonl`),
+      [
+        JSON.stringify({ type: 'summary', customTitle: title }),
+        JSON.stringify({ type: 'user', cwd: repo, message: { role: 'user', content: 'hi' } }),
+      ].join('\n') + '\n',
+    )
+  }
+
+  async function planFor(entry: RestoreEntry): Promise<PlannedEntry> {
+    const { adapter, tabsById, tabNames } = stubAdapter([])
+    const plan = await planRestore(
+      [entry],
+      buildPlanDeps(adapter, {
+        tabsById,
+        tabNames,
+        scopeTabIds: new Set(),
+        currentTabId: 'current',
+        createMissing: true,
+        sessionScope: dirs,
+      }),
+    )
+    return plan[0]
+  }
+
+  it('never plans a plain no-backend spawn for an id that only exists in a non-default config dir', async () => {
+    writeSession(join(altRoot, 'projects'), SESSION_ID, 'gapminder-login')
+
+    // A manifest that says nothing about accounts — the shape `sessions --json`
+    // emitted before it learned to record one.
+    const p = await planFor({ name: 'gapminder-login', dir: repo, sessionId: SESSION_ID })
+
+    expect(p.action).toBe('spawn')
+    expect(p.sessionId).toBe(SESSION_ID)
+    expect(p.backend).toBe('test-account')
+    expect(p.configDir).toBe(altRoot)
+    // …and that survives into the launch env, which is what actually matters.
+    expect(launchEnvFor(p.backend, p.configDir).env?.CLAUDE_CONFIG_DIR).toBe(altRoot)
+    expect(describeDecision(p, true)).toContain('[backend: test-account]')
+  })
+
+  it('infers the account from the name alone, with no session id at all', async () => {
+    writeSession(join(altRoot, 'projects'), SESSION_ID, 'gapminder-login')
+    const p = await planFor({ name: 'gapminder-login', dir: repo })
+    expect(p).toMatchObject({ action: 'spawn', sessionId: SESSION_ID, backend: 'test-account' })
+  })
+
+  it('leaves a default-config-dir session with no env at all', async () => {
+    const id = 'aaaaaaaa-0000-0000-0000-00000000000c'
+    writeSession(join(defaultRoot, 'projects'), id, 'plain')
+    const p = await planFor({ name: 'plain', dir: repo, sessionId: id })
+    expect(p.backend).toBeUndefined()
+    expect(p.configDir).toBeUndefined()
+    expect(launchEnvFor(p.backend, p.configDir)).toEqual({})
+    expect(describeDecision(p, true)).not.toContain('backend')
+  })
+
+  it('honours a backend the manifest states even when the transcript is not here yet', async () => {
+    // Restoring onto a fresh machine: nothing to infer from, so the manifest's
+    // own record is all there is.
+    const p = await planFor({
+      name: 'gapminder-login',
+      dir: repo,
+      sessionId: SESSION_ID,
+      backend: 'test-account',
+    })
+    expect(p.backend).toBe('test-account')
+    expect(p.sessionId).toBe(SESSION_ID)
+  })
+})
+
+describe('buildResumeCommand', () => {
+  const base: PlannedEntry = {
+    entry: { name: 'gapminder-login', dir: '/repo' },
+    action: 'attach',
+    sessionId: 'c1ae54cf-728b-40e5-a4a1-c34ac017968b',
+    dir: '/repo',
+  }
+
+  it('cds and resumes by id under the default account', () => {
+    expect(buildResumeCommand(base, '--flag')).toBe(
+      'cd "/repo" && claude --flag --resume c1ae54cf-728b-40e5-a4a1-c34ac017968b --name "gapminder-login"',
+    )
+  })
+
+  // The whole point of carrying the origin: without CLAUDE_CONFIG_DIR this line
+  // runs fine and quietly opens a NEW conversation, because the id isn't in the
+  // default config dir.
+  it('exports the config dir for a session from another account', () => {
+    const cmd = buildResumeCommand({ ...base, configDir: '/home/x/.claude-gapminder' }, '')
+    expect(cmd).toStartWith('cd "/repo" && CLAUDE_CONFIG_DIR="/home/x/.claude-gapminder" claude --resume ')
+  })
+
+  it('applies a backend preset env and its model', () => {
+    const cmd = buildResumeCommand({ ...base, backend: 'kimi' }, '')
+    expect(cmd).toContain('CCTABS_ACTIVE_BACKEND="kimi"')
+    expect(cmd).toContain('ANTHROPIC_BASE_URL=')
+    expect(cmd).toEndWith('--model "kimi-k2.6:cloud"')
+  })
+
+  it('quotes a directory containing spaces', () => {
+    const cmd = buildResumeCommand({ ...base, dir: '/Users/x/Remember This' }, '')
+    expect(cmd).toStartWith('cd "/Users/x/Remember This" &&')
   })
 })

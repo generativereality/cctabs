@@ -15,6 +15,13 @@ import type { RestoreEntry } from './restore-plan.js'
  * Per entry, `dir` and `cwd` are interchangeable; `~` is expanded and the path
  * made absolute. Entries missing a name or directory are skipped rather than
  * failing the whole file — a manifest is often hand-edited.
+ *
+ * `backend` / `config_dir` say which Claude account the session belongs to.
+ * They're optional: restore infers both from wherever it finds the session, so
+ * an older manifest still restores correctly. Carrying them matters when the
+ * transcript isn't on this machine yet (an imported manifest) — there is
+ * nothing to infer from, and resuming the id under the default config dir would
+ * quietly open a fresh conversation instead.
  */
 export function parseManifest(raw: string): RestoreEntry[] {
   let parsed: unknown
@@ -49,7 +56,16 @@ export function parseManifest(raw: string): RestoreEntry[] {
     const dir = typeof it.dir === 'string' ? it.dir : typeof it.cwd === 'string' ? it.cwd : null
     if (!name || !dir) continue
     const sessionId = typeof it.session_id === 'string' ? it.session_id : undefined
-    entries.push({ name, dir: resolve(dir.replace(/^~/, homedir())), sessionId })
+    const backend = typeof it.backend === 'string' && it.backend ? it.backend : undefined
+    const rawConfigDir = typeof it.config_dir === 'string' ? it.config_dir : null
+    const configDir = rawConfigDir ? resolve(rawConfigDir.replace(/^~/, homedir())) : undefined
+    entries.push({
+      name,
+      dir: resolve(dir.replace(/^~/, homedir())),
+      sessionId,
+      backend,
+      configDir,
+    })
   }
   return entries
 }

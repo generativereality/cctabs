@@ -9,8 +9,8 @@ describe('parseManifest', () => {
       { name: 'beta', dir: '/tmp/beta' },
     ]))
     expect(out).toEqual([
-      { name: 'alpha', dir: '/tmp/alpha', sessionId: 'abc123' },
-      { name: 'beta', dir: '/tmp/beta', sessionId: undefined },
+      { name: 'alpha', dir: '/tmp/alpha', sessionId: 'abc123', backend: undefined, configDir: undefined },
+      { name: 'beta', dir: '/tmp/beta', sessionId: undefined, backend: undefined, configDir: undefined },
     ])
   })
 
@@ -27,8 +27,8 @@ describe('parseManifest', () => {
       ],
     }))
     expect(out).toEqual([
-      { name: 'alpha', dir: '/tmp/alpha', sessionId: undefined },
-      { name: 'beta', dir: '/tmp/beta', sessionId: undefined },
+      { name: 'alpha', dir: '/tmp/alpha', sessionId: undefined, backend: undefined, configDir: undefined },
+      { name: 'beta', dir: '/tmp/beta', sessionId: undefined, backend: undefined, configDir: undefined },
     ])
   })
 
@@ -69,6 +69,49 @@ describe('parseManifest', () => {
 
   it('returns nothing for a shape it does not recognise', () => {
     expect(parseManifest(JSON.stringify({ tabs: [{ name: 'a', dir: '/tmp/a' }] }))).toEqual([])
+  })
+
+  it('round-trips the backend and config dir a `sessions --json` entry carries', () => {
+    // Shape emitted by `cctabs sessions --json` for a session living in a
+    // second Claude account's config dir.
+    const out = parseManifest(JSON.stringify({
+      workspaces: [{
+        sessions: [{
+          name: 'gapminder-login',
+          cwd: '/Users/motin/Dev/Projects/Gapminder',
+          session_id: 'c1ae54cf-728b-40e5-a4a1-c34ac017968b',
+          backend: 'gapminder',
+          config_dir: '/Users/motin/.claude-gapminder',
+        }],
+      }],
+    }))
+    expect(out).toEqual([{
+      name: 'gapminder-login',
+      dir: '/Users/motin/Dev/Projects/Gapminder',
+      sessionId: 'c1ae54cf-728b-40e5-a4a1-c34ac017968b',
+      backend: 'gapminder',
+      configDir: '/Users/motin/.claude-gapminder',
+    }])
+  })
+
+  it('leaves backend and config dir unset when the manifest omits them', () => {
+    // Older manifests, and default-account sessions. Restore infers the origin
+    // from wherever it finds the session, so these still restore correctly.
+    const [entry] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a', session_id: 'abc' }]))
+    expect(entry.backend).toBeUndefined()
+    expect(entry.configDir).toBeUndefined()
+  })
+
+  it('expands ~ in a config dir', () => {
+    const [entry] = parseManifest(JSON.stringify([
+      { name: 'a', dir: '/tmp/a', config_dir: '~/.claude-gapminder' },
+    ]))
+    expect(entry.configDir).toBe(`${homedir()}/.claude-gapminder`)
+  })
+
+  it('ignores a non-string backend', () => {
+    const [entry] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a', backend: 7 }]))
+    expect(entry.backend).toBeUndefined()
   })
 
   it('throws a clear error on invalid JSON', () => {

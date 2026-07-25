@@ -1,4 +1,5 @@
 import type { SessionStatus } from '../types/index.js'
+import type { SessionOrigin } from './config-dirs.js'
 
 /**
  * Planning half of `cctabs restore`.
@@ -15,7 +16,7 @@ import type { SessionStatus } from '../types/index.js'
  * would act on, rather than a separate, more optimistic guess.
  */
 
-export interface RestoreEntry {
+export interface RestoreEntry extends SessionOrigin {
   /** Tab title / Claude session `--name`. */
   name: string
   /**
@@ -57,7 +58,7 @@ export type RestoreAction =
   /** No tab exists and --create-missing wasn't passed. */
   | 'missing'
 
-export interface PlannedEntry {
+export interface PlannedEntry extends SessionOrigin {
   entry: RestoreEntry
   action: RestoreAction
   /** Existing tab this entry resolved to, when there is one. */
@@ -76,8 +77,13 @@ export interface PlannedEntry {
   dir?: string
 }
 
-/** Session lookup result: the id to resume and the directory to resume it in. */
-export interface ResolvedSession {
+/**
+ * Session lookup result: the id to resume, the directory to resume it in, and
+ * which Claude config dir / backend it belongs to. The origin has to travel
+ * with the id — resuming it against the wrong config dir silently starts a
+ * fresh conversation rather than failing.
+ */
+export interface ResolvedSession extends SessionOrigin {
   id: string
   dir: string
 }
@@ -101,6 +107,21 @@ export interface PlanDeps {
   resolveSession(entry: RestoreEntry): ResolvedSession | null
   /** Whether entries with no existing tab may be spawned. */
   createMissing: boolean
+}
+
+/**
+ * Where a planned entry's session must be relaunched from.
+ *
+ * An entry that names its own backend (a manifest that recorded one) wins over
+ * what discovery inferred — the manifest is a deliberate statement about which
+ * account the tab belongs to, and it may name a config dir whose transcript
+ * hasn't been copied to this machine yet.
+ */
+function originFor(entry: RestoreEntry, session: ResolvedSession | null): SessionOrigin {
+  if (entry.backend || entry.configDir) {
+    return { backend: entry.backend, configDir: entry.configDir }
+  }
+  return { backend: session?.backend, configDir: session?.configDir }
 }
 
 /** Actions that leave a tab running this entry's session. */
@@ -240,13 +261,20 @@ export async function planRestore(
         closeTabId: dead ? p.tabId : undefined,
         sessionId: session.id,
         dir: session.dir,
+        ...originFor(entry, session),
       })
       continue
     }
 
     // No tab at all.
     if (!deps.createMissing) {
-      planned.push({ entry, action: 'missing', sessionId: session?.id, dir: session?.dir ?? entry.dir })
+      planned.push({
+        entry,
+        action: 'missing',
+        sessionId: session?.id,
+        dir: session?.dir ?? entry.dir,
+        ...originFor(entry, session),
+      })
       continue
     }
     claimedNames.add(entry.name)
@@ -258,6 +286,7 @@ export async function planRestore(
       action: 'spawn',
       sessionId: session?.id,
       dir: session?.dir ?? entry.dir,
+      ...originFor(entry, session),
     })
   }
 

@@ -308,3 +308,68 @@ describe('buildDesiredOrder', () => {
     expect(order).toEqual(['t3', 't1'])
   })
 })
+
+/**
+ * A session's Claude config dir has to survive planning. Losing it is silent:
+ * `claude --resume <id>` in the default config dir doesn't fail, it just can't
+ * find that id and opens a fresh conversation instead.
+ */
+describe('planRestore — session origin', () => {
+  const gapminder = { id: 'sess-alpha', dir: '/dir/alpha', backend: 'gapminder', configDir: '/home/x/.claude-gapminder' }
+
+  function depsWithOrigin(tabs: FakeTab[], session: typeof gapminder | null, createMissing = false): PlanDeps {
+    const deps = makeDeps(tabs, { createMissing })
+    deps.resolveSession = () => session
+    return deps
+  }
+
+  it('carries the backend onto an attach', async () => {
+    const plan = await planRestore(
+      [mEntry('alpha')],
+      depsWithOrigin([{ id: 't1', name: 'alpha', status: 'terminal' }], gapminder),
+    )
+    expect(plan[0]).toMatchObject({
+      action: 'attach',
+      backend: 'gapminder',
+      configDir: '/home/x/.claude-gapminder',
+    })
+  })
+
+  it('carries the backend onto a recreate and a spawn', async () => {
+    const recreate = await planRestore(
+      [mEntry('alpha')],
+      depsWithOrigin([{ id: 't1', name: 'alpha', status: 'unknown', empty: true }], gapminder),
+    )
+    expect(recreate[0]).toMatchObject({ action: 'recreate', backend: 'gapminder' })
+
+    const spawn = await planRestore([mEntry('alpha')], depsWithOrigin([], gapminder, true))
+    expect(spawn[0]).toMatchObject({ action: 'spawn', backend: 'gapminder' })
+  })
+
+  it('leaves a default-config-dir session with no backend', async () => {
+    const plan = await planRestore(
+      [mEntry('alpha')],
+      depsWithOrigin([{ id: 't1', name: 'alpha', status: 'terminal' }], { id: 'sess-alpha', dir: '/dir/alpha' } as typeof gapminder),
+    )
+    expect(plan[0].backend).toBeUndefined()
+    expect(plan[0].configDir).toBeUndefined()
+  })
+
+  it('lets a manifest override what discovery inferred', async () => {
+    // The manifest is a deliberate statement about which account owns the tab,
+    // and it may name a config dir whose transcript isn't on this machine yet.
+    const entry = { ...mEntry('alpha'), backend: 'other-account' }
+    const plan = await planRestore(
+      [entry],
+      depsWithOrigin([{ id: 't1', name: 'alpha', status: 'terminal' }], gapminder),
+    )
+    expect(plan[0].backend).toBe('other-account')
+    expect(plan[0].configDir).toBeUndefined()
+  })
+
+  it('keeps a manifest config dir that no preset names', async () => {
+    const entry = { ...mEntry('alpha'), configDir: '/home/x/.claude-adhoc' }
+    const plan = await planRestore([entry], depsWithOrigin([], gapminder, true))
+    expect(plan[0]).toMatchObject({ action: 'spawn', configDir: '/home/x/.claude-adhoc' })
+  })
+})

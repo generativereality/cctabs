@@ -6,7 +6,9 @@ import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByNameGlobally, expandSessionId, resolveTabSession } from '../core/session.js'
+import { findSessionsByNameGlobally, locateSessionById, resolveTabSession } from '../core/session.js'
+import { launchEnvFor } from '../core/backends.js'
+import type { ConfigDirScope } from '../core/config-dirs.js'
 import { parseManifest } from '../core/manifest.js'
 import {
   planRestore,
@@ -240,6 +242,8 @@ export function buildPlanDeps(
     scopeTabIds: Set<string>
     currentTabId: string
     createMissing: boolean
+    /** Which Claude config dirs to search. Defaults to every one on the machine. */
+    sessionScope?: ConfigDirScope
   },
 ): PlanDeps {
   return {
@@ -251,41 +255,67 @@ export function buildPlanDeps(
     termBlockOf: (tabId) => (opts.tabsById.get(tabId) ?? []).find((b) => b.view === 'term')?.blockid,
     statusOf: (blockId) => adapter.detectSessionStatus(blockId),
     confirmEmpty: (blockId) => adapter.confirmScrollbackEmpty(blockId),
-    resolveSession: (entry) => resolveEntrySession(entry),
+    resolveSession: (entry) => resolveEntrySession(entry, opts.sessionScope),
     createMissing: opts.createMissing,
   }
 }
 
 /**
- * Find the session an entry should resume.
+ * Find the session an entry should resume, and which Claude config dir it lives
+ * in. Every shape reports its origin: a session found in a backend's own config
+ * dir has to be relaunched with that backend's env, or `claude --resume <id>`
+ * quietly starts a new conversation because the id isn't there.
  *
  * Three shapes, in descending order of confidence:
- *   - an explicit id from a manifest (expanded from a prefix if needed);
+ *   - an explicit id from a manifest (expanded from a prefix if needed, and
+ *     located on disk so its config dir is known even when the manifest didn't
+ *     record one);
  *   - a directory, which resolves worktree-aware and newest-first, so a
  *     `--worktree` tab picks its worktree session over a stale repo-root one;
- *   - name only, which searches every project and takes the newest match.
+ *   - name only, which searches every project in every config dir and takes the
+ *     newest match.
  */
-function resolveEntrySession(entry: RestoreEntry): ResolvedSession | null {
+function resolveEntrySession(entry: RestoreEntry, scope?: ConfigDirScope): ResolvedSession | null {
   if (entry.sessionId) {
-    const expanded =
-      expandSessionId(entry.sessionId, entry.dir) ?? expandSessionId(entry.sessionId)
-    return { id: expanded ?? entry.sessionId, dir: entry.dir ?? process.cwd() }
+    const located =
+      locateSessionById(entry.sessionId, entry.dir, scope) ?? locateSessionById(entry.sessionId, undefined, scope)
+    return {
+      id: located?.id ?? entry.sessionId,
+      dir: entry.dir ?? process.cwd(),
+      backend: located?.backend,
+      configDir: located?.configDir,
+    }
   }
 
   if (entry.dir) {
-    const hit = resolveTabSession(entry.dir, entry.name)
-    return hit ? { id: hit.id, dir: hit.dir } : null
+    const hit = resolveTabSession(entry.dir, entry.name, scope)
+    return hit ? { id: hit.id, dir: hit.dir, backend: hit.backend, configDir: hit.configDir } : null
   }
 
-  const sessions = findSessionsByNameGlobally(entry.name)
+  const sessions = findSessionsByNameGlobally(entry.name, scope)
   if (!sessions.length) return null
+  const best = sessions[0]
   if (sessions.length > 1) {
-    consola.log(`  ${entry.name} — multiple sessions across projects, picking newest (${sessions[0].dir})`)
+    // Say which one won — with several Claude accounts in play, "newest" can
+    // mean a different account than the user expected.
+    const where = best.backend ? `${best.dir}, backend ${best.backend}` : best.dir
+    consola.log(`  ${entry.name} — multiple sessions across projects, picking newest (${where})`)
   }
-  return { id: sessions[0].id, dir: sessions[0].dir }
+  return { id: best.id, dir: best.dir, backend: best.backend, configDir: best.configDir }
 }
 
 export const shortId = (id?: string) => (id ? `${id.slice(0, 8)}…` : 'fresh')
+
+/**
+ * Which Claude account a decision will use, when it isn't the default one.
+ * Shown because "resumed the right session under the wrong account" is
+ * otherwise indistinguishable from success until you look inside the tab.
+ */
+export function originNote(p: PlannedEntry): string {
+  if (p.backend) return ` [backend: ${p.backend}]`
+  if (p.configDir) return ` [config dir: ${p.configDir}]`
+  return ''
+}
 
 /** The per-entry decision line, worded for a dry run or a real one. */
 export function describeDecision(p: PlannedEntry, dry: boolean): string {
@@ -301,15 +331,15 @@ export function describeDecision(p: PlannedEntry, dry: boolean): string {
     case 'no-session':
       return `— no session found${p.entry.dir ? ` in ${p.entry.dir}` : ''}, skipping`
     case 'attach':
-      return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab`
+      return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab${originNote(p)}`
     case 'recreate':
-      return `→ ${dry ? 'would recreate' : 'recreating'} dead tab with ${shortId(p.sessionId)} in ${p.dir}`
+      return `→ ${dry ? 'would recreate' : 'recreating'} dead tab with ${shortId(p.sessionId)} in ${p.dir}${originNote(p)}`
     case 'duplicate':
       return p.closeTabId
         ? `— duplicate dead tab, ${dry ? 'would close' : 'closing'} (already restoring one)`
         : '— duplicate entry, skipping (already restoring one)'
     case 'spawn':
-      return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})`
+      return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}`
     case 'missing':
       return '— no existing tab; pass --create-missing to spawn one'
   }
@@ -329,15 +359,15 @@ export function summarizeDecision(p: PlannedEntry, dry: boolean): string {
     case 'no-session':
       return 'no matching session'
     case 'attach':
-      return dry ? `dry run: attach ${shortId(p.sessionId)}` : 'sent'
+      return dry ? `dry run: attach ${shortId(p.sessionId)}${originNote(p)}` : 'sent'
     case 'recreate':
-      return dry ? `dry run: recreate (${shortId(p.sessionId)})` : 'queued for recreate'
+      return dry ? `dry run: recreate (${shortId(p.sessionId)})${originNote(p)}` : 'queued for recreate'
     case 'duplicate':
       return p.closeTabId
         ? dry ? 'dry run: close duplicate dead tab' : 'duplicate dead tab — closed'
         : 'duplicate entry — skipped'
     case 'spawn':
-      return dry ? `dry run: spawn (${shortId(p.sessionId)})` : 'queued for spawn'
+      return dry ? `dry run: spawn (${shortId(p.sessionId)})${originNote(p)}` : 'queued for spawn'
     case 'missing':
       return 'missing (skipped, no --create-missing)'
   }
@@ -372,8 +402,7 @@ async function executePlan(
   // -- attach: send the resume into tabs that still have a live shell --
   const attached = plan.filter((p) => p.action === 'attach')
   for (const p of attached) {
-    const cmd = `cd ${JSON.stringify(p.dir)} && claude${extraFlags ? ' ' + extraFlags : ''} --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}\r`
-    await adapter.sendInput(p.blockId!, cmd)
+    await adapter.sendInput(p.blockId!, buildResumeCommand(p, extraFlags) + '\r')
     await sleep(500)
   }
 
@@ -409,10 +438,13 @@ async function executePlan(
         const claudeCmd = p.sessionId
           ? `claude --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}`
           : 'claude'
+        const { env, model } = launchEnvFor(p.backend, p.configDir)
         const newTabId = await openSession({
           tabName: p.entry.name,
           dir: p.dir!,
           claudeCmd,
+          envVars: env,
+          modelOverride: model,
           // Spawned tabs append; the whole bar is reordered below, so don't
           // insert after-active here.
           tailDelayMs: 500,
@@ -464,3 +496,25 @@ async function executePlan(
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * The `claude --resume` line typed into a tab that still has a live shell.
+ *
+ * A session from a non-default Claude config dir needs that dir — and its
+ * backend's base URL and model — on the command line, exactly as `resume -b`
+ * would set them. Without it the id resolves to nothing and Claude opens a
+ * fresh conversation in the tab, which looks like a successful restore.
+ */
+export function buildResumeCommand(p: PlannedEntry, extraFlags: string): string {
+  const { env, model } = launchEnvFor(p.backend, p.configDir)
+  const envPrefix = env ? shellQuoteEnv(env) : ''
+  const modelPart = model ? ` --model ${JSON.stringify(model)}` : ''
+  return `cd ${JSON.stringify(p.dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}${modelPart}`
+}
+
+/** `KEY="value" ` prefix for a shell command, matching how `resume` builds it. */
+function shellQuoteEnv(env: Record<string, string>): string {
+  const entries = Object.entries(env)
+  if (!entries.length) return ''
+  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ') + ' '
+}
