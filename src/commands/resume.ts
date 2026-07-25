@@ -5,8 +5,9 @@ import { consola } from 'consola'
 import { loadConfig, applyPrefix } from '../core/config.js'
 import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByName, pathToProjectSlug, listSessionNames, expandSessionId } from '../core/session.js'
+import { findSessionsByName, pathToProjectSlug, listSessionNames, locateSessionById } from '../core/session.js'
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
+import type { SessionOrigin } from '../core/config-dirs.js'
 import { shellQuoteArg } from '../core/shell.js'
 
 function shellQuoteEnv(env: Record<string, string>): string {
@@ -36,7 +37,7 @@ export const resumeCommand = define({
     name: { type: 'positional', description: 'Tab / session name' },
     dir: { type: 'positional', description: 'Working directory (default: cwd)' },
     session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
-    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
+    backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the backend whose Claude config dir the session was found in, else the CURRENT session\'s backend (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude).' },
   },
   async run(ctx) {
@@ -52,9 +53,55 @@ export const resumeCommand = define({
 
     const explicitSession = ctx.values.session as string | undefined
     const explicitBackend = ctx.values.backend as string | undefined
-    const backendName = resolveBackendName(explicitBackend)
     const modelOverride = ctx.values.model as string | undefined
 
+    let sessionId: string | undefined
+    // Where the session turned out to live. A session in a backend's own
+    // CLAUDE_CONFIG_DIR must be resumed under that backend, so discovery — not
+    // the ambient CCTABS_ACTIVE_BACKEND of whatever tab you happen to be in —
+    // is the better default when the user didn't name one.
+    let foundOrigin: SessionOrigin = {}
+
+    if (explicitSession) {
+      const located =
+        locateSessionById(explicitSession, dir) ?? locateSessionById(explicitSession)
+      if (!located) {
+        consola.error(`Session '${explicitSession}' not found (or matches multiple sessions). Pass the full UUID.`)
+        process.exit(1)
+      }
+      sessionId = located.id
+      foundOrigin = { backend: located.backend, configDir: located.configDir }
+    } else {
+      const sessions = findSessionsByName(dir, displayName)
+      if (sessions.length === 0) {
+        consola.error(`No session named "${displayName}" in ${dir}`)
+        const available = listSessionNames(dir)
+        if (available.length) {
+          consola.info('Available session names:')
+          for (const s of available.slice(0, 15)) {
+            consola.log(`  ${s.name}  (${s.id.slice(0, 8)}…)${s.backend ? `  [backend: ${s.backend}]` : ''}`)
+          }
+        } else {
+          consola.info(`Looked in ${pathToProjectSlug(dir)}/ under every known Claude config dir.`)
+        }
+        process.exit(1)
+      } else if (sessions.length === 1) {
+        sessionId = sessions[0].id
+        foundOrigin = { backend: sessions[0].backend, configDir: sessions[0].configDir }
+      } else {
+        consola.error(`Multiple "${displayName}" sessions found. Use --session <id> to pick one:\n`)
+        for (const s of sessions) {
+          consola.log(`  ${s.id}  ${formatAge(s.mtime)}  ${formatSize(s.size)}${s.backend ? `  [backend: ${s.backend}]` : ''}`)
+          if (s.firstPrompt) consola.log(`    start: "${s.firstPrompt}"`)
+          if (s.lastActivity) consola.log(`    last:  "${s.lastActivity}"`)
+        }
+        process.exit(1)
+      }
+    }
+
+    // Backend precedence: what the user asked for, else what the session's own
+    // config dir implies, else the backend of the tab we were invoked from.
+    const backendName = explicitBackend || foundOrigin.backend || resolveBackendName(undefined)
     let envVars: Record<string, string> | undefined
     let resolvedModel = modelOverride
     if (backendName) {
@@ -65,46 +112,20 @@ export const resumeCommand = define({
         process.exit(1)
       }
       envVars = backendEnvWithMarker(backendName, backend)
+      if (foundOrigin.configDir && !envVars.CLAUDE_CONFIG_DIR) {
+        envVars.CLAUDE_CONFIG_DIR = foundOrigin.configDir
+      }
       resolvedModel ??= backend.model || undefined
+    } else if (foundOrigin.configDir) {
+      // A config dir nothing has a preset for: pass it through directly, so the
+      // resume at least looks for the session where it actually lives.
+      envVars = { CLAUDE_CONFIG_DIR: foundOrigin.configDir }
     }
-    const inheritedBackend = !explicitBackend && !!backendName
-    const be = backendName ? ` [backend: ${backendName}${inheritedBackend ? ' (inherited)' : ''}]` : ''
-
-    let sessionId: string | undefined
-
-    if (explicitSession) {
-      const expanded = expandSessionId(explicitSession, dir) ?? expandSessionId(explicitSession)
-      if (!expanded) {
-        consola.error(`Session '${explicitSession}' not found (or matches multiple sessions). Pass the full UUID.`)
-        process.exit(1)
-      }
-      sessionId = expanded
-    } else {
-      const sessions = findSessionsByName(dir, displayName)
-      if (sessions.length === 0) {
-        consola.error(`No session named "${displayName}" in ${dir}`)
-        const available = listSessionNames(dir)
-        if (available.length) {
-          consola.info('Available session names:')
-          for (const s of available.slice(0, 15)) {
-            consola.log(`  ${s.name}  (${s.id.slice(0, 8)}…)`)
-          }
-        } else {
-          consola.info(`Looked in ~/.claude/projects/${pathToProjectSlug(dir)}/`)
-        }
-        process.exit(1)
-      } else if (sessions.length === 1) {
-        sessionId = sessions[0].id
-      } else {
-        consola.error(`Multiple "${displayName}" sessions found. Use --session <id> to pick one:\n`)
-        for (const s of sessions) {
-          consola.log(`  ${s.id}  ${formatAge(s.mtime)}  ${formatSize(s.size)}`)
-          if (s.firstPrompt) consola.log(`    start: "${s.firstPrompt}"`)
-          if (s.lastActivity) consola.log(`    last:  "${s.lastActivity}"`)
-        }
-        process.exit(1)
-      }
-    }
+    const inferredBackend = !explicitBackend && !!foundOrigin.backend
+    const inheritedBackend = !explicitBackend && !inferredBackend && !!backendName
+    const be = backendName
+      ? ` [backend: ${backendName}${inferredBackend ? ' (from session)' : inheritedBackend ? ' (inherited)' : ''}]`
+      : ''
 
     const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
