@@ -179,6 +179,7 @@ cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
+cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
 cctabs scrollback <tab-or-block> [n]    # read terminal output (default: 50 lines)
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball

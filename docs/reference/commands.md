@@ -167,6 +167,26 @@ Rename a tab.
 cctabs rename <name-or-id> <new-name>
 ```
 
+## cctabs sort
+
+Reorder the tab bar by Claude session activity, most recently active first.
+
+```bash
+cctabs sort [--dry] [--reverse]
+```
+
+| Flag | Effect |
+|------|--------|
+| `--dry`, `-n` | Print the planned order without applying it (`--dry-run` also works) |
+| `--reverse`, `-r` | Oldest first instead of newest |
+
+Activity is the modification time of the newest Claude transcript whose title
+matches the tab's name, across every [config dir](/guide/configuration#backends).
+Tabs with no matching session — a plain shell, an editor — sink to the end and
+keep their relative order, so sorting never scrambles your non-Claude tabs.
+
+Tabby only: Wave has no reordering API, and `cctabs sort` exits with an error there.
+
 ## cctabs scrollback
 
 Read terminal output for a tab or block.

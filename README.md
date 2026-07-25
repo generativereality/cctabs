@@ -75,6 +75,7 @@ cctabs resume <name> [dir]               resume that session (reuses its tab, or
 cctabs fork <tab> [-n new-name]          fork a session into a new tab
 cctabs close <tab>                       close a tab
 cctabs rename <tab> <new-name>           rename a tab (+ on-disk title, so `resume` finds it)
+cctabs sort [--dry] [--reverse]          reorder the tab bar by session activity (Tabby only)
 cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines)
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
 cctabs restore [dir] [--dry]             bring back every tab that lost its session

@@ -21,6 +21,12 @@ npm i -g @generativereality/cctabs
 
 <!-- releases -->
 
+## Unreleased
+
+- **A tab that Claude was actively working in could not be restored.** Tabby shows a tab's live terminal title whenever it has no `customTitle` of its own — and Claude Code prefixes that title with a spinner glyph while it is busy — so the tab's identity flickered between `career-strategy` and `✳ career-strategy` depending on when you looked. Every name-based lookup missed it in the busy state: `cctabs sessions` reported no session id, `cctabs restore` said `no session found, skipping` and left the tab dead, and `cctabs sort` ranked the single most recently active tab last as `(no session)`. Titles are now normalized where they enter cctabs, so a leading status glyph can't change what a tab *is*. Tabs created by `cctabs new` were never affected — they carry a `customTitle` — so this only ever hit tabs opened by hand.
+- **`cctabs sort` accepts `--dry`**, matching `restore` and `resume`. `--dry-run` still works.
+- **`cctabs sort` is documented** — in the command reference, the README, and the skill. It had shipped undocumented everywhere except one changelog line.
+
 ## 0.4.10 — 2026-07-25
 
 - **Backend presets inherit into child tabs.** `new`/`resume`/`fork` resolved `-b` independently, so a tab spawned from *inside* a session already running under a backend silently fell back to the plain `anthropic` preset. That matters more now that a preset can represent a different Claude **account** (`env_CLAUDE_CODE_OAUTH_TOKEN` + `env_CLAUDE_CONFIG_DIR`) rather than just a different model provider — forgetting `-b` on a spawned sub-task tab meant it quietly ran on the wrong account. Each launched tab's claude process now carries `CCTABS_ACTIVE_BACKEND=<name>`, which its child `cctabs` invocations inherit and default to. Explicit `-b` still wins, and `-b anthropic` forces the default back. `fork` had no backend support at all before this; it now matches `new`/`resume`.
