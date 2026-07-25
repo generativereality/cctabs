@@ -6,6 +6,27 @@
  * correctness — can't drift between Wave and Tabby.
  */
 
+/**
+ * A leading status glyph written by the running process, e.g. Claude Code's
+ * `✳ my-tab` while it is working. Kept deliberately narrow: a short run of
+ * symbol characters, a space, then the real name.
+ */
+const STATUS_MARKER = /^[^\p{L}\p{N}\s]{1,3}\s+(?=\S)/u
+
+/**
+ * Strip a transient status glyph from a tab title.
+ *
+ * A Tabby tab with no `customTitle` shows whatever OSC title its process sets,
+ * and Claude Code prefixes that title with a spinner glyph while it is busy —
+ * so the tab's *identity* flickers between `career-strategy` and
+ * `✳ career-strategy` depending on when you look. Everything that matches a tab
+ * to a session by name (restore, resume, sort, sessions) silently missed such a
+ * tab: `cctabs restore` reported "no session found, skipping" and left it dead.
+ */
+export function normalizeTabName(raw: string): string {
+  return raw.replace(STATUS_MARKER, '').trim()
+}
+
 export interface TabMatchOptions {
   /**
    * Match by exact name (or exact id) only, with no prefix fallback.

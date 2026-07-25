@@ -7,7 +7,7 @@ import type {
   WorkspaceData,
 } from '../types/index.js'
 import type { TerminalAdapter } from './adapter.js'
-import { matchTabsByName, type TabMatchOptions } from './tab-match.js'
+import { matchTabsByName, normalizeTabName, type TabMatchOptions } from './tab-match.js'
 
 /**
  * Thrown when the cctabs Tabby plugin's HTTP API is unreachable.
@@ -322,7 +322,10 @@ export class TabbyAdapter implements TerminalAdapter {
           tabs: Array<{ uuid: string; title: string; customTitle?: string }>
         }
         for (const t of data.tabs) {
-          tabNames.set(t.uuid, t.customTitle || t.title || t.uuid.slice(0, 8))
+          // Normalize here, at the one place a live OSC title enters cctabs, so
+          // a tab can't change identity just because Claude started thinking.
+          const name = t.customTitle || normalizeTabName(t.title ?? '')
+          tabNames.set(t.uuid, name || t.uuid.slice(0, 8))
         }
       }
     } catch {

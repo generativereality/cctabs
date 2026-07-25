@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { matchTabsByName } from './tab-match.js'
+import { matchTabsByName, normalizeTabName } from './tab-match.js'
 
 const TABS = new Map<string, string>([
   ['aaaaaaaa-1111', 'gapminder'],
@@ -55,5 +55,28 @@ describe('matchTabsByName', () => {
       ['t3', 'other'],
     ])
     expect(matchTabsByName('notes', [...dupes.keys()], dupes, { exact: true })).toEqual(['t1', 't2'])
+  })
+})
+
+describe('normalizeTabName', () => {
+  it("strips Claude Code's working glyph so a busy tab keeps its identity", () => {
+    expect(normalizeTabName('✳ career-strategy')).toBe('career-strategy')
+    expect(normalizeTabName('✻ career-strategy')).toBe('career-strategy')
+  })
+
+  it('leaves an ordinary title untouched', () => {
+    expect(normalizeTabName('career-strategy')).toBe('career-strategy')
+    expect(normalizeTabName('OS default')).toBe('OS default')
+  })
+
+  it('keeps punctuation that is part of the name, not a status marker', () => {
+    // No space after the leading run, so it is not a marker.
+    expect(normalizeTabName('~/Remember This')).toBe('~/Remember This')
+    expect(normalizeTabName('@scope/pkg — build')).toBe('@scope/pkg — build')
+  })
+
+  it('does not eat a long symbol run or an all-symbol title', () => {
+    expect(normalizeTabName('>>>> deploy')).toBe('>>>> deploy')
+    expect(normalizeTabName('✳')).toBe('✳')
   })
 })
