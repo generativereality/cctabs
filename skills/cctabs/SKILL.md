@@ -172,10 +172,10 @@ cctabs new fix-api ~/Dev/myapp --worktree --prompt "checkout PR #102 and fix tes
 cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
-cctabs new <name> [dir] -b <preset>      # new tab on a non-Anthropic backend (Ollama)
-cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one)
+cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
+cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one; picks the session's own account)
 cctabs restore [dir] [--dry]             # resume every dead tab by name search (e.g. after a reboot)
-cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id} list — accepts `cctabs sessions --json` directly
+cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
@@ -354,28 +354,25 @@ The search covers **every Claude account**, not just the default one: sessions l
 When you already know exactly which sessions to bring back — e.g. you deliberately closed a batch of tabs, or you're recreating a fleet from a snapshot — skip the by-name search and drive `restore` from an explicit manifest instead:
 
 ```bash
-cctabs sessions --json > snapshot.json          # capture {name, cwd, session_id} for every live tab
+cctabs sessions --json > snapshot.json          # {name, cwd, session_id, backend?, config_dir?} per live tab
 cctabs restore --manifest snapshot.json --dry   # preview first
 cctabs restore --manifest snapshot.json --create-missing   # spawn tabs for entries with none
 ```
 
-`--manifest -` reads from stdin, so `cctabs sessions --json | cctabs restore --manifest - --create-missing` works as a one-liner. Entries for tabs that are already running are reported as "already running, skipping" — safe to re-run.
+`--manifest -` reads from stdin, so `cctabs sessions --json | cctabs restore --manifest - --create-missing` works as a one-liner. Entries for tabs that are already running are reported as "already running, skipping" — safe to re-run. `backend` / `config_dir` are emitted only for sessions belonging to a non-default Claude account, and restore infers them anyway from wherever it finds the session, so a hand-written manifest can omit them.
 
-**Dedupe by `session_id` before restoring.** A manifest can contain two entries with the same name pointing at the *same* `session_id` — this happens when a crash or an earlier restart leaves a stale duplicate tab behind. `restore` does not dedupe: it will happily spawn two separate tabs racing to be the active worker for one conversation, which shows up as Remote Control "this connection is no longer the active worker for the session (code 4090)" errors. Filter the manifest to one entry per `session_id` first.
+**One entry per `session_id`, if the names differ.** Restore dedupes by *name* — a repeated name is reported as a duplicate and skipped, and a leftover duplicate dead tab is closed — but two entries with *different* names pointing at the same `session_id` still spawn two tabs racing to be the active worker for one conversation, which surfaces as Remote Control "this connection is no longer the active worker for the session (code 4090)". That shape only arises in a hand-edited or merged manifest; `cctabs sessions --json` doesn't produce it.
 
-**Bulk-restore reliability limit (hard-won).** Spawning ~35+ tabs in a single `restore --manifest --create-missing` call overwhelmed Tabby's tab-creation automation in practice: only 1-2 tabs actually got their `claude --resume …` command launched, while the rest registered in Tabby (visible in `cctabs list`) but sat as empty shells indefinitely — `cctabs sessions` showed them stuck at `? unknown` status with no `cwd`. Don't trust "✔ spawned" in the restore summary as proof the process is actually running. Verify with:
+**Bulk restore is reliable — with the current plugin.** A 45-tab close-and-restore completes in under a minute with tab order preserved. This used to be the opposite: spawning ~35+ tabs in one call left most of them registered in Tabby but sitting as empty shells at `? unknown` status, because a Tabby tab only spawns its process once its terminal frontend attaches, which only happens once the tab has been focused — and each new tab stole focus from the last. `tabby-cctabs` ≥ 0.1.3 serialises tab creation internally and doesn't answer until the process is actually running, advertising `spawn-waits-for-pty` on `/api/health`; the CLI probes for that and only then spawns in parallel. Against an older plugin it falls back to one-at-a-time with a settle gap — slower, still correct.
 
-```bash
-ps aux | grep "claude --allow" | grep -c -- "--resume"   # should match your tab count
-```
-
-If it's low, fall back to resuming the stragglers **one at a time** — this is slow (each call can take 10-20s right after a mass-spawn while Tabby is still catching up) but reliable:
+**If you do need to verify what's running, never use `ps aux | grep`.** It truncates long command lines, so any entry whose `--name` falls past the cutoff silently disappears and a healthy tab reads as dead. Use the tab list itself, or a full-width `ps`:
 
 ```bash
-cctabs resume <name> "<dir>" -s <session_id>   # repeat per straggler; run sequentially, not concurrently
+cctabs sessions                       # status per tab, straight from the terminal
+ps -Ao command | grep -c -- "--resume"   # full command lines, not truncated
 ```
 
-`cctabs resume` detects an empty/dead tab itself ("has no live shell (empty scrollback) — recreating") and relaunches into it, so this is safe to run against tabs `restore` already registered.
+To relaunch a straggler individually, `cctabs resume <name> "<dir>"` detects an empty/dead tab itself ("has no live shell (empty scrollback) — recreating") and rebuilds it, so it's safe against a tab `restore` already registered.
 
 ### The "Resume from summary / full session" picker
 

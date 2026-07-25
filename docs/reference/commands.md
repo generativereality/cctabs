@@ -37,6 +37,17 @@ Status values:
 - `● active` — Claude Code UI detected in scrollback
 - `○ idle` — `claude` in last line but no active UI
 - `  terminal` — plain shell, no Claude running
+- `? unknown` — nothing readable in the scrollback, usually a tab whose shell died with the terminal
+
+### `--json`
+
+Emit the same listing as machine-readable JSON, one entry per tab:
+
+```bash
+cctabs sessions --json > snapshot.json
+```
+
+Each entry carries `{block_id, tab_id, name, cwd, current, status, last_line, session_id}`, plus `backend` and `config_dir` when the session belongs to a non-default Claude account. The shape is exactly what `cctabs restore --manifest` consumes, so the two pipe together directly.
 
 ## cctabs list
 
@@ -62,10 +73,69 @@ cctabs new <name> [dir] [-w workspace]
 
 ## cctabs resume
 
-Open a new tab and run `claude --continue`.
+Bring a named session back with `claude --resume <id>`, reusing that tab if it's
+still open and creating one otherwise. A tab whose shell died is rebuilt rather
+than typed into.
 
 ```bash
 cctabs resume <name> [dir]
+cctabs resume <name> [dir] -s <session-id>   # when several sessions share the name
+cctabs resume <name> [dir] -b <preset>       # force a backend / Claude account
+cctabs resume <name> [dir] -m <model>        # override the model
+```
+
+The session is looked up by its `--name` under `dir` (default: cwd), across every
+Claude config dir — so a session belonging to a second Claude account is found
+too, and is resumed **under that account** without any flags. Precedence for the
+backend: explicit `-b`, then the account the session was found in, then the one
+inherited from the calling tab (`CCTABS_ACTIVE_BACKEND`). The success line says
+which was used.
+
+## cctabs restore
+
+Bring back every tab that lost its session — the usual after a reboot or a
+terminal restart. Tabs still running Claude are left alone.
+
+```bash
+cctabs restore                    # scan this window's tabs, resume each by name
+cctabs restore --dry              # print the decisions without acting on any of them
+cctabs restore ~/Dev/myapp        # only consider sessions under one directory
+```
+
+For each dead tab it finds the session by name (searching every project directory
+in every Claude config dir), then either types the resume into the tab's live
+shell or, when the shell is gone too, rebuilds the tab around it. The
+pre-restore tab order is restored once everything is back.
+
+`--dry` runs exactly the same planning a real run does and stops before executing,
+so what it prints is what a real run would do — including tabs it would close as
+duplicates.
+
+### Manifest mode
+
+Drive the restore from an explicit list instead of scanning:
+
+```bash
+cctabs restore --manifest snapshot.json [--create-missing] [--dry]
+cctabs sessions --json | cctabs restore --manifest - --create-missing
+```
+
+Entries are `{name, dir, session_id?, backend?, config_dir?}`; `dir` and `cwd` are
+interchangeable, and `cctabs sessions --json` output is accepted as-is (both its
+`{workspaces: [{sessions: […]}]}` shape and a bare array). Without
+`--create-missing`, entries with no existing tab are reported and skipped.
+`backend` / `config_dir` are optional — restore infers the account from wherever
+it finds the session id.
+
+The manifest's order is the order the tab bar is rebuilt in.
+
+## cctabs backends
+
+List the available backend presets — model providers and alternate Claude
+accounts. See [Configuration](/guide/configuration#backends).
+
+```bash
+cctabs backends
 ```
 
 ## cctabs fork

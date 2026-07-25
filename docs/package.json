@@ -2,8 +2,9 @@
   "name": "@generativereality/cctabs-docs",
   "private": true,
   "scripts": {
-    "dev": "vitepress dev --port 7417",
-    "build": "vitepress build",
+    "dev": "npm run sync-changelog && vitepress dev --port 7417",
+    "build": "npm run sync-changelog && vitepress build",
+    "sync-changelog": "node scripts/sync-changelog.mjs",
     "preview": "vitepress preview",
     "deploy": "npm run build && wrangler pages deploy .vitepress/dist --project-name cctabs",
     "generate-og": "node scripts/generate-og.mjs"

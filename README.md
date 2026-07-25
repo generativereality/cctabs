@@ -71,17 +71,21 @@ cctabs sessions [--json]                 what's running (active/idle status)
 cctabs list                              all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace]   open tab, start claude
 cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by ID
-cctabs resume <name> [dir]               open tab, run claude --continue
+cctabs resume <name> [dir]               resume that session (reuses its tab, or opens one)
 cctabs fork <tab> [-n new-name]          fork a session into a new tab
 cctabs close <tab>                       close a tab
 cctabs rename <tab> <new-name>           rename a tab (+ on-disk title, so `resume` finds it)
 cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines)
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
-cctabs restore [--manifest <file|->] [--create-missing]   reattach or spawn from a manifest
+cctabs restore [dir] [--dry]             bring back every tab that lost its session
+cctabs restore --manifest <file|-> [--create-missing]   ...or drive it from an explicit list
+cctabs backends                          list backend presets (providers / Claude accounts)
 cctabs config                            show config path and values
 ```
 
-Tab names match by prefix. Block IDs can be shortened to 8 chars.
+Tab names match by prefix. Block IDs can be shortened to 8 chars. (`resume` and
+`restore` are the exception — deciding whether a session's tab already exists is
+exact-name only, so a longer-named neighbour can't be mistaken for it.)
 
 ### Spin up a session fleet
 
@@ -199,6 +203,16 @@ flags = ["--allow-dangerously-skip-permissions"]
 [defaults]
 # Default Wave workspace for new sessions
 # workspace = ""
+
+# Backend presets: another model provider, or another Claude account entirely.
+# Launch with `cctabs new <name> [dir] -b client-x`; tabs spawned from inside
+# that session inherit it. Sessions started under a preset that sets its own
+# CLAUDE_CONFIG_DIR are still found by `resume`/`restore`, and come back under
+# that account automatically.
+[backends.client-x]
+description = "Client X's Claude account"
+env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
+env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
 ```
 
 ## Terminal support

@@ -40,14 +40,42 @@ This lets you run parallel sessions on the same repo without branches conflictin
 
 ## Resuming after a restart
 
-```bash
-cctabs sessions    # see which tabs are terminal (no claude running)
+A reboot or a terminal restart leaves every tab without its Claude session. One
+command brings the whole window back:
 
-cctabs resume auth ~/Dev/myapp
-cctabs resume api ~/Dev/myapp
+```bash
+cctabs restore --dry    # what it would do
+cctabs restore          # do it
 ```
 
-`resume` runs `claude --continue`, picking up the last conversation.
+Each dead tab's session is found by the tab's name, resumed in place where the
+shell survived, and rebuilt where it didn't — then the original tab order is
+restored. Tabs still running Claude are left untouched, so re-running is safe.
+
+To bring back one session at a time instead:
+
+```bash
+cctabs sessions              # see which tabs are terminal / unknown
+cctabs resume auth ~/Dev/myapp
+```
+
+`resume` runs `claude --resume <id>`, picking up that named conversation — and
+resumes it under the Claude account it belongs to, so a fleet spread across
+several accounts needs no extra flags.
+
+### Recreating a fleet from a snapshot
+
+When you deliberately closed a batch of tabs, or you're rebuilding on another
+machine, drive the restore from a captured list rather than a scan:
+
+```bash
+cctabs sessions --json > snapshot.json     # capture the live fleet
+cctabs restore --manifest snapshot.json --create-missing --dry
+cctabs restore --manifest snapshot.json --create-missing
+```
+
+`cctabs sessions --json | cctabs restore --manifest - --create-missing` does it in
+one shot. The manifest's order becomes the tab order.
 
 ## Forking a session
 
