@@ -244,7 +244,8 @@ cctabs new x ~/Dev/myapp -b qwen-local -m my-custom-tag:latest
 - **Local backends are slow on M1.** A Claude Code turn against the local 50k-token system prompt takes ~100s prefill + generation on M1 Max. Only worth it for non-time-sensitive private work.
 - **Llama 3.1 8B garbles tool calls** under Claude Code's system prompt. Capability gate, not a bug.
 - **Ollama Cloud Pro requires `ollama signin`** (one-time). Free tier denies cloud-tagged models.
-- **Backend does NOT carry over to child tabs.** `new`/`resume`/`fork` each resolve `-b` independently — spawning a tab from *within* a session that's running under a backend does not inherit it. Forgetting `-b` on a child tab silently falls back to the plain `anthropic` preset (your default account). This matters most for account-switching presets (below): forgetting `-b client-x` on a spawned sub-task tab means that tab quietly runs on *your own* account instead of the client's.
+- **Backend carries into child tabs.** Each launched tab's claude process gets `CCTABS_ACTIVE_BACKEND=<name>`, so a `new`/`resume`/`fork` run from *inside* that session defaults `-b` to the same preset instead of quietly falling back to `anthropic` (your default account). Explicit `-b` still wins, and `-b anthropic` forces the default back. This matters most for account-switching presets (below): a spawned sub-task tab stays on the client's account rather than billing your own.
+- **`resume` prefers the account the session actually belongs to.** Sessions live under their preset's `CLAUDE_CONFIG_DIR`, so cctabs knows which account each one came from and resumes it there — ahead of any inherited backend, which would otherwise be whichever account the *calling* tab happened to run under. Precedence: explicit `-b` → the session's own account → inherited. The success line says which (`[backend: client-x (from session)]`).
 - **Custom presets** can be added in `~/.config/cctabs/config.toml`. Two forms:
   ```toml
   # Different model/provider — base_url + auth_token shorthand:
@@ -345,6 +346,8 @@ cctabs restore ~/Dev/myapp        # restrict the search to one project dir
 ```
 
 If a session was started in a different `cwd` than the tab's current directory (common after `cd`-ing inside the tab), the global search still finds it via the recorded session metadata — no need to guess the right dir.
+
+The search covers **every Claude account**, not just the default one: sessions launched under a backend preset live in that preset's own `CLAUDE_CONFIG_DIR`, and restore looks there too, then relaunches each tab under the account its session came from. Nothing to pass — a mixed-account fleet restores in one command. `--dry` names the account for any tab that isn't on the default one.
 
 ### Manifest-driven restore (precise, scriptable bulk resume)
 

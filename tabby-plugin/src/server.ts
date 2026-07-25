@@ -9,7 +9,9 @@ import { OutputBufferStore } from './output-buffer'
 import { CctabsLogger } from './logger'
 import { bufferLines } from './buffer'
 
-const PLUGIN_VERSION = '0.1.1'
+// Keep in step with package.json — /api/health reports this, and it had
+// silently drifted a release behind.
+const PLUGIN_VERSION = '0.1.3'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
