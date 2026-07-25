@@ -191,12 +191,22 @@ export function resolveBackend(name: string): BackendSpec | null {
 }
 
 export function listBackends(): { name: string; description: string }[] {
-  const custom = loadCustomBackends()
-  const merged = { ...BUILTIN_BACKENDS, ...custom }
-  return Object.entries(merged).map(([name, spec]) => ({
+  return listBackendSpecs().map(({ name, spec }) => ({
     name,
     description: spec.description ?? '',
   }))
+}
+
+/**
+ * Every preset, builtin and user-defined, with its full spec. Session discovery
+ * uses this to learn which Claude config directories exist on this machine: a
+ * preset that sets `env_CLAUDE_CONFIG_DIR` puts its sessions somewhere other
+ * than `~/.claude/projects`, and anything that only looks in the default
+ * location simply cannot see them.
+ */
+export function listBackendSpecs(): Array<{ name: string; spec: BackendSpec }> {
+  const merged = { ...BUILTIN_BACKENDS, ...loadCustomBackends() }
+  return Object.entries(merged).map(([name, spec]) => ({ name, spec }))
 }
 
 /**
@@ -216,4 +226,36 @@ export function resolveBackendName(explicit: string | undefined): string | undef
 /** Build the env map for a launch: the preset's own vars plus the marker above. */
 export function backendEnvWithMarker(name: string, backend: BackendSpec): Record<string, string> {
   return { ...backend.env, CCTABS_ACTIVE_BACKEND: name }
+}
+
+/**
+ * Env and model for relaunching a session that was discovered in a particular
+ * Claude config directory.
+ *
+ * Resuming a session by id in the wrong config dir does not fail loudly — the
+ * id simply isn't there, and you get a fresh conversation instead of the one
+ * you asked for. So anything that relaunches a discovered session has to carry
+ * its config dir along, whether or not a preset happens to name it:
+ *
+ *   - `backend` (a preset): use the preset's full env, so the account, base URL
+ *     and model all come back too, not just the config dir.
+ *   - `configDir` alone (a dir with no preset pointing at it): pass
+ *     CLAUDE_CONFIG_DIR through directly, which is enough to find the session.
+ */
+export function launchEnvFor(
+  backend?: string,
+  configDir?: string,
+): { env?: Record<string, string>; model?: string } {
+  if (backend) {
+    const spec = resolveBackend(backend)
+    if (spec) {
+      const env = backendEnvWithMarker(backend, spec)
+      // Defensive: a preset that names no config dir still has to land in the
+      // one the session was actually found in.
+      if (configDir && !env.CLAUDE_CONFIG_DIR) env.CLAUDE_CONFIG_DIR = configDir
+      return { env, model: spec.model || undefined }
+    }
+  }
+  if (configDir) return { env: { CLAUDE_CONFIG_DIR: configDir } }
+  return {}
 }

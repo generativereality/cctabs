@@ -2,6 +2,13 @@ import { readdirSync, readFileSync, statSync, existsSync, appendFileSync, openSy
 import { homedir } from 'os'
 import { join, basename, extname } from 'path'
 import { resolve } from 'path'
+import {
+  scopeToDirs,
+  originOf,
+  type ClaudeConfigDir,
+  type ConfigDirScope,
+  type SessionOrigin,
+} from './config-dirs.js'
 
 /** Convert an absolute path to Claude Code's project slug.
  * Claude Code replaces any non-alphanumeric character (spaces, /, ., etc.) with '-'.
@@ -25,37 +32,39 @@ function latestJsonlIn(projectDir: string): string | null {
  * Also checks worktree subdirectories (.claude/worktrees/*) since tabs
  * opened with --worktree run from a worktree path, not the repo root.
  */
-export function findLatestSessionId(dir: string): string | null {
-  const projectsRoot = join(homedir(), '.claude', 'projects')
+export function findLatestSessionId(dir: string, scope?: ConfigDirScope): string | null {
+  for (const cfg of scopeToDirs(scope)) {
+    const projectsRoot = cfg.projectsRoot
 
-  // 1. Direct match on the given dir
-  const direct = latestJsonlIn(join(projectsRoot, pathToProjectSlug(dir)))
-  if (direct) return direct
+    // 1. Direct match on the given dir
+    const direct = latestJsonlIn(join(projectsRoot, pathToProjectSlug(dir)))
+    if (direct) return direct
 
-  // 2. Check worktrees under dir: dir/.claude/worktrees/<name>
-  const worktreesDir = join(dir, '.claude', 'worktrees')
-  if (existsSync(worktreesDir)) {
-    const candidates: Array<{ id: string; mtime: number }> = []
-    for (const entry of readdirSync(worktreesDir)) {
-      const worktreePath = join(worktreesDir, entry)
-      const slug = pathToProjectSlug(worktreePath)
-      const projectDir = join(projectsRoot, slug)
-      const id = latestJsonlIn(projectDir)
-      if (id) {
-        const mtime = statSync(join(projectDir, id + '.jsonl')).mtimeMs
-        candidates.push({ id, mtime })
+    // 2. Check worktrees under dir: dir/.claude/worktrees/<name>
+    const worktreesDir = join(dir, '.claude', 'worktrees')
+    if (existsSync(worktreesDir)) {
+      const candidates: Array<{ id: string; mtime: number }> = []
+      for (const entry of readdirSync(worktreesDir)) {
+        const worktreePath = join(worktreesDir, entry)
+        const slug = pathToProjectSlug(worktreePath)
+        const projectDir = join(projectsRoot, slug)
+        const id = latestJsonlIn(projectDir)
+        if (id) {
+          const mtime = statSync(join(projectDir, id + '.jsonl')).mtimeMs
+          candidates.push({ id, mtime })
+        }
       }
-    }
-    if (candidates.length) {
-      candidates.sort((a, b) => b.mtime - a.mtime)
-      return candidates[0].id
+      if (candidates.length) {
+        candidates.sort((a, b) => b.mtime - a.mtime)
+        return candidates[0].id
+      }
     }
   }
 
   return null
 }
 
-export interface SessionMatch {
+export interface SessionMatch extends SessionOrigin {
   id: string
   mtime: number
   size: number
@@ -64,26 +73,31 @@ export interface SessionMatch {
 }
 
 /**
- * Find all sessions with a given custom title (--name).
- * Returns them sorted by most recent first, with the first user prompt for context.
+ * Every transcript in one project directory whose *current* title is `name`,
+ * with the context callers display and the cwd it can be resumed from.
+ *
+ * Shared by the by-directory and the whole-machine lookups below, which used to
+ * carry two copies of this parsing (including two copies of the cwd-drift rule).
  */
-export function findSessionsByName(dir: string, name: string): SessionMatch[] {
-  const projectsRoot = join(homedir(), '.claude', 'projects')
-  const projectDir = join(projectsRoot, pathToProjectSlug(dir))
+function scanProjectDirForName(
+  projectDir: string,
+  name: string,
+  origin: SessionOrigin,
+): Array<SessionMatch & { cwd: string }> {
   if (!existsSync(projectDir)) return []
+  const expectedSlug = basename(projectDir)
+  const found: Array<SessionMatch & { cwd: string }> = []
 
-  const matches: SessionMatch[] = []
-  const files = readdirSync(projectDir).filter((f) => extname(f) === '.jsonl')
-
-  for (const f of files) {
+  for (const f of readdirSync(projectDir)) {
+    if (extname(f) !== '.jsonl') continue
     const fullPath = join(projectDir, f)
     try {
-      const content = readFileSync(fullPath, 'utf-8')
-      const lines = content.split('\n')
+      const lines = readFileSync(fullPath, 'utf-8').split('\n')
 
       // Find the LAST customTitle entry — sessions can be renamed, and only
       // the most recent title is the current one
       let currentTitle = ''
+      let cwd = ''
       let firstPrompt = ''
       let lastActivity = ''
 
@@ -91,8 +105,16 @@ export function findSessionsByName(dir: string, name: string): SessionMatch[] {
         if (!line.trim()) continue
         try {
           const entry = JSON.parse(line)
-          if (entry.customTitle !== undefined) {
-            currentTitle = entry.customTitle
+          if (entry.customTitle !== undefined) currentTitle = entry.customTitle
+          // Last wins, but only among cwd values that actually belong to THIS
+          // file's storage location (slug match). A session's cwd can change
+          // mid-life because it was genuinely relaunched elsewhere — the
+          // transcript moves with it — or because the agent ran `cd <subdir>`
+          // via the Bash tool, which drifts the per-message cwd while the
+          // transcript stays put. Resuming into a drifted directory fails with
+          // "No conversation found", so only a slug-matching cwd is accepted.
+          if (typeof entry.cwd === 'string' && pathToProjectSlug(entry.cwd) === expectedSlug) {
+            cwd = entry.cwd
           }
           // First user message
           if (!firstPrompt && entry.type === 'user' && entry.message?.content) {
@@ -120,12 +142,35 @@ export function findSessionsByName(dir: string, name: string): SessionMatch[] {
       if (currentTitle !== name) continue
 
       const stat = statSync(fullPath)
-      matches.push({ id: basename(f, '.jsonl'), mtime: stat.mtimeMs, size: stat.size, firstPrompt, lastActivity })
+      found.push({
+        id: basename(f, '.jsonl'),
+        mtime: stat.mtimeMs,
+        size: stat.size,
+        firstPrompt,
+        lastActivity,
+        cwd,
+        ...origin,
+      })
     } catch {
       // skip unreadable files
     }
   }
 
+  return found
+}
+
+/**
+ * Find all sessions with a given custom title (--name) under `dir`, across every
+ * Claude config dir. Newest first, with the first user prompt for context.
+ */
+export function findSessionsByName(dir: string, name: string, scope?: ConfigDirScope): SessionMatch[] {
+  const matches: SessionMatch[] = []
+  for (const cfg of scopeToDirs(scope)) {
+    const projectDir = join(cfg.projectsRoot, pathToProjectSlug(dir))
+    matches.push(...scanProjectDirForName(projectDir, name, originOf(cfg)))
+  }
+  // Newest first, across config dirs too — the same rule already used to pick
+  // between same-named sessions in different projects.
   return matches.sort((a, b) => b.mtime - a.mtime)
 }
 
@@ -232,110 +277,76 @@ function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
 export function resolveTabSession(
   cwd: string,
   name: string,
-  projectsRoot: string = join(homedir(), '.claude', 'projects'),
-): { id: string; dir: string } | null {
-  // 1. Strongest signal: a worktree named exactly after the tab. A
-  //    `--worktree <name>` launch lands at .claude/worktrees/<name>, so a
-  //    name-matched session there is definitively this tab's — prefer it even
-  //    if a stale repo-root session of the same name has a newer mtime.
-  const namedWtPath = join(cwd, '.claude', 'worktrees', name)
-  const namedHit = buildTitleIndex(join(projectsRoot, pathToProjectSlug(namedWtPath))).get(name)
-  if (namedHit) return { id: namedHit.id, dir: namedHit.cwd || namedWtPath }
-
-  // 2. Otherwise: newest name-match across the cwd's own project dir and any
-  //    other worktree project dirs under it.
-  const candidates = [join(projectsRoot, pathToProjectSlug(cwd))]
+  scope?: ConfigDirScope,
+): (SessionOrigin & { id: string; dir: string }) | null {
+  // The worktree paths to consider, alongside the tab's own cwd. Same list for
+  // every config dir — worktrees are a property of the repo, not the account.
+  const worktreePaths: string[] = []
   const worktreesDir = join(cwd, '.claude', 'worktrees')
   if (existsSync(worktreesDir)) {
-    for (const entry of readdirSync(worktreesDir)) {
-      candidates.push(join(projectsRoot, pathToProjectSlug(join(worktreesDir, entry))))
+    for (const entry of readdirSync(worktreesDir)) worktreePaths.push(join(worktreesDir, entry))
+  }
+
+  let best: (SessionOrigin & { id: string; dir: string; mtime: number }) | null = null
+
+  for (const cfg of scopeToDirs(scope)) {
+    const { projectsRoot } = cfg
+    const origin = originOf(cfg)
+
+    // 1. Strongest signal: a worktree named exactly after the tab. A
+    //    `--worktree <name>` launch lands at .claude/worktrees/<name>, so a
+    //    name-matched session there is definitively this tab's — prefer it even
+    //    if a stale repo-root session of the same name has a newer mtime.
+    const namedWtPath = join(cwd, '.claude', 'worktrees', name)
+    const namedHit = buildTitleIndex(join(projectsRoot, pathToProjectSlug(namedWtPath))).get(name)
+    if (namedHit) return { id: namedHit.id, dir: namedHit.cwd || namedWtPath, ...origin }
+
+    // 2. Otherwise: newest name-match across the cwd's own project dir and any
+    //    worktree project dirs under it — and, now, across config dirs, which
+    //    is the same newest-wins rule applied one level up.
+    const candidates = [join(projectsRoot, pathToProjectSlug(cwd))]
+    for (const wt of worktreePaths) candidates.push(join(projectsRoot, pathToProjectSlug(wt)))
+
+    for (const projectDir of candidates) {
+      const hit = buildTitleIndex(projectDir).get(name)
+      if (hit && (!best || hit.mtime > best.mtime)) {
+        best = { id: hit.id, dir: hit.cwd || cwd, mtime: hit.mtime, ...origin }
+      }
     }
   }
 
-  let best: { id: string; dir: string; mtime: number } | null = null
-  for (const projectDir of candidates) {
-    const hit = buildTitleIndex(projectDir).get(name)
-    if (hit && (!best || hit.mtime > best.mtime)) {
-      best = { id: hit.id, dir: hit.cwd || cwd, mtime: hit.mtime }
-    }
-  }
-  return best ? { id: best.id, dir: best.dir } : null
+  if (!best) return null
+  const { mtime: _mtime, ...result } = best
+  return result
 }
 
 /**
- * Like findSessionsByName, but searches every project directory under
- * ~/.claude/projects. Each match carries the cwd recorded in the session.
- * Used by `cctabs restore` so callers don't have to guess the right dir.
+ * Like findSessionsByName, but searches every project directory in every Claude
+ * config dir. Each match carries the cwd recorded in the session and where it
+ * was found. Used by `cctabs restore` so callers don't have to guess the right
+ * directory — or the right Claude account.
  */
 export function findSessionsByNameGlobally(
   name: string,
-  projectsRoot: string = join(homedir(), '.claude', 'projects'),
+  scope?: ConfigDirScope,
 ): Array<SessionMatch & { dir: string }> {
-  if (!existsSync(projectsRoot)) return []
-
   const matches: Array<SessionMatch & { dir: string }> = []
 
-  for (const slug of readdirSync(projectsRoot)) {
-    const projectDir = join(projectsRoot, slug)
-    let isDir = false
-    try { isDir = statSync(projectDir).isDirectory() } catch { continue }
-    if (!isDir) continue
+  for (const cfg of scopeToDirs(scope)) {
+    const { projectsRoot } = cfg
+    if (!existsSync(projectsRoot)) continue
+    const origin = originOf(cfg)
 
-    const files = readdirSync(projectDir).filter((f) => extname(f) === '.jsonl')
-    for (const f of files) {
-      const fullPath = join(projectDir, f)
-      try {
-        const content = readFileSync(fullPath, 'utf-8')
-        const lines = content.split('\n')
+    for (const slug of readdirSync(projectsRoot)) {
+      const projectDir = join(projectsRoot, slug)
+      let isDir = false
+      try { isDir = statSync(projectDir).isDirectory() } catch { continue }
+      if (!isDir) continue
 
-        let currentTitle = ''
-        let cwd = ''
-        let firstPrompt = ''
-        let lastActivity = ''
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const entry = JSON.parse(line)
-            if (entry.customTitle !== undefined) currentTitle = entry.customTitle
-            // Last wins, not first — but only among cwd values that actually
-            // belong to THIS file's storage location (slug match against the
-            // directory being scanned). A session's cwd can legitimately
-            // change mid-life (e.g. a worktree gets deleted and the session
-            // is later resumed from the repo root instead) and the transcript
-            // moves with it — but it can also just drift from the agent
-            // running `cd <subdir>` via the Bash tool, which changes the
-            // per-message cwd without the transcript ever moving. Accepting
-            // a drifted cwd sends `restore` into a directory with no
-            // matching session at all ("No conversation found"). Only a cwd
-            // whose slug matches `slug` is guaranteed resumable.
-            if (typeof entry.cwd === 'string' && pathToProjectSlug(entry.cwd) === slug) cwd = entry.cwd
-            if (!firstPrompt && entry.type === 'user' && entry.message?.content) {
-              const text = typeof entry.message.content === 'string'
-                ? entry.message.content
-                : entry.message.content.find((c: { type: string }) => c.type === 'text')?.text ?? ''
-              if (text.startsWith('<')) continue
-              firstPrompt = text.slice(0, 120).replace(/\n/g, ' ').trim()
-              if (text.length > 120) firstPrompt += '…'
-            }
-            if (entry.message?.role === 'assistant' && entry.message?.content) {
-              const parts = Array.isArray(entry.message.content) ? entry.message.content : [{ type: 'text', text: entry.message.content }]
-              for (const p of parts) {
-                if (p.type === 'text' && p.text?.trim()) {
-                  lastActivity = p.text.slice(0, 120).replace(/\n/g, ' ').trim()
-                  if (p.text.length > 120) lastActivity += '…'
-                }
-              }
-            }
-          } catch { /* skip malformed lines */ }
-        }
-
-        if (currentTitle !== name || !cwd) continue
-
-        const stat = statSync(fullPath)
-        matches.push({ id: basename(f, '.jsonl'), mtime: stat.mtimeMs, size: stat.size, firstPrompt, lastActivity, dir: cwd })
-      } catch {
-        // skip unreadable files
+      for (const hit of scanProjectDirForName(projectDir, name, origin)) {
+        // Without a resumable cwd there is nowhere to relaunch this session.
+        if (!hit.cwd) continue
+        matches.push({ ...hit, dir: hit.cwd })
       }
     }
   }
@@ -355,12 +366,14 @@ export function findSessionsByNameGlobally(
 export function findSessionFileById(
   sessionId: string,
   dirs: string[],
-  projectsRoot: string = join(homedir(), '.claude', 'projects'),
+  scope?: ConfigDirScope,
 ): string | null {
-  for (const d of dirs) {
-    if (!d) continue
-    const file = join(projectsRoot, pathToProjectSlug(d), `${sessionId}.jsonl`)
-    if (existsSync(file)) return file
+  for (const cfg of scopeToDirs(scope)) {
+    for (const d of dirs) {
+      if (!d) continue
+      const file = join(cfg.projectsRoot, pathToProjectSlug(d), `${sessionId}.jsonl`)
+      if (existsSync(file)) return file
+    }
   }
   return null
 }
@@ -406,10 +419,16 @@ export function persistSessionTitle(file: string, sessionId: string, newTitle: s
  * Returns Map<customTitle, latestMtimeMs>: when a title appears in multiple
  * sessions (forks, restarts), we keep the most recent mtime.
  */
-export function buildTitleActivityMap(): Map<string, number> {
-  const projectsRoot = join(homedir(), '.claude', 'projects')
+export function buildTitleActivityMap(scope?: ConfigDirScope): Map<string, number> {
   const result = new Map<string, number>()
-  if (!existsSync(projectsRoot)) return result
+  for (const cfg of scopeToDirs(scope)) {
+    collectTitleActivity(cfg.projectsRoot, result)
+  }
+  return result
+}
+
+function collectTitleActivity(projectsRoot: string, result: Map<string, number>): void {
+  if (!existsSync(projectsRoot)) return
 
   for (const slug of readdirSync(projectsRoot)) {
     const projectDir = join(projectsRoot, slug)
@@ -440,21 +459,25 @@ export function buildTitleActivityMap(): Map<string, number> {
       } catch { /* skip unreadable files */ }
     }
   }
-
-  return result
 }
 
 /**
- * List all unique session names (customTitle) in a project directory.
- * Used to show available names when a resume lookup fails.
+ * List all unique session names (customTitle) in a project directory, across
+ * every Claude config dir. Used to show available names when a resume lookup
+ * fails — a hint that omitted another account's sessions would send the user
+ * looking for a name that is right there.
  */
-export function listSessionNames(dir: string): Array<{ name: string; id: string; mtime: number }> {
-  const projectsRoot = join(homedir(), '.claude', 'projects')
-  const projectDir = join(projectsRoot, pathToProjectSlug(dir))
-  if (!existsSync(projectDir)) return []
-
-  const results: Array<{ name: string; id: string; mtime: number }> = []
+export function listSessionNames(
+  dir: string,
+  scope?: ConfigDirScope,
+): Array<{ name: string; id: string; mtime: number; backend?: string }> {
+  const results: Array<{ name: string; id: string; mtime: number; backend?: string }> = []
   const seen = new Set<string>()
+
+  for (const cfg of scopeToDirs(scope)) {
+  const projectDir = join(cfg.projectsRoot, pathToProjectSlug(dir))
+  if (!existsSync(projectDir)) continue
+  const { backend } = originOf(cfg)
   const files = readdirSync(projectDir).filter((f) => extname(f) === '.jsonl')
 
   for (const f of files) {
@@ -471,10 +494,11 @@ export function listSessionNames(dir: string): Array<{ name: string; id: string;
       seen.add(title)
 
       const stat = statSync(fullPath)
-      results.push({ name: title, id: basename(f, '.jsonl'), mtime: stat.mtimeMs })
+      results.push({ name: title, id: basename(f, '.jsonl'), mtime: stat.mtimeMs, backend })
     } catch {
       // skip unreadable files
     }
+  }
   }
 
   return results.sort((a, b) => b.mtime - a.mtime)
@@ -490,34 +514,73 @@ export function listSessionNames(dir: string): Array<{ name: string; id: string;
  * as a search query and shows the picker. So callers must expand prefixes
  * before forwarding to claude.
  */
-export function expandSessionId(input: string, dir?: string): string | null {
+export function expandSessionId(input: string, dir?: string, scope?: ConfigDirScope): string | null {
   if (!input) return null
-  // Already a full UUID — pass through unchanged.
-  if (/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input)) {
-    return input
-  }
+  // Already a full UUID — pass through unchanged, without paying for a scan.
+  if (isFullSessionId(input)) return input
+  return locateSessionById(input, dir, scope)?.id ?? null
+}
 
-  const projectsRoot = join(homedir(), '.claude', 'projects')
-  if (!existsSync(projectsRoot)) return null
+function isFullSessionId(input: string): boolean {
+  return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(input)
+}
 
-  const projectDirs = dir
-    ? [join(projectsRoot, pathToProjectSlug(dir))]
-    : readdirSync(projectsRoot)
-        .map((d) => join(projectsRoot, d))
-        .filter((p) => {
-          try { return statSync(p).isDirectory() } catch { return false }
-        })
+/**
+ * Locate a session by id (full or prefix) and report WHERE it lives.
+ *
+ * The location is the point: a manifest can carry a session id without saying
+ * which Claude account it belongs to, and resuming that id under the wrong
+ * config dir doesn't fail — Claude just can't find the conversation and starts
+ * a fresh one. Finding the transcript tells us the config dir, which tells us
+ * the backend, so an id alone is enough to relaunch correctly.
+ *
+ * Returns null when the id matches nothing, or matches more than one session
+ * (an ambiguous prefix). Scans filenames only — no transcript parsing.
+ */
+export function locateSessionById(
+  input: string,
+  dir?: string,
+  scope?: ConfigDirScope,
+): (SessionOrigin & { id: string }) | null {
+  if (!input) return null
 
-  const matches: string[] = []
-  for (const pd of projectDirs) {
-    if (!existsSync(pd)) continue
-    for (const f of readdirSync(pd)) {
-      if (extname(f) !== '.jsonl') continue
-      const id = basename(f, '.jsonl')
-      if (id.startsWith(input) && !matches.includes(id)) matches.push(id)
+  const matches: Array<SessionOrigin & { id: string }> = []
+
+  for (const cfg of scopeToDirs(scope)) {
+    const { projectsRoot } = cfg
+    if (!existsSync(projectsRoot)) continue
+    const origin = originOf(cfg)
+
+    const projectDirs = dir
+      ? [join(projectsRoot, pathToProjectSlug(dir))]
+      : readdirSync(projectsRoot)
+          .map((d) => join(projectsRoot, d))
+          .filter((p) => {
+            try { return statSync(p).isDirectory() } catch { return false }
+          })
+
+    for (const pd of projectDirs) {
+      if (!existsSync(pd)) continue
+      for (const f of readdirSync(pd)) {
+        if (extname(f) !== '.jsonl') continue
+        const id = basename(f, '.jsonl')
+        if (!id.startsWith(input)) continue
+        if (matches.some((m) => m.id === id && m.configDir === origin.configDir)) continue
+        matches.push({ id, ...origin })
+      }
     }
   }
-  return matches.length === 1 ? matches[0] : null
+
+  if (matches.length === 1) return matches[0]
+  // The same id in two config dirs is a copied transcript, not an ambiguous
+  // prefix — the id is unambiguous, only its home isn't. Prefer the default
+  // config dir, which is where an unqualified id would have been looked up all
+  // along.
+  const sameId = matches.every((m) => m.id === matches[0]?.id)
+  if (matches.length > 1 && sameId) {
+    return matches.find((m) => !m.configDir) ?? matches[0]
+  }
+  return null
 }
 
 /**
@@ -527,9 +590,8 @@ export function expandSessionId(input: string, dir?: string): string | null {
 export function findNewestSessionIdSince(
   dir: string,
   sinceMs: number,
+  scope?: ConfigDirScope,
 ): string | null {
-  const projectsRoot = join(homedir(), '.claude', 'projects')
-
   const candidates: Array<{ id: string; mtime: number }> = []
 
   function scanProjectDir(projectDir: string) {
@@ -543,14 +605,16 @@ export function findNewestSessionIdSince(
     }
   }
 
-  // Scan direct project dir
-  scanProjectDir(join(projectsRoot, pathToProjectSlug(dir)))
+  for (const cfg of scopeToDirs(scope)) {
+    // Scan direct project dir
+    scanProjectDir(join(cfg.projectsRoot, pathToProjectSlug(dir)))
 
-  // Scan worktrees under dir
-  const worktreesDir = join(dir, '.claude', 'worktrees')
-  if (existsSync(worktreesDir)) {
-    for (const entry of readdirSync(worktreesDir)) {
-      scanProjectDir(join(projectsRoot, pathToProjectSlug(join(worktreesDir, entry))))
+    // Scan worktrees under dir
+    const worktreesDir = join(dir, '.claude', 'worktrees')
+    if (existsSync(worktreesDir)) {
+      for (const entry of readdirSync(worktreesDir)) {
+        scanProjectDir(join(cfg.projectsRoot, pathToProjectSlug(join(worktreesDir, entry))))
+      }
     }
   }
 

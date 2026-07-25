@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally, findSessionFileById, persistSessionTitle } from './session.js'
+import { pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally, findSessionsByName, findSessionFileById, persistSessionTitle, listSessionNames, locateSessionById, expandSessionId } from './session.js'
+import { DEFAULT_CONFIG_ROOT, type ClaudeConfigDir } from './config-dirs.js'
 import { readFileSync } from 'fs'
 
 /**
@@ -289,5 +290,140 @@ describe('rename persistence (findSessionFileById + persistSessionTitle)', () =>
     const byNew = findSessionsByNameGlobally('new-name', projectsRoot)
     expect(byNew.map((m) => m.id)).toContain(id)
     expect(findSessionsByNameGlobally('old-name', projectsRoot)).toHaveLength(0)
+  })
+})
+
+/**
+ * Sessions belonging to a second Claude account live under that account's
+ * CLAUDE_CONFIG_DIR, not `~/.claude`. Discovery that only looks in the default
+ * location reports them as missing — and a restore that can't find a session
+ * can't restore its tab, which is what made one tab need a hand-written resume
+ * command after every reboot.
+ */
+describe('discovery across Claude config dirs', () => {
+  let defaultRoot: string
+  let altRoot: string
+  let repo: string
+  let dirs: ClaudeConfigDir[]
+
+  beforeEach(() => {
+    defaultRoot = mkdtempSync(join(tmpdir(), 'cctabs-default-'))
+    altRoot = mkdtempSync(join(tmpdir(), 'cctabs-alt-'))
+    repo = mkdtempSync(join(tmpdir(), 'cctabs-repo-'))
+    dirs = [
+      { root: defaultRoot, projectsRoot: join(defaultRoot, 'projects') },
+      { root: altRoot, projectsRoot: join(altRoot, 'projects'), backend: 'gapminder' },
+    ]
+  })
+
+  afterEach(() => {
+    for (const d of [defaultRoot, altRoot, repo]) rmSync(d, { recursive: true, force: true })
+  })
+
+  const inDefault = () => join(defaultRoot, 'projects')
+  const inAlt = () => join(altRoot, 'projects')
+
+  it('finds a session that exists only in a non-default config dir', () => {
+    writeSession(inAlt(), repo, {
+      id: 'c1ae54cf-728b-40e5-a4a1-c34ac017968b',
+      title: 'gapminder-login',
+      cwd: repo,
+      mtimeSec: 1000,
+    })
+
+    // The old behaviour: invisible, because only ~/.claude was searched.
+    expect(findSessionsByNameGlobally('gapminder-login', inDefault())).toHaveLength(0)
+
+    const global = findSessionsByNameGlobally('gapminder-login', dirs)
+    expect(global.map((m) => m.id)).toEqual(['c1ae54cf-728b-40e5-a4a1-c34ac017968b'])
+    expect(findSessionsByName(repo, 'gapminder-login', dirs)).toHaveLength(1)
+    expect(resolveTabSession(repo, 'gapminder-login', dirs)?.id)
+      .toBe('c1ae54cf-728b-40e5-a4a1-c34ac017968b')
+  })
+
+  it('infers the backend from the config dir the session was found in', () => {
+    writeSession(inAlt(), repo, { id: 'aaaaaaaa-0000-0000-0000-000000000001', title: 'work', cwd: repo, mtimeSec: 1000 })
+
+    for (const hit of [
+      findSessionsByNameGlobally('work', dirs)[0],
+      findSessionsByName(repo, 'work', dirs)[0],
+      resolveTabSession(repo, 'work', dirs)!,
+    ]) {
+      expect(hit.backend).toBe('gapminder')
+      expect(hit.configDir).toBe(altRoot)
+    }
+  })
+
+  it('gives default-config-dir sessions no backend and no config dir', () => {
+    writeSession(inDefault(), repo, { id: 'bbbbbbbb-0000-0000-0000-000000000002', title: 'plain', cwd: repo, mtimeSec: 1000 })
+
+    // The default dir here is a tmpdir, so ask about the real default instead:
+    // originOf() is what decides, and it keys off DEFAULT_CONFIG_ROOT.
+    const asDefault: ClaudeConfigDir[] = [
+      { root: DEFAULT_CONFIG_ROOT, projectsRoot: inDefault() },
+      dirs[1],
+    ]
+    const hit = findSessionsByNameGlobally('plain', asDefault)[0]
+    expect(hit.backend).toBeUndefined()
+    expect(hit.configDir).toBeUndefined()
+  })
+
+  it('picks the newest when the same name exists in two config dirs', () => {
+    writeSession(inDefault(), repo, { id: 'dddddddd-0000-0000-0000-000000000003', title: 'shared', cwd: repo, mtimeSec: 1000 })
+    writeSession(inAlt(), repo, { id: 'eeeeeeee-0000-0000-0000-000000000004', title: 'shared', cwd: repo, mtimeSec: 9000 })
+
+    const all = findSessionsByNameGlobally('shared', dirs)
+    expect(all.map((m) => m.id)).toEqual([
+      'eeeeeeee-0000-0000-0000-000000000004',
+      'dddddddd-0000-0000-0000-000000000003',
+    ])
+    // …and the winner still says which account it came from, so the caller can
+    // report it rather than silently resuming under the wrong one.
+    expect(all[0].backend).toBe('gapminder')
+    expect(resolveTabSession(repo, 'shared', dirs)?.id).toBe('eeeeeeee-0000-0000-0000-000000000004')
+  })
+
+  it('reports where a session id lives, so an id alone is enough to relaunch it', () => {
+    const id = 'c1ae54cf-728b-40e5-a4a1-c34ac017968b'
+    writeSession(inAlt(), repo, { id, title: 'gapminder-login', cwd: repo, mtimeSec: 1000 })
+
+    // Both the full id and a prefix resolve, and both name the account. A full
+    // id used to short-circuit before any lookup, which is exactly how a
+    // manifest id ended up resumed against the wrong config dir.
+    for (const input of [id, 'c1ae54cf']) {
+      const located = locateSessionById(input, undefined, dirs)
+      expect(located).toEqual({ id, backend: 'gapminder', configDir: altRoot })
+    }
+    expect(expandSessionId('c1ae54cf', undefined, dirs)).toBe(id)
+  })
+
+  it('prefers the default config dir when the same id exists in both', () => {
+    const id = 'ffffffff-0000-0000-0000-000000000005'
+    writeSession(inDefault(), repo, { id, title: 'copied', cwd: repo, mtimeSec: 1000 })
+    writeSession(inAlt(), repo, { id, title: 'copied', cwd: repo, mtimeSec: 2000 })
+
+    const asDefault: ClaudeConfigDir[] = [
+      { root: DEFAULT_CONFIG_ROOT, projectsRoot: inDefault() },
+      dirs[1],
+    ]
+    // A copied transcript is not an ambiguous prefix — the id is unambiguous,
+    // only its home isn't, so this resolves rather than giving up.
+    expect(locateSessionById(id, undefined, asDefault)).toEqual({ id })
+  })
+
+  it('still refuses a prefix that matches two different sessions', () => {
+    writeSession(inDefault(), repo, { id: '99999999-0000-0000-0000-000000000006', title: 'a', cwd: repo, mtimeSec: 1000 })
+    writeSession(inAlt(), repo, { id: '99999999-0000-0000-0000-000000000007', title: 'b', cwd: repo, mtimeSec: 2000 })
+    expect(locateSessionById('99999999', undefined, dirs)).toBeNull()
+  })
+
+  it('lists names from every config dir when a lookup fails', () => {
+    writeSession(inDefault(), repo, { id: 'aaaaaaaa-0000-0000-0000-00000000000a', title: 'local-one', cwd: repo, mtimeSec: 1000 })
+    writeSession(inAlt(), repo, { id: 'bbbbbbbb-0000-0000-0000-00000000000b', title: 'gapminder-one', cwd: repo, mtimeSec: 2000 })
+
+    const names = listSessionNames(repo, dirs)
+    expect(names.map((n) => n.name).sort()).toEqual(['gapminder-one', 'local-one'])
+    expect(names.find((n) => n.name === 'gapminder-one')?.backend).toBe('gapminder')
+    expect(names.find((n) => n.name === 'local-one')?.backend).toBeUndefined()
   })
 })
