@@ -1,12 +1,12 @@
 ---
 layout: home
-title: cctabs — Self-aware agentic coding across terminal tabs
-description: Install one plugin and Claude spawns 10, 15 parallel sessions on its own — each in a named terminal tab you can see, scroll, and switch to. No tmux. No TUI.
+title: cctabs — Run a fleet of Claude Code sessions across your terminal tabs
+description: cctabs gives every Claude Code session its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the whole fleet itself. Works in Tabby and Wave Terminal, with no tmux.
 
 hero:
   name: cctabs
-  text: Self-aware agentic coding across terminal tabs
-  tagline: "Install one plugin and Claude spawns 10, 15 parallel sessions on its own — each in a named tab (auth, api, frontend) you can see, scroll, and switch to. No tmux. No TUI."
+  text: Run a fleet of Claude Code sessions across your terminal tabs
+  tagline: "Every Claude Code session gets its own named terminal tab (auth, api, frontend) that you can scroll and switch to like any other tab, plus a CLI to open, fork, and read them. Claude Code can drive the whole thing itself, which is how you get to ten or fifteen sessions without losing track of them."
   actions:
     - theme: brand
       text: Get Started
@@ -17,17 +17,17 @@ hero:
 
 features:
   - title: Claude spawns its own sessions
-    details: Install one plugin and Claude Code gains tab-awareness. It sees what's running, opens new tabs, starts new sessions, and coordinates work across them — automatically.
+    details: Install one plugin and Claude Code can see your tabs. It checks what's already running, opens new tabs, starts sessions in them, and coordinates work across the ones it opened, without you relaying anything by hand.
   - title: Real terminal tabs
-    details: Every session runs in a native terminal tab. See them all in your tab bar. Click to switch. Scroll the output. Copy-paste normally. Not a TUI. Not tmux. Your actual terminal.
-  - title: Go from 4 sessions to 15
-    details: Most people manually open a few Claude Code sessions. With cctabs, Claude handles the session management — so you scale to 10, 15 parallel sessions without the overhead.
+    details: Every session runs in a native tab of the terminal you already use, so the whole fleet is visible in the tab bar, switching is a click, and scrolling and copy-paste behave the way they always do. There is no tmux underneath and no TUI to live in.
+  - title: From four sessions to fifteen
+    details: Most people open three or four Claude Code sessions by hand and stall there, because the bookkeeping grows faster than the work does. cctabs hands that bookkeeping to Claude, so ten or fifteen parallel sessions cost you roughly what four did.
   - title: Restore after a computer restart
-    details: After a reboot, just say "restore my cctabs now after a computer restart" — Claude reopens every named tab and resumes each session where it left off.
+    details: After a reboot, say "restore my cctabs now after a computer restart" and Claude reopens every named tab, resumes each session where it left off, and puts the tab bar back in its original order.
   - title: Fork to explore
-    details: Branch any conversation into a new independent tab. Try alternative approaches without disrupting the original. Keep what works, close what doesn't.
+    details: Branch any conversation into a new independent tab and try a different approach in it, with the original left exactly as it was. If the fork turns out better you keep it and close the one you started from.
   - title: One plugin install
-    details: Install the Claude Code plugin and the CLI comes with it. No config files. No tmux. No dependencies. Works in Tabby (recommended) or Wave Terminal.
+    details: Install the Claude Code plugin and the CLI comes with it, along with the skill that lets Claude use it. There is nothing to configure and nothing else to install. Works in Tabby (recommended) or Wave Terminal.
 ---
 
 ## Get started in 60 seconds

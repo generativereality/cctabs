@@ -5,6 +5,9 @@ description: Complete reference for all cctabs CLI commands — sessions, new, r
 
 # Commands
 
+Every command below needs the CLI on your PATH — see
+[Getting Started](/guide/getting-started) if you haven't installed it yet.
+
 ## cctabs (default)
 
 Running `cctabs` with no arguments is equivalent to `cctabs sessions`.

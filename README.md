@@ -49,7 +49,7 @@ Run these slash commands inside a [Claude Code](https://claude.ai/code) session:
 **Via npm** (CLI only, no Claude Code skill):
 
 ```bash
-npm install -g cctabs
+npm install -g @generativereality/cctabs
 ```
 
 **Skill only** (if you already have the CLI installed via npm):

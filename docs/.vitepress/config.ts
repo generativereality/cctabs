@@ -1,17 +1,27 @@
 import { defineConfig } from 'vitepress'
 
 const siteUrl = 'https://cctabs.com'
-const ogTitle = 'cctabs — Self-aware agentic coding across terminal tabs'
-const ogDescription = 'Install one plugin and Claude spawns 10, 15 parallel sessions on its own — each in a named terminal tab. No tmux. No TUI.'
+const ogTitle = 'cctabs — Run a fleet of Claude Code sessions across your terminal tabs'
+const ogDescription = 'Every Claude Code session gets its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the fleet itself. No tmux.'
 
 export default defineConfig({
   title: 'cctabs',
-  description: 'Self-aware agentic coding across terminal tabs. Install one plugin and Claude spawns parallel sessions — each in a named terminal tab. No tmux. No TUI.',
+  description: 'Run a fleet of Claude Code sessions across your terminal tabs. Every session gets its own named tab, driven by a CLI or by Claude Code itself. No tmux, no TUI.',
   lang: 'en-US',
   cleanUrls: true,
 
   sitemap: {
     hostname: siteUrl,
+  },
+
+  // VitePress emits no canonical link of its own.
+  transformPageData(pageData) {
+    const path = pageData.relativePath.replace(/(index)?\.md$/, '')
+    pageData.frontmatter.head ??= []
+    pageData.frontmatter.head.push([
+      'link',
+      { rel: 'canonical', href: `${siteUrl}/${path}` },
+    ])
   },
 
   head: [
@@ -34,7 +44,7 @@ export default defineConfig({
 
     // Additional SEO
     ['meta', { name: 'author', content: 'generativereality' }],
-    ['meta', { name: 'keywords', content: 'cctabs, claude code, ai coding, terminal sessions, agent orchestration, claude code sessions, multi-agent, wave terminal' }],
+    ['meta', { name: 'keywords', content: 'cctabs, claude code, claude code sessions, parallel claude code sessions, claude code session manager, terminal tabs, agent orchestration, multi-agent, tabby terminal, wave terminal, tmux alternative' }],
 
     // Google tag (gtag.js) — cookieless config, no banner required
     ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-KW9J78R8C6' }],

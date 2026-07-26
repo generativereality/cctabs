@@ -5,6 +5,10 @@ description: Open session batches, fork conversations, resume after restarts, se
 
 # Session Workflows
 
+These all assume cctabs is already installed. If it isn't,
+[Getting Started](/guide/getting-started) covers it, and
+[What is cctabs?](/guide/what-is-cctabs) explains the idea behind it.
+
 ## Opening a session batch
 
 ```bash

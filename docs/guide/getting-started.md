@@ -54,7 +54,7 @@ The plugin installs both the `cctabs` CLI and the Claude Code skill in one step.
 This installs the `cctabs` CLI but does **not** include the Claude Code skill:
 
 ```bash
-npm install -g cctabs
+npm install -g @generativereality/cctabs
 ```
 
 Verify:
