@@ -44,9 +44,9 @@ export class TabbyPluginUnreachableError extends Error {
  * process.pid → ppid chain via `ps`, POSTs the PID list to
  * /api/tabs/identify, and caches the resulting plugin UUID.
  *
- * In Tabby's data model there are no Wave-style "workspaces" or "blocks";
+ * In Tabby's data model there are no "workspaces" or "blocks";
  * we project a single synthetic workspace and a 1:1 tab↔block mapping so
- * the rest of cctabs sees the same shape it does on Wave.
+ * the rest of cctabs sees the shape the commands layer expects.
  */
 export class TabbyAdapter implements TerminalAdapter {
   private host: string
@@ -110,7 +110,7 @@ export class TabbyAdapter implements TerminalAdapter {
 
   blocksList(): Block[] {
     this.ensureHealthy()
-    // Synchronous in WaveAdapter; we deopt to a sync curl spawn here so the
+    // We deopt to a sync curl spawn here so the
     // existing command code can keep its synchronous shape.
     const out = spawnSync(
       'curl',

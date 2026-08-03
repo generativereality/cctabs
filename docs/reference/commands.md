@@ -72,7 +72,7 @@ cctabs new <name> [dir] [-w workspace]
 |----------|-------------|
 | `name` | Tab name (required) |
 | `dir` | Working directory (default: current) |
-| `-w, --workspace` | Target Wave workspace |
+| `-w, --workspace` | Target workspace (legacy Wave concept; no-op on Tabby) |
 
 ## cctabs resume
 
@@ -188,7 +188,7 @@ matches the tab's name, across every [config dir](/guide/configuration#backends)
 Tabs with no matching session — a plain shell, an editor — sink to the end and
 keep their relative order, so sorting never scrambles your non-Claude tabs.
 
-Tabby only: Wave has no reordering API, and `cctabs sort` exits with an error there.
+Requires the Tabby companion plugin's reordering API.
 
 ## cctabs scrollback
 
@@ -268,12 +268,27 @@ adapts to the actual current cwd on resume.
 
 ## cctabs doctor
 
-Diagnose Wave Terminal DB issues — currently the orphan-tabid bug that breaks
-`wsh blocks list`. See [Troubleshooting](../guide/troubleshooting.md) for the
-full background.
+Run environment checks and report what's wrong. See
+[Troubleshooting](../guide/troubleshooting.md) for the full background.
 
 ```bash
-cctabs doctor              # diagnose only
-cctabs doctor --fix        # back up the DB and apply the fix interactively
-cctabs doctor --fix --yes  # skip the confirmation prompt
+cctabs doctor
 ```
+
+Checks:
+
+- **Terminal** — which backend was detected, and how (env sniffing, a
+  `CCTABS_TERMINAL` override, or the Tabby plugin probe used over SSH).
+- **Spawned shell PATH** — whether a login+interactive `zsh` can find `node`.
+  This is the canonical macOS PATH-sourcing failure: when it breaks, tabs spawn
+  but Claude Code and plugin MCPs can't start inside them.
+- **Tabby cctabs plugin** — whether the companion plugin answers on
+  `127.0.0.1:3300`, and which version.
+
+Exits non-zero if any check fails. It's safe to run under an unsupported
+terminal — it reports what it found rather than refusing, which is the point.
+
+::: info Changed in 0.5.0
+`--fix` and `--yes` are gone. They only ever repaired Wave Terminal's
+orphan-tabid database bug, and the Wave backend was removed in 0.5.0.
+:::

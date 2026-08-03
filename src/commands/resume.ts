@@ -175,7 +175,7 @@ export const resumeCommand = define({
       }
 
       // Empty scrollback ('unknown') means the tab has no live shell — typical
-      // after a Wave restart. Recreate the tab rather than send into the void.
+      // after a terminal restart. Recreate the tab rather than send into the void.
       if (status === 'unknown') {
         const stillEmpty = await adapter.confirmScrollbackEmpty(termBlock.blockid)
         if (stillEmpty) {

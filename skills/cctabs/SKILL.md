@@ -1,9 +1,9 @@
 ---
 name: cctabs
 description: |
-  Manage Claude Code sessions across terminal tabs (Wave Terminal or Tabby) — list, open, fork, close, inspect output, send input. Each terminal tab runs its own Claude Code session.
+  Manage Claude Code sessions across terminal tabs (Tabby) — list, open, fork, close, inspect output, send input. Each terminal tab runs its own Claude Code session.
 
-  TRIGGER when the user says any of: "open a tab", "open a new tab", "open a tab with prompt …", "open a tab and <do X>", "open a tab that <does X>", "open a new cctab" (singular alias), "spawn a tab", "a new cctabs session", "in another tab", "in a separate tab", "fork this tab", "list my tabs", "close that tab", "send to <tab>", "resume <name>" — anything that refers to a terminal tab running Claude Code. ALSO trigger for: "/cctabs", or when the user mentions Wave Terminal / Tabby tab management for Claude Code.
+  TRIGGER when the user says any of: "open a tab", "open a new tab", "open a tab with prompt …", "open a tab and <do X>", "open a tab that <does X>", "open a new cctab" (singular alias), "spawn a tab", "a new cctabs session", "in another tab", "in a separate tab", "fork this tab", "list my tabs", "close that tab", "send to <tab>", "resume <name>" — anything that refers to a terminal tab running Claude Code. ALSO trigger for: "/cctabs", or when the user mentions Tabby tab management for Claude Code.
 
   The word "tab" is DECISIVE. If the user says "tab" / "cctab" / "cctabs" — even paired with a task, and even when that task sounds like background or parallel work (e.g. "open a tab with prompt 'do X asap'", "open a tab and fix Y") — they mean a real terminal tab running its own Claude Code session: CALL THIS SKILL, not the Agent tool. Handing a task to a fresh tab is the single most common use: "open a tab with prompt <task>" maps directly to `cctabs new <name> [dir] --prompt "<task>"`. A background/fork subagent (the Agent tool) is NOT a tab and must never be substituted when the user said "tab" — its output is invisible in the terminal and it cannot be attached to, resumed, watched, or driven as a session. Use the Agent tool ONLY when the user explicitly says "subagent", "background agent", "spawn an agent", "do this in parallel without a new tab", or when the work is tightly interconnected with the current session's filesystem state and must share it.
 
@@ -12,7 +12,7 @@ description: |
 
 You are managing Claude Code sessions using the `cctabs` CLI.
 
-**Important:** "tabs" here means **terminal tabs** (Wave Terminal or Tabby), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
+**Important:** "tabs" here means **terminal tabs** (Tabby), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
 
 ## Before you spawn anything: is cctabs the right tool?
 
@@ -52,9 +52,11 @@ On your first cctabs invocation in a session, look at the version banner cctabs 
 
 Don't silently work around an outdated CLI: detection heuristics, command flags, and bug fixes diverge between versions, so misbehavior on the user's machine is often "binary on PATH lags behind the plugin docs you're reading." The Claude Code marketplace plugin update path only refreshes this skill — the npm-installed CLI binary is a separate channel and must be upgraded explicitly.
 
-### Tabby users: a one-time plugin install is needed
+### A one-time plugin install is needed
 
-Wave Terminal works out of the box. **Tabby additionally needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
+Tabby is the terminal cctabs supports, and it **needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
+
+**Wave Terminal is not supported.** It was a working backend through 0.4.x and was withdrawn in 0.5.0 — tabs opened, but the Claude session inside them often never started. Under Wave, every cctabs command exits with a pointer to Tabby. If a user is on Wave, the move is: install Tabby, install the companion plugin, then `cctabs restore` — their conversations live in `~/.claude/projects` and are unaffected by the terminal switch.
 
 You don't need to detect this proactively — every cctabs command will fail with a self-documenting error if the plugin isn't running:
 
@@ -74,7 +76,7 @@ On approval, run `cctabs install-tabby-plugin --yes`. Tabby quits ~2s after the 
 
 If the user wants to keep their other Tabby tabs intact, run `cctabs install-tabby-plugin --no-restart` instead and tell them to quit + reopen Tabby themselves.
 
-`cctabs doctor` is also available for a deliberate environment check. It adapts to whichever terminal you're running in — terminal detection runs either way; on Wave it additionally inspects Accessibility permission and scans the Wave DB for orphan tabids; on Tabby it probes the cctabs plugin's localhost health endpoint. Useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
+`cctabs doctor` is also available for a deliberate environment check: it reports the detected terminal (and how it was detected), whether a login+interactive shell can find `node`, and — on Tabby — whether the cctabs plugin answers its localhost health endpoint. Useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
 
 #### Auto-install + auto-restart (recommended)
 
@@ -108,7 +110,7 @@ Windows: `%APPDATA%\tabby`.
 
 If the user prefers, point them at Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby. Same end state.
 
-Do not assume "no Wave detected → cctabs unusable" — Tabby is fully supported.
+Do not assume an unfamiliar terminal means cctabs is unusable — check `cctabs doctor` first, and note that over SSH the detection falls back to probing the Tabby plugin.
 
 ### Driving a remote Tabby over SSH
 
@@ -338,7 +340,7 @@ cctabs resume api ~/Dev/myapp
 
 ## Workflow: Restoring tabs after a reboot
 
-After a terminal restart or computer reboot, every tab loses its Claude session and shows up with `terminal` or `unknown` status (true for both Wave and Tabby). `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
+After a terminal restart or computer reboot, every tab loses its Claude session and shows up with `terminal` or `unknown` status. `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
 
 ```bash
 cctabs restore                    # search all projects (default)
@@ -572,7 +574,7 @@ Both slugs are just the absolute path with `/` → `-`; list `~/.claude/projects
 `cctabs new` may occasionally fail with "Timed out waiting for new terminal block" (or, on Tabby, "Shell prompt never appeared in new tab"). This does **NOT** mean you have too many tabs or that the terminal has hit a limit.
 
 **Possible causes:**
-- The terminal app may need to be in focus / foreground for tab creation to register (true for both Wave and Tabby).
+- The terminal app may need to be in focus / foreground for tab creation to register.
 - The internal timeout may be slightly too short for the current system load.
 - Transient IPC timing issue between cctabs and the terminal.
 - **Tabby only:** the cctabs plugin must be installed and running (`curl http://127.0.0.1:3300/api/health` to verify).
@@ -605,7 +607,7 @@ cctabs close e5f6a7b8                  # close by block ID prefix
 
 Every session actually carries **two independent names**, and it's easy to change one while assuming you changed both:
 
-1. **Tabby/Wave tab title** — the text on the terminal tab. Set by `cctabs new`/`resume`/`fork`, and changeable with `cctabs rename`.
+1. **Tabby tab title** — the text on the terminal tab. Set by `cctabs new`/`resume`/`fork`, and changeable with `cctabs rename`.
 2. **The claude session name** — the **remote-control (RC) session name shown on claude.ai** when you control the session from the web/mobile app. It mirrors the session's **current local name**, which is *initialized* from the launch `--name` (what cctabs passes) and thereafter changed by `/rename`.
 
 There's also a third, on-disk name that matters for lookup: the **`customTitle` recorded in the session's `.jsonl`**, which is what `cctabs resume <name>` / `restore` search by. cctabs writes it at launch via `--name`; **Claude's in-session `/rename` does NOT rewrite it** (it only relabels the live/RC session), so a session renamed *only* with `/rename` stays findable by resume under its **original** name — a known limitation.

@@ -7,28 +7,29 @@ description: Install cctabs as a Claude Code plugin or via npm, then open your f
 
 ## Prerequisites
 
-- A supported terminal — either:
-  - **[Tabby](https://tabby.sh)** (recommended) with the
-    [`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs) plugin installed.
-    Stays responsive with many open tabs and is faster on tab creation and
-    scrollback reads, which matters once Claude is orchestrating 10+ sessions.
-  - [Wave Terminal](https://waveterm.dev).
-  - Both terminals support macOS, Linux, and Windows. cctabs is actively
-    tested on **macOS**. Wave didn't work in one Ubuntu test; Tabby on
-    Linux/Windows hasn't been tried yet but its plugin format is portable,
-    so it might Just Work. If you hit issues on another platform or want a
-    new terminal supported, point Claude Code at
-    [the repo](https://github.com/generativereality/cctabs), share the
-    error, and ask it to investigate + open a PR — the backend interface is
-    small ([`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts)).
+- **[Tabby](https://tabby.sh)** with the
+  [`tabby-cctabs`](https://www.npmjs.com/package/tabby-cctabs) plugin installed.
+  It stays responsive with many open tabs and is fast on tab creation and
+  scrollback reads, which matters once Claude is orchestrating 10+ sessions.
+  Tabby runs on macOS, Linux, and Windows; cctabs is actively tested on
+  **macOS**, and Linux/Windows haven't been tried yet but the plugin format is
+  portable, so it might Just Work. If you hit issues on another platform or
+  want a new terminal supported, point Claude Code at
+  [the repo](https://github.com/generativereality/cctabs), share the
+  error, and ask it to investigate + open a PR — the backend interface is
+  small ([`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts)).
+
+  ::: warning Wave Terminal is no longer supported
+  Wave was supported through 0.4.x and was withdrawn in **0.5.0**: tabs would
+  open, but the Claude session inside them often never started. cctabs now
+  exits with a pointer to Tabby when it detects Wave. Your conversations are
+  not affected — they live in `~/.claude/projects`, so `cctabs restore` brings
+  them back by name once Tabby is set up.
+  :::
 - [Claude Code](https://claude.ai/code) — `claude` on your PATH
 - Node.js ≥ 20
 
-**One-time setup (Tabby):** install the cctabs plugin from Tabby → **Settings → Plugins** (search "cctabs"), or sideload the dev build (see [`tabby-plugin/README.md`](https://github.com/generativereality/cctabs/tree/main/tabby-plugin)).
-
-**One-time setup (Wave):** Wave Terminal needs Accessibility permission to open new tabs:
-
-> System Settings → Privacy & Security → Accessibility → Wave Terminal ✓
+**One-time setup:** install the cctabs plugin from Tabby → **Settings → Plugins** (search "cctabs"), or run `cctabs install-tabby-plugin` from inside a Tabby tab. To sideload a dev build instead, see [`tabby-plugin/README.md`](https://github.com/generativereality/cctabs/tree/main/tabby-plugin). Restart Tabby afterwards.
 
 ## Install
 
@@ -65,7 +66,7 @@ cctabs --version
 
 ## First session
 
-From inside Tabby (with the cctabs plugin running) or Wave Terminal:
+From inside Tabby, with the cctabs plugin running:
 
 ```bash
 cctabs sessions
@@ -80,7 +81,7 @@ cctabs new myproject ~/Dev/myproject
 ```
 
 cctabs will:
-1. Open a new terminal tab (Tabby or Wave — whichever you're running in)
+1. Open a new Tabby tab
 2. Rename it to `myproject`
 3. `cd` to `~/Dev/myproject`
 4. Launch `claude --name myproject`

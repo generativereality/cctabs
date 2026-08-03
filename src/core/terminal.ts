@@ -35,6 +35,9 @@ export function detectTerminal(): KnownTerminal {
   // want the *current* terminal to win.
   if (prog === 'Tabby') return 'tabby'
 
+  // Wave is still *detected* even though its adapter was removed in 0.5.0 —
+  // recognising it is what lets requireAdapter() explain that support was
+  // withdrawn instead of reporting "an unrecognised terminal".
   if (process.env.WAVETERM_JWT) return 'wave'
 
   if (prog === 'iTerm.app') return 'iterm2'
@@ -122,21 +125,53 @@ export function printUnsupportedTerminalError(terminal: KnownTerminal): void {
 
   const lines: string[] = [
     '',
-    `  cctabs currently requires Wave Terminal.`,
+    `  cctabs requires Tabby.`,
     `  You appear to be running in: ${name}`,
     '',
-    `  Option 1 — Switch to Wave Terminal (full support today):`,
-    `    brew install --cask wave`,
-    `    https://waveterm.dev`,
+    `  Option 1 — Switch to Tabby (the supported terminal):`,
+    `    brew install --cask tabby`,
+    `    cctabs install-tabby-plugin   # run this from inside a Tabby tab`,
+    `    https://cctabs.com/guide/getting-started`,
     '',
     `  Option 2 — Add ${name} support (one adapter file, PRs welcome):`,
     `    git clone ${repo}`,
     `    cd cctabs`,
     `    claude   # ask Claude to implement the ${name} adapter`,
     '',
-    `    Claude will find src/core/wave.ts, use it as the reference`,
+    `    Claude will find src/core/tabby.ts, use it as the reference`,
     `    implementation, create src/core/${adapterFileName(terminal)},`,
     `    wire it up, and open a PR — all in one session.`,
+    '',
+  ]
+
+  console.error(lines.join('\n'))
+}
+
+/**
+ * Wave gets its own message rather than falling into the generic
+ * unsupported-terminal path: Wave *was* supported through 0.4.x, so a user
+ * hitting this is more likely to be an existing user whose setup just stopped
+ * working than someone picking a terminal for the first time. Say plainly that
+ * support was withdrawn, and why, so it doesn't read as a bug.
+ */
+export function printWaveWithdrawnError(): void {
+  const lines: string[] = [
+    '',
+    `  cctabs no longer supports Wave Terminal.`,
+    '',
+    `  Wave support was withdrawn in 0.5.0. It had degraded to the point`,
+    `  where tabs would open but the Claude session inside them often never`,
+    `  started, and diagnosing that cost more than the backend was worth.`,
+    `  Tabby is the supported terminal and is where the work goes now.`,
+    '',
+    `  Switch to Tabby:`,
+    `    brew install --cask tabby`,
+    `    cctabs install-tabby-plugin   # run this from inside a Tabby tab`,
+    `    https://cctabs.com/guide/getting-started`,
+    '',
+    `  Your Claude sessions are not tied to the terminal — they live in`,
+    `  ~/.claude/projects. Once Tabby is running, \`cctabs restore\` will`,
+    `  reopen them by name.`,
     '',
   ]
 

@@ -60,9 +60,9 @@ curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skill
   -o .claude/skills/cctabs/SKILL.md
 ```
 
-**Requirements:** [Wave Terminal](https://waveterm.dev) · macOS · Node.js 20+
+**Requirements:** [Tabby](https://tabby.sh) · macOS · Node.js 20+
 
-**One-time:** Wave needs Accessibility permission — System Settings → Privacy & Security → Accessibility → Wave ✓
+**One-time:** install the companion plugin — run `cctabs install-tabby-plugin` from inside a Tabby tab, then restart Tabby.
 
 ## Usage
 
@@ -202,7 +202,7 @@ One remote-controlled session orchestrating a local fleet.
 flags = ["--allow-dangerously-skip-permissions"]
 
 [defaults]
-# Default Wave workspace for new sessions
+# Default workspace for new sessions (inert on Tabby, which has no workspaces)
 # workspace = ""
 
 # Backend presets: another model provider, or another Claude account entirely.
@@ -220,13 +220,15 @@ env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
 
 | Terminal | Status |
 |----------|--------|
-| [Wave Terminal](https://waveterm.dev) | ✅ Full support |
 | [Tabby](https://tabby.sh) | ✅ Full support (requires the [`tabby-cctabs`](./tabby-plugin/) companion plugin) |
+| [Wave Terminal](https://waveterm.dev) | ❌ Withdrawn in 0.5.0 |
 | iTerm2 | Planned |
 | Ghostty | Planned |
 | Warp | Planned |
 
-Wave is supported via its unix socket RPC. Tabby is supported via a small companion plugin that exposes a localhost HTTP API the cctabs CLI talks to — install with `cctabs install-tabby-plugin`. Other terminals will follow as adapters — PRs welcome.
+Tabby is supported via a small companion plugin that exposes a localhost HTTP API the cctabs CLI talks to — install with `cctabs install-tabby-plugin`. Other terminals will follow as adapters — PRs welcome.
+
+**Wave Terminal was supported through 0.4.x and is not supported from 0.5.0 on.** It had reached the point where tabs would open but the Claude session inside them often never started. Running cctabs under Wave now exits with a message pointing at Tabby. Nothing is lost in the move: Claude sessions live in `~/.claude/projects`, not in the terminal, so once Tabby and its plugin are installed, `cctabs restore` reopens them by name.
 
 ### Login shells on macOS
 

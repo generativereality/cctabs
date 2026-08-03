@@ -1,17 +1,20 @@
 import type { AllData, Block, SessionStatus, Workspace } from '../types/index.js'
-import { resolveTerminal, printUnsupportedTerminalError } from './terminal.js'
-import { WaveAdapter } from './wave.js'
+import {
+  resolveTerminal,
+  printUnsupportedTerminalError,
+  printWaveWithdrawnError,
+} from './terminal.js'
 import { TabbyAdapter } from './tabby.js'
 import type { TabMatchOptions } from './tab-match.js'
 
 /**
- * The shared shape every backend adapter (Wave, Tabby, …) presents to the
- * commands layer. New methods should be added here first, then implemented
- * in each adapter.
+ * The shared shape every backend adapter presents to the commands layer. New
+ * methods should be added here first, then implemented in each adapter.
  *
- * The Block / Workspace types are modelled after Wave's data shape; non-Wave
- * adapters synthesize records that fit the same shape. In particular each
- * Tabby tab maps to a single Block with view='term'.
+ * Tabby is the only adapter today; the interface stays in place because it is
+ * what a new terminal backend implements (and because the Block / Workspace
+ * shape it speaks is now baked into the commands layer). Each Tabby tab maps
+ * to a single Block with view='term'.
  */
 export interface TerminalAdapter {
   // -- bulk reads / lifecycle --
@@ -106,11 +109,12 @@ export function requireAdapter(): TerminalAdapter {
   // TERM_PROGRAM is empty still resolves to Tabby when the plugin answers on
   // this host — the probe only runs in the otherwise-unknown case.
   const terminal = resolveTerminal()
-  if (terminal === 'wave') {
-    return new WaveAdapter()
-  }
   if (terminal === 'tabby') {
     return new TabbyAdapter()
+  }
+  if (terminal === 'wave') {
+    printWaveWithdrawnError()
+    process.exit(1)
   }
   printUnsupportedTerminalError(terminal)
   process.exit(1)

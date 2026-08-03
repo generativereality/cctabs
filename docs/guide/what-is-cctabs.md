@@ -47,16 +47,21 @@ open, read, and coordinate those tabs without you driving it.
 
 ## Terminal support
 
-Tabby is the recommended backend, and Wave Terminal is supported too. Each one is
-a small [`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts)
+Tabby is the backend cctabs supports. It's a small
+[`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts)
 implementation, so adding another terminal is a contained piece of work rather
 than a rewrite — if you want one supported, point Claude Code at
 [the repo](https://github.com/generativereality/cctabs) and ask it to write the
 adapter and open a PR.
 
-cctabs is actively tested on macOS. Wave didn't work in one Ubuntu test, and
-Tabby on Linux and Windows hasn't been tried yet, though its plugin format is
-portable so it may well work as-is.
+Wave Terminal was a supported backend through 0.4.x and was **withdrawn in
+0.5.0**: tabs would open, but the Claude session inside them often never
+started. cctabs now exits with a pointer to Tabby when it detects Wave. Your
+conversations aren't affected — they live in `~/.claude/projects`, so
+`cctabs restore` brings them back by name once Tabby is set up.
+
+cctabs is actively tested on macOS. Tabby on Linux and Windows hasn't been tried
+yet, though its plugin format is portable so it may well work as-is.
 
 ## Installing it
 

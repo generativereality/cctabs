@@ -39,7 +39,7 @@ export const installTabbyPluginCommand = define({
 
     if (detectTerminal() !== 'tabby') {
       consola.error('cctabs install-tabby-plugin must be run from inside a Tabby tab.')
-      consola.info('On Wave Terminal you don\'t need this — Wave works without a plugin.')
+      consola.info('Open Tabby (`brew install --cask tabby` if you need it) and run this there.')
       process.exit(1)
     }
 

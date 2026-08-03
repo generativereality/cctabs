@@ -30,7 +30,7 @@ interface OpenSessionOptions {
    * Defaults to 2000ms. Batch callers (e.g. restore) can lower this: by the
    * time we return, waitForNewBlock has already confirmed the new block is
    * visible in `blocks list`, so the next call's beforeIds snapshot is complete
-   * regardless — a short settle is enough to let Wave's tab animation finish.
+   * regardless — a short settle is enough to let the tab animation finish.
    */
   tailDelayMs?: number
 }
@@ -343,7 +343,6 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   // quit claude or Ctrl-C out of it. `;` (not `&&`) so the shell appears even
   // when claude exits non-zero or via signal, and the launch shell's own `-i`
   // keeps it alive through the SIGINT that interrupts claude.
-  // (workspaceQuery is a Wave-only window concept and does not apply here.)
   //
   // Why both -l and -i: `-l -c` alone is a non-interactive login shell, which
   // sources `~/.zprofile` (path_helper → /opt/homebrew/bin etc.) but NOT
@@ -449,7 +448,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     await sendInitialPrompt(adapter, blockId, initialPromptFile)
   }
 
-  // Wait for Wave to fully process the new tab before returning, so rapid
+  // Wait for the terminal to fully process the new tab before returning, so rapid
   // back-to-back `cctabs new` calls don't race on waitForNewBlock.
   if (tailDelayMs > 0) await new Promise((r) => setTimeout(r, tailDelayMs))
   mark('tail')

@@ -1,7 +1,7 @@
 ---
 layout: home
 title: cctabs — Run a fleet of Claude Code sessions across your terminal tabs
-description: cctabs gives every Claude Code session its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the whole fleet itself. Works in Tabby and Wave Terminal, with no tmux.
+description: cctabs gives every Claude Code session its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the whole fleet itself. Runs in Tabby, with no tmux.
 
 hero:
   name: cctabs
@@ -27,16 +27,16 @@ features:
   - title: Fork to explore
     details: Branch any conversation into a new independent tab and try a different approach in it, with the original left exactly as it was. If the fork turns out better you keep it and close the one you started from.
   - title: One plugin install
-    details: Install the Claude Code plugin and the CLI comes with it, along with the skill that lets Claude use it. There is nothing to configure and nothing else to install. Works in Tabby (recommended) or Wave Terminal.
+    details: Install the Claude Code plugin and the CLI comes with it, along with the skill that lets Claude use it. There is nothing to configure and nothing else to install. Runs in Tabby.
 ---
 
 ## Get started in 60 seconds
 
 The simplest path: open [Claude Code](https://claude.ai/code) in any terminal and paste this prompt:
 
-> Visit https://cctabs.com/guide/getting-started and walk me through setting up cctabs on this machine. I want to use Tabby Terminal.
+> Visit https://cctabs.com/guide/getting-started and walk me through setting up cctabs on this machine.
 
-Claude will install the terminal app, the `tabby-cctabs` companion plugin (or grant Wave's Accessibility permission), and the cctabs Claude Code plugin — then verify with `cctabs sessions`.
+Claude will install Tabby, the `tabby-cctabs` companion plugin, and the cctabs Claude Code plugin — then verify with `cctabs sessions`.
 
 Or follow the manual steps in the [Getting Started guide](/guide/getting-started).
 
@@ -44,12 +44,13 @@ Or follow the manual steps in the [Getting Started guide](/guide/getting-started
 
 | Terminal | Platforms | Companion install |
 |---|---|---|
-| **[Tabby](https://tabby.sh)** (recommended) | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
-| **[Wave Terminal](https://waveterm.dev)** | macOS · Linux · Windows | Grant Accessibility permission in System Settings |
+| **[Tabby](https://tabby.sh)** | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
 
-> **Platform status:** cctabs is actively tested on **macOS**. Wave Terminal didn't work in one Ubuntu test; Tabby on Linux and Windows hasn't been tried yet but its plugin format is portable, so it might Just Work.
+> **Platform status:** cctabs is actively tested on **macOS**. Tabby on Linux and Windows hasn't been tried yet, but its plugin format is portable, so it might Just Work.
 >
-> **Hitting issues on Linux, Windows, or another terminal?** Point Claude Code at [the cctabs repo](https://github.com/generativereality/cctabs), share the error, and ask it to investigate and open a PR. Adding a new terminal backend means implementing the small [`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts) interface — Wave and Tabby are the two existing examples.
+> **Wave Terminal was supported through 0.4.x and was withdrawn in 0.5.0** — tabs would open but the Claude session inside them often never started. Running cctabs under Wave now exits with a pointer to Tabby. Your sessions are unaffected: they live in `~/.claude/projects`, so `cctabs restore` reopens them by name once Tabby is set up.
+>
+> **Hitting issues on Linux, Windows, or another terminal?** Point Claude Code at [the cctabs repo](https://github.com/generativereality/cctabs), share the error, and ask it to investigate and open a PR. Adding a new terminal backend means implementing the small [`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts) interface — [`src/core/tabby.ts`](https://github.com/generativereality/cctabs/blob/main/src/core/tabby.ts) is the worked example.
 
 Then, inside Claude Code:
 

@@ -143,7 +143,7 @@ async function runRestore(req: RestoreRequest): Promise<void> {
   const currentTab = adapter.currentTabId()
 
   // Manifest mode restores into the current workspace. The scan restores what
-  // it can see, which on Wave spans every open workspace.
+  // it can see.
   let scopeTabIds: Set<string>
   let entries: RestoreEntry[]
   let baseOrder: string[] | undefined
@@ -477,7 +477,7 @@ async function executePlan(
   }
 
   // -- rebuild the tab bar --
-  // Best-effort: adapters without reorderTabs (Wave) keep the append order, and
+  // Best-effort: adapters without reorderTabs keep the append order, and
   // reorderTabs leaves unlisted tabs in their relative slot, sorted after.
   if (typeof adapter.reorderTabs === 'function') {
     const desiredOrder = buildDesiredOrder(

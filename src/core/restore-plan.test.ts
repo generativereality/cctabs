@@ -15,7 +15,7 @@ interface FakeTab {
   status: SessionStatus
   /** For 'unknown' tabs: does the scrollback re-check confirm it's really dead? */
   empty?: boolean
-  /** A tab with no terminal in it (e.g. a Wave web-view tab). */
+  /** A tab with no terminal in it (e.g. a web-view / settings tab). */
   noTerm?: boolean
 }
 

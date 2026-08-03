@@ -44,7 +44,7 @@ export default defineConfig({
 
     // Additional SEO
     ['meta', { name: 'author', content: 'generativereality' }],
-    ['meta', { name: 'keywords', content: 'cctabs, claude code, claude code sessions, parallel claude code sessions, claude code session manager, terminal tabs, agent orchestration, multi-agent, tabby terminal, wave terminal, tmux alternative' }],
+    ['meta', { name: 'keywords', content: 'cctabs, claude code, claude code sessions, parallel claude code sessions, claude code session manager, terminal tabs, agent orchestration, multi-agent, tabby terminal, tmux alternative' }],
 
     // Google tag (gtag.js) — cookieless config, no banner required
     ['script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-KW9J78R8C6' }],

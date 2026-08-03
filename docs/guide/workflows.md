@@ -123,7 +123,7 @@ echo "please review this PR" | cctabs send auth
 cctabs new api ~/Dev/myapp -w work
 ```
 
-Opens the new tab in the Wave workspace named "work".
+Legacy flag from the Wave backend, which had a workspace concept. Tabby does not, so this is currently a no-op.
 
 ## Cleanup
 

@@ -18,7 +18,8 @@ const DEFAULT_CONFIG_FILE = `# cctabs configuration
 flags = ["--allow-dangerously-skip-permissions"]
 
 [defaults]
-# Default Wave workspace to open new sessions in.
+# Default workspace to open new sessions in. Inert on Tabby, which has no
+# workspace concept — kept for config compatibility.
 # workspace = ""
 
 # Prefix prepended to every new tab title AND \`claude --name\` (the claude.ai

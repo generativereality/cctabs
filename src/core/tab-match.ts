@@ -3,7 +3,7 @@
  *
  * Lives here rather than being copy-pasted per adapter so the matching rules —
  * especially the exact-only mode below, which restore/resume depend on for
- * correctness — can't drift between Wave and Tabby.
+ * correctness — can't drift between adapters.
  */
 
 /**

@@ -17,7 +17,8 @@ Created automatically on first run of `cctabs config`.
 flags = ["--allow-dangerously-skip-permissions"]
 
 [defaults]
-# Default Wave workspace to open new sessions in.
+# Default workspace to open new sessions in. Inert on Tabby, which has no
+# workspace concept — kept for config compatibility.
 # workspace = ""
 ```
 

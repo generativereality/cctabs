@@ -40,7 +40,15 @@ describe('detectTerminal override', () => {
   })
 
   it('accepts CCTABS_BACKEND as an alias', () => {
-    process.env.CCTABS_BACKEND = 'wave'
+    process.env.CCTABS_BACKEND = 'tabby'
+    expect(detectTerminal()).toBe('tabby')
+  })
+
+  // Wave's adapter was removed in 0.5.0, but detection deliberately survives it:
+  // requireAdapter() needs to tell a Wave user that support was *withdrawn*
+  // rather than report "an unrecognised terminal", which would read as a bug.
+  it('still recognises Wave, so the withdrawal message can be specific', () => {
+    process.env.WAVETERM_JWT = 'stub-jwt'
     expect(detectTerminal()).toBe('wave')
   })
 
