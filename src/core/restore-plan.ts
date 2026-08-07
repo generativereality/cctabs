@@ -30,7 +30,7 @@ export interface RestoreEntry extends SessionOrigin {
   /**
    * Scan mode only: the existing tab this entry was derived from. A bound entry
    * belongs to that one tab and skips name→tab resolution, which is what lets
-   * two dead tabs sharing a name be told apart (one restored, the extra closed)
+   * two empty tabs sharing a name be told apart (one restored, the extra closed)
    * instead of collapsing into a single ambiguous match.
    */
   tabId?: string
@@ -47,11 +47,16 @@ export type RestoreAction =
   | 'no-terminal'
   /** A tab exists but no session could be found to resume in it. */
   | 'no-session'
+  /**
+   * The tab's output could not be read, but its process is alive — so we
+   * cannot say what is in it and must not touch it. Reported, never acted on.
+   */
+  | 'unreadable'
   /** Send `claude --resume` into the matching tab's live shell. */
   | 'attach'
   /** The matching tab's shell is gone — close it and spawn a replacement. */
   | 'recreate'
-  /** An earlier entry already claimed this name; close this leftover dead tab. */
+  /** An earlier entry already claimed this name; close this leftover empty tab. */
   | 'duplicate'
   /** No tab exists — create one. */
   | 'spawn'
@@ -66,7 +71,7 @@ export interface PlannedEntry extends SessionOrigin {
   /** Terminal block within `tabId`. */
   blockId?: string
   /**
-   * Tab to close as part of executing this entry: the dead tab being replaced
+   * Tab to close as part of executing this entry: the empty tab being replaced
    * ('recreate') or the redundant duplicate ('duplicate'). Never set for an
    * entry whose tab is owned by a different entry.
    */
@@ -99,10 +104,25 @@ export interface PlanDeps {
   termBlockOf(tabId: string): string | undefined
   statusOf(blockId: string): SessionStatus
   /**
-   * Read-only re-check that a terminal with no readable scrollback really is
-   * dead rather than merely slow to report. Only called for 'unknown' tabs.
+   * Read-only re-check that a terminal with no readable output is not merely
+   * slow to report. Only called for 'unreadable' tabs.
+   *
+   * Note what this can and cannot settle: it re-reads the same capture, so it
+   * confirms the capture is still empty and nothing more. If the backend never
+   * captured this tab's output at all, polling it again returns empty forever.
+   * That is why liveness is decided by {@link PlanDeps.hasLiveProcess} and not
+   * by this.
    */
   confirmEmpty(blockId: string): Promise<boolean>
+  /**
+   * Does this tab have a running process?
+   *
+   * `true`/`false` when the backend reports pids, `undefined` when it cannot
+   * tell — an older plugin, or a backend without the notion. Only `false` may
+   * be read as "no shell here"; `undefined` puts us back on the scrollback
+   * heuristic alone.
+   */
+  hasLiveProcess(tabId: string): boolean | undefined
   /** Find the session to resume for an entry, or null when there is none. */
   resolveSession(entry: RestoreEntry): ResolvedSession | null
   /** Whether entries with no existing tab may be spawned. */
@@ -128,6 +148,9 @@ function originFor(entry: RestoreEntry, session: ResolvedSession | null): Sessio
 const KEEPS_TAB: ReadonlySet<RestoreAction> = new Set<RestoreAction>([
   'current-tab',
   'already-running',
+  // A tab we can't read still owns its name. Letting a later entry claim it
+  // would spawn a second copy of a session that may well be running right there.
+  'unreadable',
   'attach',
   'recreate',
   'spawn',
@@ -184,13 +207,13 @@ export async function planRestore(
     return { entry, tabId, blockId, status }
   })
 
-  // Pass 2 (parallel): confirm the 'unknown'-status tabs really are dead.
+  // Pass 2 (parallel): re-read the tabs whose output came back empty.
   // confirmEmpty sleeps between polls, so overlapping them costs ~one poll
   // window in total rather than one per tab.
   const emptyByBlock = new Map<string, boolean>()
   await Promise.all(
     pending
-      .filter((p) => !p.early && p.status === 'unknown' && p.blockId)
+      .filter((p) => !p.early && p.status === 'unreadable' && p.blockId)
       .map(async (p) => {
         emptyByBlock.set(p.blockId!, await deps.confirmEmpty(p.blockId!))
       }),
@@ -200,7 +223,7 @@ export async function planRestore(
   // we go so a name is only ever restored once.
   //
   // `claimedNames` covers every entry that ends up owning a tab for that name,
-  // including ones we merely leave alone — a dead tab must not be restored into
+  // including ones we merely leave alone — an empty tab must not be restored into
   // a second copy of a session that is already live somewhere in the bar.
   // `restoredNames` is the narrower set we're willing to CLOSE a leftover tab
   // for: only when this restore actively brought that name back up.
@@ -225,8 +248,8 @@ export async function planRestore(
     }
 
     // Someone else already has this name. A scan entry bound to its own
-    // leftover dead tab is closed, but only when the name was actually restored
-    // — a dead tab shadowed by an already-running one is reported and left for
+    // leftover empty tab is closed, but only when the name was actually restored
+    // — an empty tab shadowed by an already-running one is reported and left for
     // the user, since nothing here put that session back on screen.
     if (claimedNames.has(entry.name) || (p.tabId && claimedTabs.has(p.tabId))) {
       const ownsTab = !!entry.tabId && p.tabId === entry.tabId && !claimedTabs.has(p.tabId)
@@ -243,6 +266,21 @@ export async function planRestore(
     const session = deps.resolveSession(entry)
 
     if (p.tabId) {
+      const noOutput = p.status === 'unreadable' && emptyByBlock.get(p.blockId!) === true
+
+      // We couldn't read the tab, but something is running in it. Both of the
+      // things we could do here are destructive on a false reading — sending
+      // `claude --resume` types into whatever is already there, and recreating
+      // closes it — so do neither and say so. This is the case that cost a
+      // live 4,000-turn session its tab: an empty capture was read as an empty
+      // tab, and the tab was closed and rebuilt underneath a running Claude.
+      if (noOutput && deps.hasLiveProcess(p.tabId) === true) {
+        claimedNames.add(entry.name)
+        claimedTabs.add(p.tabId)
+        planned.push({ entry, action: 'unreadable', tabId: p.tabId, blockId: p.blockId })
+        continue
+      }
+
       // Existing tab: without a session there's nothing to resume into it.
       if (!session) {
         planned.push({ entry, action: 'no-session', tabId: p.tabId, blockId: p.blockId })
@@ -251,8 +289,9 @@ export async function planRestore(
       claimedNames.add(entry.name)
       restoredNames.add(entry.name)
       claimedTabs.add(p.tabId)
-      // No live shell to send to — the tab has to be rebuilt around the resume.
-      const dead = p.status === 'unknown' && emptyByBlock.get(p.blockId!) === true
+      // Nothing captured AND no process: the shell really is gone, so the tab
+      // has to be rebuilt around the resume rather than sent to.
+      const dead = noOutput && deps.hasLiveProcess(p.tabId) !== true
       planned.push({
         entry,
         action: dead ? 'recreate' : 'attach',

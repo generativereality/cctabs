@@ -158,7 +158,7 @@ async function runRestore(req: RestoreRequest): Promise<void> {
   } else {
     // Scan: one entry per terminal tab, in bar order, each bound to its tab.
     // Live tabs are included so they're reported and so they claim their name
-    // against a same-named dead tab elsewhere in the bar.
+    // against a same-named empty tab elsewhere in the bar.
     scopeTabIds = new Set<string>()
     entries = []
     baseOrder = []
@@ -246,9 +246,20 @@ export function buildPlanDeps(
     sessionScope?: ConfigDirScope
   },
 ): PlanDeps {
+  // Whether this backend reports pids at all. Asked of the whole snapshot
+  // rather than per tab, so we can tell "this tab has no process" from "this
+  // plugin is too old to say" without a capability probe: if any tab reports a
+  // pid, the ones that don't are genuinely process-less.
+  const reportsPids = [...opts.tabsById.values()]
+    .some((blocks) => blocks.some((b) => typeof b.pid === 'number'))
+
   return {
     currentTabId: opts.currentTabId,
     scopeTabIds: opts.scopeTabIds,
+    hasLiveProcess: (tabId) => {
+      if (!reportsPids) return undefined
+      return (opts.tabsById.get(tabId) ?? []).some((b) => typeof b.pid === 'number')
+    },
     // Exact-name only: a longer-named live tab (`gapminder-login`) must never
     // be taken as proof that `gapminder`'s tab already exists.
     matchTabs: (name) => adapter.resolveTab(name, opts.tabsById, opts.tabNames, { exact: true }),
@@ -330,13 +341,15 @@ export function describeDecision(p: PlannedEntry, dry: boolean): string {
       return '— no terminal block in tab, skipping'
     case 'no-session':
       return `— no session found${p.entry.dir ? ` in ${p.entry.dir}` : ''}, skipping`
+    case 'unreadable':
+      return '— could not read this tab, but its process is running; leaving it alone'
     case 'attach':
       return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab${originNote(p)}`
     case 'recreate':
-      return `→ ${dry ? 'would recreate' : 'recreating'} dead tab with ${shortId(p.sessionId)} in ${p.dir}${originNote(p)}`
+      return `→ ${dry ? 'would recreate' : 'recreating'} empty tab (no process) with ${shortId(p.sessionId)} in ${p.dir}${originNote(p)}`
     case 'duplicate':
       return p.closeTabId
-        ? `— duplicate dead tab, ${dry ? 'would close' : 'closing'} (already restoring one)`
+        ? `— duplicate empty tab, ${dry ? 'would close' : 'closing'} (already restoring one)`
         : '— duplicate entry, skipping (already restoring one)'
     case 'spawn':
       return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}`
@@ -358,13 +371,15 @@ export function summarizeDecision(p: PlannedEntry, dry: boolean): string {
       return 'no terminal block in tab'
     case 'no-session':
       return 'no matching session'
+    case 'unreadable':
+      return 'unreadable, process alive — left alone'
     case 'attach':
       return dry ? `dry run: attach ${shortId(p.sessionId)}${originNote(p)}` : 'sent'
     case 'recreate':
       return dry ? `dry run: recreate (${shortId(p.sessionId)})${originNote(p)}` : 'queued for recreate'
     case 'duplicate':
       return p.closeTabId
-        ? dry ? 'dry run: close duplicate dead tab' : 'duplicate dead tab — closed'
+        ? dry ? 'dry run: close duplicate empty tab' : 'duplicate empty tab — closed'
         : 'duplicate entry — skipped'
     case 'spawn':
       return dry ? `dry run: spawn (${shortId(p.sessionId)})${originNote(p)}` : 'queued for spawn'
@@ -420,18 +435,18 @@ async function executePlan(
     for (const p of attached) {
       const status = adapter.detectSessionStatus(p.blockId!)
       if (status === 'active' || status === 'idle') results.set(p, '✔ running')
-      else if (status === 'unknown') results.set(p, '? scrollback unavailable')
+      else if (status === 'unreadable') results.set(p, '? no output captured — check it yourself')
       else results.set(p, '✘ may not have started')
     }
   }
 
   adapter.closeSocket()
 
-  // -- spawn: recreated dead tabs and brand-new ones, in plan order --
+  // -- spawn: recreated empty tabs and brand-new ones, in plan order --
   const toSpawn = plan.filter((p) => p.action === 'recreate' || p.action === 'spawn')
   if (toSpawn.length) {
     const recreates = toSpawn.filter((p) => p.action === 'recreate').length
-    if (recreates) consola.info(`Recreating ${recreates} dead tab(s)…`)
+    if (recreates) consola.info(`Recreating ${recreates} empty tab(s)…`)
 
     const spawnOne = async (p: PlannedEntry) => {
       try {

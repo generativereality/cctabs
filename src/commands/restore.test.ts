@@ -37,7 +37,7 @@ function stubAdapter(tabs: Array<{ id: string; name: string; status: SessionStat
     blocksList: () => [...tabsById.values()].flat(),
     scrollback: () => '',
     confirmScrollbackEmpty: async () => true,
-    detectSessionStatus: (blockId) => statusById.get(blockId) ?? 'unknown',
+    detectSessionStatus: (blockId) => statusById.get(blockId) ?? 'unreadable',
     deleteBlock: mutation('deleteBlock'),
     newTab: mutation('newTab'),
     waitForNewBlock: mutation('waitForNewBlock'),
@@ -155,8 +155,8 @@ describe('restore output parity', () => {
 
   it('says it would close a duplicate tab only when a real run would close it', () => {
     const closes = planned('duplicate', { closeTabId: 't2' })
-    expect(summarizeDecision(closes, true)).toBe('dry run: close duplicate dead tab')
-    expect(summarizeDecision(closes, false)).toBe('duplicate dead tab — closed')
+    expect(summarizeDecision(closes, true)).toBe('dry run: close duplicate empty tab')
+    expect(summarizeDecision(closes, false)).toBe('duplicate empty tab — closed')
 
     const keeps = planned('duplicate')
     expect(summarizeDecision(keeps, true)).toBe(summarizeDecision(keeps, false))

@@ -7,6 +7,7 @@ import type {
   WorkspaceData,
 } from '../types/index.js'
 import type { TerminalAdapter } from './adapter.js'
+import { classifyTerminalBuffer } from './session-status.js'
 import { matchTabsByName, normalizeTabName, type TabMatchOptions } from './tab-match.js'
 
 /**
@@ -118,7 +119,9 @@ export class TabbyAdapter implements TerminalAdapter {
       { encoding: 'utf-8' },
     )
     if (out.status !== 0 || !out.stdout) return []
-    let parsed: { tabs: Array<{ uuid: string; type: string; cwd?: string | null }> }
+    let parsed: {
+      tabs: Array<{ uuid: string; type: string; cwd?: string | null; pid?: number }>
+    }
     try {
       parsed = JSON.parse(out.stdout)
     } catch {
@@ -131,6 +134,10 @@ export class TabbyAdapter implements TerminalAdapter {
         tabid: t.uuid,
         view: 'term',
         meta: t.cwd ? { 'cmd:cwd': t.cwd } : undefined,
+        // Reported since plugin 0.1.x from the tab's own pty. A restored tab
+        // that Tabby never focused has no pty and therefore no pid — which is
+        // the genuine "no live shell" case that scrollback only ever guessed at.
+        pid: typeof t.pid === 'number' ? t.pid : undefined,
       }))
   }
 
@@ -163,56 +170,10 @@ export class TabbyAdapter implements TerminalAdapter {
   }
 
   detectSessionStatus(blockId: string): SessionStatus {
-    // Tabby returns the literal last-N rows of the terminal viewport. Claude
-    // Code's UI renders with blank padding below the prompt, so the bottom 10
-    // rows are usually empty. Read enough rows to cover the full Claude UI
-    // (status line, prompt, recap area).
-    const tail = this.scrollback(blockId, 200)
-    if (!tail.trim()) return 'unknown'
-
-    const tailLines = tail.split('\n').map((l) => l.trim()).filter(Boolean)
-    const lastLine = tailLines.at(-1) ?? ''
-
-    if (/[$%>]\s*$/.test(lastLine) && !lastLine.includes('claude')) {
-      return 'terminal'
-    }
-
-    // Tabby's buffer endpoint can drop spaces between adjacent characters
-    // depending on how Claude rendered them, so match against a
-    // whitespace-stripped copy of the tail using whitespace-stripped markers.
-    const compact = tail.replace(/\s+/g, '')
-    const markers = [
-      'Claude Code',
-      'claude.ai/code',
-      '⏵⏵ bypass',
-      '⏵⏵ auto',
-      // Idle-input hints. Long-context sessions sitting at an empty prompt
-      // emit only these strings on redraw, so the startup banner and pill
-      // text scroll out of the ring buffer. Without these the detector
-      // falsely reports 'terminal' for sessions burning hundreds of k tokens.
-      'new task?',
-      'Checking for updates',
-      // Spinner labels Claude Code emits while a turn is in flight. These
-      // dominate the buffer during long thinks and push the status line
-      // out of the readable window.
-      'Thinking',
-      'Hatching',
-      'Composing',
-      'Cogitating',
-      'Befuddling',
-      'Worked for',
-      'Baked for',
-      'Churned for',
-      'Cooked for',
-      'high effort',
-    ]
-    if (markers.some((m) => compact.includes(m.replace(/\s+/g, '')))) {
-      return 'active'
-    }
-    // Claude Code spinner glyphs cycle through these regardless of label.
-    if (/[✻✽✶✳✢]/.test(tail)) return 'active'
-    if (lastLine.toLowerCase().includes('claude')) return 'idle'
-    return 'terminal'
+    // 200 rows: Claude Code renders blank padding below its prompt, so a short
+    // read is mostly empty space. The rules themselves live in
+    // session-status.ts — pure, shared, and testable without a terminal.
+    return classifyTerminalBuffer(this.scrollback(blockId, 200))
   }
 
   deleteBlock(blockId: string): void {

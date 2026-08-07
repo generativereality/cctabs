@@ -13,8 +13,13 @@ interface FakeTab {
   id: string
   name: string
   status: SessionStatus
-  /** For 'unknown' tabs: does the scrollback re-check confirm it's really dead? */
+  /** For 'unreadable' tabs: does the re-read confirm nothing was captured? */
   empty?: boolean
+  /**
+   * Does this tab have a running process? `undefined` models a backend that
+   * can't report pids at all, which is the pre-fix behaviour.
+   */
+  live?: boolean
   /** A tab with no terminal in it (e.g. a web-view / settings tab). */
   noTerm?: boolean
 }
@@ -44,8 +49,9 @@ function makeDeps(
     termBlockOf: (tabId) => (byId.get(tabId)?.noTerm ? undefined : `block-${tabId}`),
     statusOf: (blockId) => {
       log(`statusOf:${blockId}`)
-      return byId.get(blockId.replace(/^block-/, ''))?.status ?? 'unknown'
+      return byId.get(blockId.replace(/^block-/, ''))?.status ?? 'unreadable'
     },
+    hasLiveProcess: (tabId) => byId.get(tabId)?.live,
     confirmEmpty: async (blockId) => {
       log(`confirmEmpty:${blockId}`)
       return byId.get(blockId.replace(/^block-/, ''))?.empty ?? false
@@ -96,18 +102,54 @@ describe('planRestore — manifest entries', () => {
     }
   })
 
-  it('recreates a tab whose terminal is confirmed dead', async () => {
+  it('recreates a tab with no captured output and no process', async () => {
     const plan = await planRestore(
       [mEntry('alpha')],
-      makeDeps([{ id: 't1', name: 'alpha', status: 'unknown', empty: true }]),
+      makeDeps([{ id: 't1', name: 'alpha', status: 'unreadable', empty: true, live: false }]),
     )
     expect(plan[0]).toMatchObject({ action: 'recreate', closeTabId: 't1', sessionId: 'sess-alpha' })
+  })
+
+  it('never closes a tab it could not read while its process is alive', async () => {
+    // The career-strategy case: the backend had captured no output for this
+    // tab, so it read as empty — while a 4,000-turn session ran inside it.
+    // Recreating means closing that session's tab; attaching means typing
+    // `claude --resume` into it. Both are wrong, so we do neither.
+    const plan = await planRestore(
+      [mEntry('alpha')],
+      makeDeps([{ id: 't1', name: 'alpha', status: 'unreadable', empty: true, live: true }]),
+    )
+    expect(plan[0]).toMatchObject({ action: 'unreadable', tabId: 't1' })
+    expect(plan[0].closeTabId).toBeUndefined()
+    expect(plan[0].sessionId).toBeUndefined()
+  })
+
+  it('holds the name of an unreadable tab so nothing spawns a second copy', async () => {
+    const plan = await planRestore(
+      [mEntry('alpha'), mEntry('alpha')],
+      makeDeps([{ id: 't1', name: 'alpha', status: 'unreadable', empty: true, live: true }], {
+        createMissing: true,
+      }),
+    )
+    expect(actionsOf(plan)).toMatchObject({ alpha: 'duplicate' })
+    expect(plan.some((p) => p.action === 'spawn')).toBe(false)
+    expect(plan.every((p) => !p.closeTabId)).toBe(true)
+  })
+
+  it('falls back to the scrollback heuristic when the backend reports no pids', async () => {
+    // An older plugin can't answer the liveness question, so `undefined` must
+    // behave exactly as before rather than blocking every restore.
+    const plan = await planRestore(
+      [mEntry('alpha')],
+      makeDeps([{ id: 't1', name: 'alpha', status: 'unreadable', empty: true }]),
+    )
+    expect(plan[0]).toMatchObject({ action: 'recreate', closeTabId: 't1' })
   })
 
   it('attaches instead of recreating when the scrollback turns out not to be empty', async () => {
     const plan = await planRestore(
       [mEntry('alpha')],
-      makeDeps([{ id: 't1', name: 'alpha', status: 'unknown', empty: false }]),
+      makeDeps([{ id: 't1', name: 'alpha', status: 'unreadable', empty: false }]),
     )
     expect(plan[0].action).toBe('attach')
     expect(plan[0].closeTabId).toBeUndefined()
@@ -200,8 +242,8 @@ describe('planRestore — manifest entries', () => {
 describe('planRestore — scanned tabs', () => {
   it('binds each entry to its own tab, so same-named dead tabs are told apart', async () => {
     const tabs: FakeTab[] = [
-      { id: 't1', name: 'notes', status: 'unknown', empty: true },
-      { id: 't2', name: 'notes', status: 'unknown', empty: true },
+      { id: 't1', name: 'notes', status: 'unreadable', empty: true },
+      { id: 't2', name: 'notes', status: 'unreadable', empty: true },
     ]
     const plan = await planRestore([sEntry('notes', 't1'), sEntry('notes', 't2')], makeDeps(tabs))
     expect(plan[0]).toMatchObject({ action: 'recreate', closeTabId: 't1' })
@@ -226,7 +268,7 @@ describe('planRestore — scanned tabs', () => {
     const tabs: FakeTab[] = [
       { id: 't1', name: 'live', status: 'active' },
       { id: 't2', name: 'shell', status: 'terminal' },
-      { id: 't3', name: 'dead', status: 'unknown', empty: true },
+      { id: 't3', name: 'dead', status: 'unreadable', empty: true },
       { id: 't4', name: 'orphan', status: 'terminal' },
     ]
     const plan = await planRestore(
@@ -250,8 +292,8 @@ describe('planRestore — dry-run parity', () => {
   it('takes no mutating action — the deps surface is read-only', async () => {
     const calls: string[] = []
     const tabs: FakeTab[] = [
-      { id: 't1', name: 'alpha', status: 'unknown', empty: true },
-      { id: 't2', name: 'alpha', status: 'unknown', empty: true },
+      { id: 't1', name: 'alpha', status: 'unreadable', empty: true },
+      { id: 't2', name: 'alpha', status: 'unreadable', empty: true },
     ]
     await planRestore([sEntry('alpha', 't1'), sEntry('alpha', 't2')], makeDeps(tabs, { calls }))
 
@@ -262,8 +304,8 @@ describe('planRestore — dry-run parity', () => {
 
   it('reaches identical decisions whether or not the caller intends to execute', async () => {
     const tabs: FakeTab[] = [
-      { id: 't1', name: 'alpha', status: 'unknown', empty: true },
-      { id: 't2', name: 'alpha', status: 'unknown', empty: true },
+      { id: 't1', name: 'alpha', status: 'unreadable', empty: true },
+      { id: 't2', name: 'alpha', status: 'unreadable', empty: true },
       { id: 't3', name: 'beta', status: 'terminal' },
     ]
     const entries = [sEntry('alpha', 't1'), sEntry('alpha', 't2'), sEntry('beta', 't3')]
@@ -338,7 +380,7 @@ describe('planRestore — session origin', () => {
   it('carries the backend onto a recreate and a spawn', async () => {
     const recreate = await planRestore(
       [mEntry('alpha')],
-      depsWithOrigin([{ id: 't1', name: 'alpha', status: 'unknown', empty: true }], gapminder),
+      depsWithOrigin([{ id: 't1', name: 'alpha', status: 'unreadable', empty: true }], gapminder),
     )
     expect(recreate[0]).toMatchObject({ action: 'recreate', backend: 'gapminder' })
 

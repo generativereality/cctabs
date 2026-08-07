@@ -131,13 +131,22 @@ export const sessionsCommand = define({
         const status = adapter.detectSessionStatus(b.blockid)
 
         const statusLabel =
-          status === 'active' ? '● active'
-          : status === 'idle' ? '○ idle'
-          : status === 'unknown' ? '? unknown'
+          status === 'active' ? '● active (turn in flight)'
+          : status === 'idle' ? '○ idle (waiting for input)'
+          : status === 'unreadable' ? '? unreadable'
           : '  terminal'
 
         console.log(`  [${tabId.slice(0, 8)}] "${name}"${cur}  ${cwd}`)
         console.log(`    ${statusLabel}`)
+        // An unreadable tab is the one case where the status line alone would
+        // mislead, so say what we do know: whether a process is running in it.
+        if (status === 'unreadable') {
+          console.log(
+            b.pid
+              ? `    no output captured, but pid ${b.pid} is running — open it to see`
+              : '    no output captured and no process — the shell is gone',
+          )
+        }
         if (status === 'terminal') {
           const tail = adapter.scrollback(b.blockid, 5)
           const lastLine = tail.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''

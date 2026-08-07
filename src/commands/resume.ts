@@ -174,12 +174,22 @@ export const resumeCommand = define({
         process.exit(0)
       }
 
-      // Empty scrollback ('unknown') means the tab has no live shell — typical
-      // after a terminal restart. Recreate the tab rather than send into the void.
-      if (status === 'unknown') {
+      // Nothing captured for this tab. That is typical after a terminal restart
+      // — no shell, so recreate rather than send into the void — but it also
+      // happens to a perfectly live tab whose output the backend never captured.
+      // The pid tells the two apart; without one we'd be closing a running
+      // Claude to "restore" the session already inside it.
+      if (status === 'unreadable') {
+        if (termBlock.pid) {
+          adapter.closeSocket()
+          consola.warn(
+            `Tab "${displayName}" has no captured output but pid ${termBlock.pid} is running — refusing to recreate it. Open the tab to see what's in it.`,
+          )
+          process.exit(0)
+        }
         const stillEmpty = await adapter.confirmScrollbackEmpty(termBlock.blockid)
         if (stillEmpty) {
-          consola.info(`Tab "${displayName}" has no live shell (empty scrollback) — recreating`)
+          consola.info(`Tab "${displayName}" has no live shell (no process, no output) — recreating`)
           for (const b of blocks) adapter.deleteBlock(b.blockid)
           adapter.closeSocket()
           const newTabId = await openSession({
