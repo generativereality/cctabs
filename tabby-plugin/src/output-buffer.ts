@@ -63,20 +63,47 @@ export class OutputBufferStore {
       session.output$.subscribe(handle)
     }
 
-    // sessionChanged$ misses past emissions, and Tabby attaches sessions
-    // late for non-focused / restored tabs. Poll until a session shows up,
-    // up to ~5 minutes (enough for a user to switch tabs once), then drop.
+    // sessionChanged$ misses past emissions, and Tabby attaches sessions late
+    // for non-focused / restored tabs — a restored tab spawns its PTY only
+    // once it has been focused, which may be hours after startup or never.
+    //
+    // This used to give up after ~5 minutes, which quietly created permanently
+    // blind tabs: the subscriber was gone by the time the session appeared, so
+    // the tab's buffer stayed empty for the rest of the Tabby run no matter how
+    // much Claude output flowed through it. cctabs then read that empty buffer
+    // as "no session here" and offered to close the tab. One boot's log showed
+    // 192 tabs wired and 147 subscribed — 45 live tabs reading as dead.
+    //
+    // So: never give up while the tab lives. Back off to a slow poll, which
+    // costs one timer per not-yet-started tab and nothing else, and stop on
+    // destroy so a closed tab doesn't keep a timer (and itself) alive.
+    const FAST_INTERVAL_MS = 500
+    const SLOW_INTERVAL_MS = 5000
+    const FAST_ATTEMPTS = 120  // ~1 minute of eager polling at startup
+
+    let gone = false
+    const stop = (): void => { gone = true }
+    // `destroy(skipDestroyedEvent)` can complete the subject without emitting,
+    // so watch both signals.
+    tab.destroyed$.subscribe({ next: stop, complete: stop })
+
     let attempts = 0
-    const maxAttempts = 600
     const tick = (): void => {
+      if (gone) return
       if (tab.session) {
         subscribeToSession(tab.session)
         return
       }
-      if (++attempts >= maxAttempts) return
-      setTimeout(tick, 500)
+      attempts++
+      setTimeout(tick, attempts < FAST_ATTEMPTS ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS)
     }
     tick()
+
+    // Focus is precisely when Tabby gets around to attaching a restored tab's
+    // session, so take the fast path rather than waiting out the poll interval.
+    tab.focused$.subscribe(() => {
+      if (tab.session) subscribeToSession(tab.session)
+    })
 
     tab.sessionChanged$.subscribe(s => subscribeToSession(s))
   }
