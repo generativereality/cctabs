@@ -304,4 +304,21 @@ describe('buildResumeCommand', () => {
     const cmd = buildResumeCommand({ ...base, dir: '/Users/x/Remember This' }, '')
     expect(cmd).toStartWith('cd "/Users/x/Remember This" &&')
   })
+
+  it('hands the tab back its own permission mode, after the global flags', () => {
+    // Verified against a live session: --permission-mode composes with
+    // --allow-dangerously-skip-permissions (which only makes bypass available
+    // rather than selecting it) and wins, so a plan-mode tab comes back in plan
+    // mode under the usual config.
+    const cmd = buildResumeCommand(
+      { ...base, permissionMode: 'plan' },
+      '--allow-dangerously-skip-permissions',
+    )
+    expect(cmd).toEndWith('--permission-mode plan')
+    expect(cmd).toContain('--allow-dangerously-skip-permissions')
+  })
+
+  it('omits the flag entirely when no mode was recorded', () => {
+    expect(buildResumeCommand(base, '--flag')).not.toContain('--permission-mode')
+  })
 })

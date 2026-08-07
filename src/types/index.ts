@@ -58,3 +58,18 @@ export interface AllData {
  *   "dead", which is how a live session came to be closed and recreated.
  */
 export type SessionStatus = 'active' | 'idle' | 'terminal' | 'unreadable'
+
+/**
+ * A permission mode cctabs is willing to hand back to `claude --permission-mode`.
+ *
+ * Exactly the values that flag accepts, minus `dontAsk`, which has no observed
+ * UI pill to capture it from. Notably this is NOT the same set the session
+ * transcript records: transcripts also contain `default`, which the flag
+ * rejects, so a transcript value has to be validated rather than passed through.
+ */
+export type PermissionMode =
+  | 'acceptEdits'
+  | 'auto'
+  | 'bypassPermissions'
+  | 'manual'
+  | 'plan'

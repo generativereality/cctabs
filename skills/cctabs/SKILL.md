@@ -176,7 +176,7 @@ cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
 cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one; picks the session's own account)
-cctabs restore [dir] [--dry]             # resume every dead tab by name search (e.g. after a reboot)
+cctabs restore [dir] [--dry]             # resume every empty tab by name search (e.g. after a reboot)
 cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
@@ -307,13 +307,34 @@ Sessions
 Workspace: work (current)
 
   [a1b2c3d4] "auth" ◄  ~/Dev/myapp
-    ● active
+    ● active (turn in flight)  ·  bypassPermissions
   [e5f6a7b8] "api"  ~/Dev/myapp
-    ○ idle
+    ○ idle (waiting for input)  ·  plan
   [c9d0e1f2] "infra"  ~/Dev/myapp
       terminal
     last: $ git status
+  [b3c4d5e6] "notes"  ~/Dev/myapp
+    ? unreadable
+    no output captured, but pid 4812 is running — open it to see
 ```
+
+The four statuses mean different things and only two of them are about Claude:
+
+| status | meaning |
+|---|---|
+| `● active` | a turn is in flight right now |
+| `○ idle` | Claude is there, waiting for input |
+| `terminal` | a shell prompt, no Claude session |
+| `? unreadable` | **no output could be read for this tab** — says nothing about whether a session is running |
+
+`unreadable` is not "dead". The Tabby plugin captures a tab's output by
+subscribing to it, and a tab it never managed to subscribe to reads empty
+forever while Claude runs happily inside. That is why the line underneath
+reports the pid: a pid means something is running in there regardless of what
+the buffer says, and `restore` will refuse to touch such a tab.
+
+The trailing word after the status is the tab's **permission mode**, read from
+Claude's own footer.
 
 ## Workflow: Opening a Session Batch
 
@@ -340,7 +361,9 @@ cctabs resume api ~/Dev/myapp
 
 ## Workflow: Restoring tabs after a reboot
 
-After a terminal restart or computer reboot, every tab loses its Claude session and shows up with `terminal` or `unknown` status. `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
+After a terminal restart or computer reboot, every tab loses its Claude session and shows up with `terminal` or `? unreadable` status. `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
+
+A tab is only rebuilt when it has **no captured output AND no running process**. An unreadable tab whose process is alive is reported and left alone — restore can neither send `claude --resume` into it (that types into whatever is already there) nor recreate it (that closes it), so it does neither.
 
 ```bash
 cctabs restore                    # search all projects (default)
@@ -364,9 +387,16 @@ cctabs restore --manifest snapshot.json --create-missing   # spawn tabs for entr
 
 `--manifest -` reads from stdin, so `cctabs sessions --json | cctabs restore --manifest - --create-missing` works as a one-liner. Entries for tabs that are already running are reported as "already running, skipping" — safe to re-run. `backend` / `config_dir` are emitted only for sessions belonging to a non-default Claude account, and restore infers them anyway from wherever it finds the session, so a hand-written manifest can omit them.
 
-**One entry per `session_id`, if the names differ.** Restore dedupes by *name* — a repeated name is reported as a duplicate and skipped, and a leftover duplicate dead tab is closed — but two entries with *different* names pointing at the same `session_id` still spawn two tabs racing to be the active worker for one conversation, which surfaces as Remote Control "this connection is no longer the active worker for the session (code 4090)". That shape only arises in a hand-edited or merged manifest; `cctabs sessions --json` doesn't produce it.
+**Permission mode travels with the manifest.** `cctabs sessions --json` records each tab's mode as `permission_mode`, read from Claude's own footer, and restore hands it back with `claude --permission-mode <mode>` — so a tab that was in plan mode comes back in plan mode instead of in whatever the global `claude.flags` produce. The flag is appended after those flags and wins; it composes with `--allow-dangerously-skip-permissions`, which only makes bypass *available* rather than selecting it. Entries with no recorded mode fall back to the configured flags, and restore says how many did so rather than doing it silently.
 
-**Bulk restore is reliable — with the current plugin.** A 45-tab close-and-restore completes in under a minute with tab order preserved. This used to be the opposite: spawning ~35+ tabs in one call left most of them registered in Tabby but sitting as empty shells at `? unknown` status, because a Tabby tab only spawns its process once its terminal frontend attaches, which only happens once the tab has been focused — and each new tab stole focus from the last. `tabby-cctabs` ≥ 0.1.3 serialises tab creation internally and doesn't answer until the process is actually running, advertising `spawn-waits-for-pty` on `/api/health`; the CLI probes for that and only then spawns in parallel. Against an older plugin it falls back to one-at-a-time with a settle gap — slower, still correct.
+Two consequences worth knowing:
+
+- **The footer is the source, not the transcript.** The transcript's `permission-mode` entries are written at turn boundaries, not when the mode changes — cycling a session shift+tab through manual → plan → bypass leaves its recorded value untouched until the next prompt is submitted. Reading the footer is what makes a mode change with no subsequent turn survive a restore.
+- **Scan mode can't capture it.** A bare `cctabs restore` rebuilds tabs whose sessions are already gone, and a tab with no session has no footer to read. Modes round-trip through `--manifest` only, which means capturing the manifest *before* you close anything.
+
+**One entry per `session_id`, if the names differ.** Restore dedupes by *name* — a repeated name is reported as a duplicate and skipped, and a leftover duplicate empty tab is closed — but two entries with *different* names pointing at the same `session_id` still spawn two tabs racing to be the active worker for one conversation, which surfaces as Remote Control "this connection is no longer the active worker for the session (code 4090)". That shape only arises in a hand-edited or merged manifest; `cctabs sessions --json` doesn't produce it.
+
+**Bulk restore is reliable — with the current plugin.** A 45-tab close-and-restore completes in under a minute with tab order preserved. This used to be the opposite: spawning ~35+ tabs in one call left most of them registered in Tabby but sitting as empty shells at `? unreadable` status, because a Tabby tab only spawns its process once its terminal frontend attaches, which only happens once the tab has been focused — and each new tab stole focus from the last. `tabby-cctabs` ≥ 0.1.3 serialises tab creation internally and doesn't answer until the process is actually running, advertising `spawn-waits-for-pty` on `/api/health`; the CLI probes for that and only then spawns in parallel. Against an older plugin it falls back to one-at-a-time with a settle gap — slower, still correct.
 
 **If you do need to verify what's running, never use `ps aux | grep`.** It truncates long command lines, so any entry whose `--name` falls past the cutoff silently disappears and a healthy tab reads as dead. Use the tab list itself, or a full-width `ps`:
 
@@ -375,7 +405,7 @@ cctabs sessions                       # status per tab, straight from the termin
 ps -Ao command | grep -c -- "--resume"   # full command lines, not truncated
 ```
 
-To relaunch a straggler individually, `cctabs resume <name> "<dir>"` detects an empty/dead tab itself ("has no live shell (empty scrollback) — recreating") and rebuilds it, so it's safe against a tab `restore` already registered.
+To relaunch a straggler individually, `cctabs resume <name> "<dir>"` detects a genuinely empty tab itself ("has no live shell (no process, no output) — recreating") and rebuilds it; if the tab can't be read but its process is alive it refuses and tells you to look, so it's safe against a tab `restore` already registered.
 
 ### The "Resume from summary / full session" picker
 

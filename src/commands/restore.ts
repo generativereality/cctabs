@@ -201,6 +201,19 @@ async function runRestore(req: RestoreRequest): Promise<void> {
   const actionable = plan.filter(
     (p) => p.action === 'attach' || p.action === 'recreate' || p.action === 'spawn',
   )
+  // Falling back to the configured flags is the right default, but it must not
+  // be silent: a tab that was deliberately in plan mode coming back able to
+  // bypass permissions is exactly the surprise this reports.
+  const withoutMode = actionable.filter((p) => !p.permissionMode)
+  if (withoutMode.length) {
+    const flags = loadConfig().claude.flags
+    consola.warn(
+      `${withoutMode.length} of ${actionable.length} tab(s) recorded no permission mode — ` +
+      `they will launch with the configured claude.flags (${flags.join(' ') || 'none'}). ` +
+      `Modes are captured by \`cctabs sessions --json\`; a scan-mode restore has no live footer to read.`,
+    )
+  }
+
   consola.info(`${actionable.length} tab(s) to restore${dryRun ? ' (dry run)' : ''}:`)
   for (const p of plan) {
     // Already-running tabs are covered by the one-line list above; repeating
@@ -328,6 +341,16 @@ export function originNote(p: PlannedEntry): string {
   return ''
 }
 
+/**
+ * The permission mode a decision will relaunch with, when the entry recorded
+ * one. Shown because it overrides the configured `claude.flags` for that tab,
+ * and a tab silently coming back in a different mode than it was in is the
+ * whole reason this is captured.
+ */
+export function modeNote(p: PlannedEntry): string {
+  return p.permissionMode ? ` [mode: ${p.permissionMode}]` : ''
+}
+
 /** The per-entry decision line, worded for a dry run or a real one. */
 export function describeDecision(p: PlannedEntry, dry: boolean): string {
   switch (p.action) {
@@ -344,15 +367,15 @@ export function describeDecision(p: PlannedEntry, dry: boolean): string {
     case 'unreadable':
       return '— could not read this tab, but its process is running; leaving it alone'
     case 'attach':
-      return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab${originNote(p)}`
+      return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab${originNote(p)}${modeNote(p)}`
     case 'recreate':
-      return `→ ${dry ? 'would recreate' : 'recreating'} empty tab (no process) with ${shortId(p.sessionId)} in ${p.dir}${originNote(p)}`
+      return `→ ${dry ? 'would recreate' : 'recreating'} empty tab (no process) with ${shortId(p.sessionId)} in ${p.dir}${originNote(p)}${modeNote(p)}`
     case 'duplicate':
       return p.closeTabId
         ? `— duplicate empty tab, ${dry ? 'would close' : 'closing'} (already restoring one)`
         : '— duplicate entry, skipping (already restoring one)'
     case 'spawn':
-      return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}`
+      return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}${modeNote(p)}`
     case 'missing':
       return '— no existing tab; pass --create-missing to spawn one'
   }
@@ -451,8 +474,10 @@ async function executePlan(
     const spawnOne = async (p: PlannedEntry) => {
       try {
         const claudeCmd = p.sessionId
-          ? `claude --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}`
-          : 'claude'
+          ? `claude --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}${permissionModeFlag(p)}`
+          // A fresh Claude still honours the captured mode: the manifest asked
+          // for this tab, and the mode is part of what it asked for.
+          : `claude${permissionModeFlag(p)}`
         const { env, model } = launchEnvFor(p.backend, p.configDir)
         const newTabId = await openSession({
           tabName: p.entry.name,
@@ -524,7 +549,20 @@ export function buildResumeCommand(p: PlannedEntry, extraFlags: string): string 
   const { env, model } = launchEnvFor(p.backend, p.configDir)
   const envPrefix = env ? shellQuoteEnv(env) : ''
   const modelPart = model ? ` --model ${JSON.stringify(model)}` : ''
-  return `cd ${JSON.stringify(p.dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}${modelPart}`
+  return `cd ${JSON.stringify(p.dir)} && ${envPrefix}claude${extraFlags ? ' ' + extraFlags : ''} --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}${modelPart}${permissionModeFlag(p)}`
+}
+
+/**
+ * The per-tab `--permission-mode`, which overrides whatever the global
+ * `claude.flags` would otherwise settle on.
+ *
+ * Appended last so it wins over the configured flags. It composes with
+ * `--allow-dangerously-skip-permissions` rather than conflicting with it —
+ * that flag only makes bypass *available*, it doesn't select a mode — so a tab
+ * captured in plan mode comes back in plan mode even under the usual config.
+ */
+export function permissionModeFlag(p: PlannedEntry): string {
+  return p.permissionMode ? ` --permission-mode ${p.permissionMode}` : ''
 }
 
 /** `KEY="value" ` prefix for a shell command, matching how `resume` builds it. */

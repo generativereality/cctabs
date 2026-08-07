@@ -1,4 +1,4 @@
-import type { SessionStatus } from '../types/index.js'
+import type { PermissionMode, SessionStatus } from '../types/index.js'
 import type { SessionOrigin } from './config-dirs.js'
 
 /**
@@ -27,6 +27,13 @@ export interface RestoreEntry extends SessionOrigin {
   dir?: string
   /** Session id (possibly a prefix) recorded in a manifest. */
   sessionId?: string
+  /**
+   * Permission mode the tab was in when it was captured, to be handed back via
+   * `claude --permission-mode`. Absent means "not recorded" — the tab was
+   * unreadable at capture, or the manifest predates the field — and the
+   * configured `claude.flags` decide instead.
+   */
+  permissionMode?: PermissionMode
   /**
    * Scan mode only: the existing tab this entry was derived from. A bound entry
    * belongs to that one tab and skips name→tab resolution, which is what lets
@@ -78,6 +85,8 @@ export interface PlannedEntry extends SessionOrigin {
   closeTabId?: string
   /** Session to resume; absent on a 'spawn' means start a fresh Claude. */
   sessionId?: string
+  /** Permission mode to relaunch with, when the entry recorded one. */
+  permissionMode?: PermissionMode
   /** Directory Claude must be launched from. */
   dir?: string
 }
@@ -300,6 +309,7 @@ export async function planRestore(
         closeTabId: dead ? p.tabId : undefined,
         sessionId: session.id,
         dir: session.dir,
+        permissionMode: entry.permissionMode,
         ...originFor(entry, session),
       })
       continue
@@ -312,6 +322,7 @@ export async function planRestore(
         action: 'missing',
         sessionId: session?.id,
         dir: session?.dir ?? entry.dir,
+        permissionMode: entry.permissionMode,
         ...originFor(entry, session),
       })
       continue
@@ -325,6 +336,7 @@ export async function planRestore(
       action: 'spawn',
       sessionId: session?.id,
       dir: session?.dir ?? entry.dir,
+      permissionMode: entry.permissionMode,
       ...originFor(entry, session),
     })
   }

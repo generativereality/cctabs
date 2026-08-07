@@ -118,3 +118,27 @@ describe('parseManifest', () => {
     expect(() => parseManifest('{not json')).toThrow(/Manifest is not valid JSON/)
   })
 })
+
+describe('permission mode round-trip', () => {
+  it('carries a recorded mode through so restore can put the tab back as it was', () => {
+    const [e] = parseManifest(JSON.stringify([
+      { name: 'a', dir: '/tmp/a', permission_mode: 'plan' },
+    ]))
+    expect(e.permissionMode).toBe('plan')
+  })
+
+  it('drops a mode `claude --permission-mode` would reject rather than failing the launch', () => {
+    // `default` occurs in real transcripts but is not an accepted flag value.
+    for (const bad of ['default', 'dontAsk', 'PLAN', '', 42, null]) {
+      const [e] = parseManifest(JSON.stringify([
+        { name: 'a', dir: '/tmp/a', permission_mode: bad },
+      ]))
+      expect(e.permissionMode).toBeUndefined()
+    }
+  })
+
+  it('leaves the mode unset for a manifest written before the field existed', () => {
+    const [e] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a' }]))
+    expect(e.permissionMode).toBeUndefined()
+  })
+})

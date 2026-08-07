@@ -1,4 +1,4 @@
-import type { SessionStatus } from '../types/index.js'
+import type { PermissionMode, SessionStatus } from '../types/index.js'
 
 /**
  * What a terminal tab's captured output says about the Claude session in it.
@@ -145,4 +145,77 @@ export function classifyTerminalBuffer(buffer: string): SessionStatus {
   if (PRESENCE_MARKERS.some((m) => hasMarker(all, m))) return 'idle'
   if (lastLine.toLowerCase().includes('claude')) return 'idle'
   return 'terminal'
+}
+
+/**
+ * The mode pill Claude Code prints in its footer, and the `--permission-mode`
+ * value that reproduces it.
+ *
+ * Read off a live fleet by cycling shift+tab through a probe session and
+ * comparing the footer against `claude --permission-mode <v>` on resume. The
+ * glyph is optional in the pattern because the plugin's buffer occasionally
+ * splits it away from the text it decorates.
+ */
+const MODE_PILLS: ReadonlyArray<readonly [RegExp, PermissionMode]> = [
+  [/(⏵⏵)?accepteditson/g, 'acceptEdits'],
+  [/(⏵⏵)?bypasspermissionson/g, 'bypassPermissions'],
+  [/(⏸)?planmodeon/g, 'plan'],
+  [/(⏸)?manualmodeon/g, 'manual'],
+  [/(⏵⏵)?automodeon/g, 'auto'],
+]
+
+/**
+ * The permission mode a session is in *right now*, read from its footer.
+ *
+ * Why the footer and not the transcript: the transcript's `permission-mode`
+ * entries are written at turn boundaries, not when the mode changes. Cycling a
+ * probe session shift+tab through manual → plan → bypass → auto left its last
+ * recorded value at `auto` the entire time, and it only caught up once a prompt
+ * was submitted. So the transcript is the mode as of the last turn, while the
+ * footer is the mode now — and a tab whose mode was changed and then left alone
+ * is exactly the tab a restore would otherwise bring back wrong.
+ *
+ * The buffer accumulates redraws, so every mode the session has ever been in is
+ * somewhere in it. The last pill wins.
+ */
+export function parsePermissionMode(buffer: string): PermissionMode | undefined {
+  if (!buffer.trim()) return undefined
+  const compact = stripWhitespace(buffer)
+
+  let best: PermissionMode | undefined
+  let bestAt = -1
+  for (const [pattern, mode] of MODE_PILLS) {
+    pattern.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = pattern.exec(compact)) !== null) {
+      if (m.index > bestAt) {
+        bestAt = m.index
+        best = mode
+      }
+    }
+  }
+  return best
+}
+
+/** Every mode `claude --permission-mode` will accept from us. */
+const LAUNCHABLE_MODES: ReadonlySet<string> = new Set<PermissionMode>([
+  'acceptEdits',
+  'auto',
+  'bypassPermissions',
+  'manual',
+  'plan',
+])
+
+/**
+ * Narrow an arbitrary recorded string to a mode we can safely launch with.
+ *
+ * Transcripts and hand-edited manifests contain values the flag rejects — most
+ * commonly `default`, which appears in real transcripts and would make the
+ * relaunch fail outright rather than degrade. Anything unrecognised is dropped
+ * so the caller falls back to the configured flags.
+ */
+export function toLaunchableMode(value: unknown): PermissionMode | undefined {
+  return typeof value === 'string' && LAUNCHABLE_MODES.has(value)
+    ? (value as PermissionMode)
+    : undefined
 }

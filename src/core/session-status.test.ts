@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { classifyTerminalBuffer } from './session-status.js'
+import { classifyTerminalBuffer, parsePermissionMode, toLaunchableMode } from './session-status.js'
 
 /**
  * Fixtures are trimmed captures from a real 59-tab fleet, taken through the
@@ -103,5 +103,57 @@ describe('classifyTerminalBuffer', () => {
 
   it('matches markers through the plugin dropping spaces between characters', () => {
     expect(classifyTerminalBuffer('⏵⏵automodeon (shift+tabtocycle)')).toBe('idle')
+  })
+})
+
+describe('parsePermissionMode', () => {
+  // Footer text as the plugin's buffer actually delivers it, spaces and all.
+  const PILLS: Array<[string, string]> = [
+    ['⏵⏵automodeon (shift+tabtocycle)·←foragents', 'auto'],
+    ['⏵⏵ accept edits on (shift+tab to cycle) · ← for agents', 'acceptEdits'],
+    ['⏸ plan mode on (shift+tab to cycle) · ← for agents', 'plan'],
+    ['⏵⏵bypasspermissionson ·1shell ·←foragents', 'bypassPermissions'],
+    ['⏸ manual mode on · ← for agents', 'manual'],
+  ]
+
+  for (const [pill, expected] of PILLS) {
+    it(`reads ${expected} from its footer`, () => {
+      expect(parsePermissionMode(pill)).toBe(expected as never)
+    })
+  }
+
+  it('takes the most recent pill, since the buffer keeps every redraw', () => {
+    // Cycling shift+tab leaves the old pills above the new one.
+    const cycled = [
+      '⏵⏵ auto mode on',
+      '⏸ manual mode on',
+      '⏸ plan mode on',
+    ].join('\n')
+    expect(parsePermissionMode(cycled)).toBe('plan')
+  })
+
+  it('returns nothing when there is no footer to read', () => {
+    expect(parsePermissionMode('')).toBeUndefined()
+    expect(parsePermissionMode('motin@mbp cctabs %')).toBeUndefined()
+  })
+})
+
+describe('toLaunchableMode', () => {
+  it('accepts every mode claude --permission-mode takes', () => {
+    for (const m of ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'plan']) {
+      expect(toLaunchableMode(m)).toBe(m as never)
+    }
+  })
+
+  it('drops "default", which real transcripts contain and the flag rejects', () => {
+    // Passing it through would make the relaunch fail outright rather than
+    // fall back to the configured flags.
+    expect(toLaunchableMode('default')).toBeUndefined()
+  })
+
+  it('drops anything else, including non-strings', () => {
+    for (const v of ['dontAsk', 'PLAN', '', undefined, null, 7, {}]) {
+      expect(toLaunchableMode(v)).toBeUndefined()
+    }
   })
 })

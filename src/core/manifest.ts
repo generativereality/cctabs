@@ -1,6 +1,7 @@
 import { resolve } from 'path'
 import { homedir } from 'os'
 import type { RestoreEntry } from './restore-plan.js'
+import { toLaunchableMode } from './session-status.js'
 
 /**
  * Parse a restore manifest into entries.
@@ -59,12 +60,19 @@ export function parseManifest(raw: string): RestoreEntry[] {
     const backend = typeof it.backend === 'string' && it.backend ? it.backend : undefined
     const rawConfigDir = typeof it.config_dir === 'string' ? it.config_dir : null
     const configDir = rawConfigDir ? resolve(rawConfigDir.replace(/^~/, homedir())) : undefined
+    // Validated rather than passed through: a hand-edited manifest, or one
+    // built from a transcript, can carry a value `claude --permission-mode`
+    // rejects (`default` occurs in real transcripts). An unusable value is
+    // dropped so the entry falls back to the configured flags instead of
+    // failing to launch at all.
+    const permissionMode = toLaunchableMode(it.permission_mode)
     entries.push({
       name,
       dir: resolve(dir.replace(/^~/, homedir())),
       sessionId,
       backend,
       configDir,
+      permissionMode,
     })
   }
   return entries

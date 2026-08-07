@@ -1,6 +1,16 @@
 import { define } from 'gunshi'
 import { requireAdapter } from '../core/adapter.js'
 import { resolveTabSession } from '../core/session.js'
+import { classifyTerminalBuffer, parsePermissionMode } from '../core/session-status.js'
+
+/**
+ * Rows of captured output to read per tab.
+ *
+ * One read serves everything: the status classification, the mode pill, and
+ * the last line. 200 rows covers Claude Code's full footer, which renders with
+ * blank padding below the prompt.
+ */
+const BUFFER_ROWS = 200
 
 export const sessionsCommand = define({
   name: 'sessions',
@@ -26,6 +36,12 @@ export const sessionsCommand = define({
         status: string
         last_line: string
         session_id: string | null
+        /**
+         * Permission mode read from the session's own footer, so `restore` can
+         * put the tab back the way it was instead of in whatever the global
+         * `claude.flags` dictate. Omitted when the tab couldn't be read.
+         */
+        permission_mode?: string
         /** Backend preset owning this session's Claude config dir, if any. */
         backend?: string
         /** Non-default CLAUDE_CONFIG_DIR the session lives in, if any. */
@@ -57,9 +73,11 @@ export const sessionsCommand = define({
           const tabName = tabNames.get(tabId) ?? tabId.slice(0, 8)
           const b = termBlocks[0]
           const cwd = b.meta?.['cmd:cwd'] ?? ''
-          const status = adapter.detectSessionStatus(b.blockid)
-          const tail = adapter.scrollback(b.blockid, 5)
-          const lastLine = tail.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
+          // One read, three answers — see BUFFER_ROWS.
+          const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
+          const status = classifyTerminalBuffer(buffer)
+          const permissionMode = parsePermissionMode(buffer)
+          const lastLine = buffer.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
 
           // Worktree-aware resolution: returns the session id AND the directory
           // Claude must launch from to resume it. For a --worktree tab that dir
@@ -95,6 +113,7 @@ export const sessionsCommand = define({
             status,
             last_line: lastLine.slice(0, 200),
             session_id: sessionId,
+            ...(permissionMode ? { permission_mode: permissionMode } : {}),
             ...(backend ? { backend } : {}),
             ...(configDir ? { config_dir: configDir } : {}),
           })
@@ -128,7 +147,9 @@ export const sessionsCommand = define({
         const b = termBlocks[0]
         const cwd = (b.meta?.['cmd:cwd'] ?? '').replace(process.env.HOME ?? '', '~')
 
-        const status = adapter.detectSessionStatus(b.blockid)
+        const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
+        const status = classifyTerminalBuffer(buffer)
+        const permissionMode = parsePermissionMode(buffer)
 
         const statusLabel =
           status === 'active' ? '● active (turn in flight)'
@@ -137,7 +158,7 @@ export const sessionsCommand = define({
           : '  terminal'
 
         console.log(`  [${tabId.slice(0, 8)}] "${name}"${cur}  ${cwd}`)
-        console.log(`    ${statusLabel}`)
+        console.log(`    ${statusLabel}${permissionMode ? `  ·  ${permissionMode}` : ''}`)
         // An unreadable tab is the one case where the status line alone would
         // mislead, so say what we do know: whether a process is running in it.
         if (status === 'unreadable') {
@@ -148,8 +169,7 @@ export const sessionsCommand = define({
           )
         }
         if (status === 'terminal') {
-          const tail = adapter.scrollback(b.blockid, 5)
-          const lastLine = tail.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
+          const lastLine = buffer.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
           if (lastLine) console.log(`    last: ${lastLine.slice(0, 80)}`)
         }
       }

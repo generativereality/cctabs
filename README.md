@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skill
 ## Usage
 
 ```
-cctabs sessions [--json]                 what's running (active/idle status)
+cctabs sessions [--json]                 what's running (busy/waiting status + permission mode)
 cctabs list                              all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace]   open tab, start claude
 cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by ID
