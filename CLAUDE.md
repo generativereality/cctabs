@@ -53,6 +53,31 @@ tarball, so a stale claim in it reaches every user. It has twice described
 behavior that had already been inverted by an unreleased commit. Re-read the
 sections your change touches.
 
+### The skill's `description` has a hard 1535-character budget
+
+Claude Code truncates a skill description at **1535 characters** in the
+available-skills listing and appends `…`. There is no warning: the skill still
+loads and still works when invoked by name, so the loss is invisible unless you
+go read a transcript's `skill_listing` attachment. Ours silently overran for
+several releases and the amputated tail was the anti-substitution rule — the one
+thing the description exists to say.
+
+Rules for editing it:
+
+- **Keep it under ~1450** so there is headroom, and re-measure after any edit.
+- **Put the load-bearing sentences first.** Order is the only truncation
+  protection there is. The TRIGGER list is long but individually cheap to lose a
+  tail of; the "a subagent is NOT a tab" rule is not, so it goes above it.
+- **Lead with the literal words a user would type** (`cctab`, `cctabs`, `tab`).
+  In a project with dozens of its own skills this entry can land 75% of the way
+  down 80+ entries, and the first clause is what registers.
+
+Note what this can and cannot fix: the full listing is injected **once per
+session** and is **not re-injected after a compaction** — only single-skill
+recall deltas are. A long session that has compacted has no listing at all, and
+no description wording reaches it. That is why `cctab` exists as a real bin
+alias: probing the shell is the only discovery path left in that state.
+
 ## Plugin capabilities
 
 `/api/health` returns `{ok, version, capabilities: [...]}`. The CLI probes it via
