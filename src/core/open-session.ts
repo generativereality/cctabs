@@ -5,6 +5,8 @@ import { consola } from 'consola'
 import { loadConfig } from './config.js'
 import { requireAdapter, type TerminalAdapter } from './adapter.js'
 import { shellQuoteArg } from './shell.js'
+import { autoModeDialogVisible, trustDialogVisible } from './session-status.js'
+import { hasPriorSessions } from './session.js'
 
 interface OpenSessionOptions {
   tabName: string
@@ -71,7 +73,7 @@ async function waitForScrollbackMatch(
   throw new Error(`Timed out waiting for ${label}`)
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /**
  * Wait for Claude's input prompt, then send the initial task and reliably
@@ -122,33 +124,17 @@ async function sendInitialPrompt(
     consola.warn('Could not confirm Claude was ready within 45s — sending the prompt anyway (will verify it lands).')
   }
 
-  // Auto-confirm Claude's "Do you trust the files in this folder?" dialog when
-  // the session opens on it (a new/untrusted cwd, e.g. a freshly created repo).
-  // Its menu reuses the ❯ glyph, so the wait above matches the dialog rather
-  // than the chat input, and a paste here would be lost into the menu. Enter
-  // selects the default "Yes, I trust this folder". cctabs only ever launches
-  // Claude in a directory the caller explicitly named, so trusting it is the
-  // intended action.
+  // Clear either startup dialog before pasting. Both reuse the ❯ glyph, so the
+  // wait above matches the dialog rather than the chat input, and a paste here
+  // would be lost into the menu.
   //
-  // Retry, patiently: the dialog has its own not-ready window right as it
-  // renders (its input handler attaches a beat after the text paints), so an
-  // Enter sent the instant it appears is dropped. Once it *did* appear, keep
-  // pressing Enter until a FORWARD signal proves we're past it — the chat
-  // input's footer ("auto mode" / "for agents") or placeholder ("Try …"),
-  // none of which the dialog shows. (The output log is append-only, so we
-  // can't detect dismissal by the dialog text *disappearing* — only by new
-  // post-dialog content appearing.)
-  const sawTrust = /trustthisfolder|Yes,?Itrustthis|Isthisaproject/i.test(
-    adapter.scrollback(blockId, 40).replace(/\s+/g, ''),
-  )
-  if (sawTrust) {
-    for (let attempt = 0; attempt < 18; attempt++) {
-      const screen = adapter.scrollback(blockId, 14).replace(/\s+/g, '')
-      if (/automode|foragents|Try["'“]/i.test(screen)) break
-      await adapter.sendInput(blockId, '\r')
-      await sleep(800)
-    }
-  }
+  // `trusted: true` on this path, unconditionally, and that is deliberate: an
+  // explicit `cctabs new <name> <dir>` names the directory the caller wants,
+  // and requiring a prior session would hang the one case this most needs to
+  // work — opening a session in a repo that was just created. The
+  // prior-session rule belongs to restore, which is re-opening directories
+  // rather than choosing them.
+  await clearStartupDialogs(adapter, blockId, { trusted: true })
 
   const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
   // Distinctive chunk for the inline-echo case. Claude's output is append-only
@@ -191,6 +177,74 @@ async function sendInitialPrompt(
   }
 
   consola.warn('Could not confirm the initial prompt was submitted — switch to the tab and press Enter to send it.')
+}
+
+/**
+ * Clear Claude's two blocking startup dialogs, if either is on screen.
+ *
+ * Both appear after the process starts and before the session is usable, so a
+ * tab sitting on one is indistinguishable from a healthy launch unless you read
+ * its output: the process is alive, `restore` reported success, and the
+ * conversation never loaded. Measured on a real 65-tab restore — 8 tabs on the
+ * trust dialog, 2 on the auto-mode dialog, all reported as restored.
+ *
+ * The two are answered differently, and getting that backwards is the hazard:
+ *
+ *   - Trust dialog — Enter takes the default ("Yes, I trust this folder"). Only
+ *     answered when `trusted` says the directory already holds transcripts from
+ *     earlier sessions; otherwise the dialog is doing its job and we leave it.
+ *   - Auto-mode dialog — the default is "Set it up", which would kick off an
+ *     interactive environment review. We need option 2 ("Not now"), so: ↓ once,
+ *     then Enter. Never option 3 ("Don't show again") — permanently suppressing
+ *     a prompt is the user's decision, the same reasoning as the resume
+ *     picker's option 3.
+ *
+ * Dismissal is detected by a FORWARD signal, never by the dialog text
+ * disappearing: the captured buffer is append-only, so the prose stays visible
+ * forever and "is it still there?" always answers yes. (That trap cost a real
+ * debugging session — the dialogs read as still-stuck after they had cleared.)
+ */
+export async function clearStartupDialogs(
+  adapter: TerminalAdapter,
+  blockId: string,
+  opts: { sleep?: (ms: number) => Promise<void>; trusted?: boolean; dir?: string } = {},
+): Promise<void> {
+  const nap = opts.sleep ?? sleep
+  const read = (n: number) => adapter.scrollback(blockId, n)
+  // The live input footer — proof we are past every dialog. The dialogs draw ❯
+  // too, so a bare prompt glyph proves nothing.
+  const pastDialogs = () => /automode|foragents|Try["'“]/i.test(read(14).replace(/\s+/g, ''))
+
+  if (autoModeDialogVisible(read(40))) {
+    // Let the dialog's key handler attach before the single navigation press —
+    // it has the same not-ready window as the resume picker.
+    await nap(1200)
+    await adapter.sendInput(blockId, '\x1b[B') // ↓ once → option 2, "Not now"
+    await nap(250)
+    let cleared = false
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await adapter.sendInput(blockId, '\r')
+      await nap(800)
+      if (pastDialogs()) { cleared = true; break }
+    }
+    if (!cleared) {
+      consola.warn('Could not confirm the auto-mode dialog was dismissed — switch to the tab and choose "Not now".')
+    }
+  }
+
+  if (!trustDialogVisible(read(40))) return
+  if (!opts.trusted) {
+    consola.warn(
+      `Tab is waiting on the folder-trust dialog${opts.dir ? ` for ${opts.dir}` : ''}, and Claude has no earlier session there — leaving it for you to answer.`,
+    )
+    return
+  }
+  for (let attempt = 0; attempt < 18; attempt++) {
+    if (pastDialogs()) return
+    await adapter.sendInput(blockId, '\r') // Enter → default, "Yes, I trust this folder"
+    await nap(800)
+  }
+  consola.warn('Could not confirm the folder-trust dialog was dismissed — switch to the tab and press Enter.')
 }
 
 /**
@@ -238,10 +292,20 @@ async function sendInitialPrompt(
 export async function confirmResumePicker(
   adapter: TerminalAdapter,
   blockId: string,
-  deps: { sleep?: (ms: number) => Promise<void> } = {},
+  deps: { sleep?: (ms: number) => Promise<void>; dir?: string; trusted?: boolean } = {},
 ): Promise<void> {
   const nap = deps.sleep ?? sleep
   const stripped = (n: number) => adapter.scrollback(blockId, n).replace(/\s+/g, '')
+
+  // Both startup dialogs render BEFORE the resume picker and block the tab, so
+  // they have to clear first or nothing below ever appears. They were handled
+  // only on the `cctabs new` path; a restore hit neither, which is how a 65-tab
+  // restore left 10 tabs stranded on a dialog while reporting success.
+  await clearStartupDialogs(adapter, blockId, {
+    sleep: nap,
+    trusted: deps.trusted ?? (deps.dir ? hasPriorSessions(deps.dir) : false),
+    dir: deps.dir,
+  })
   const pickerVisible = (n: number) => {
     const c = stripped(n)
     return /Resumefromsummary/i.test(c) && /Resumefullsession/i.test(c)
@@ -376,7 +440,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     mark('openTabDirect')
 
     if (isResume) {
-      await confirmResumePicker(adapter, blockId)
+      await confirmResumePicker(adapter, blockId, { dir })
       mark('resumePicker')
     }
 
@@ -440,7 +504,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   await adapter.sendInput(blockId, cmd)
 
   if (isResume) {
-    await confirmResumePicker(adapter, blockId)
+    await confirmResumePicker(adapter, blockId, { dir })
     mark('resumePicker')
   }
 

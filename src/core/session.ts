@@ -17,6 +17,32 @@ export function pathToProjectSlug(dir: string): string {
   return resolve(dir).replace(/[^A-Za-z0-9-]/g, '-')
 }
 
+/**
+ * Has Claude ever held a session in this directory?
+ *
+ * Answers the only question that makes auto-confirming the folder-trust dialog
+ * defensible: a transcript under `<configDir>/projects/<slug>` is evidence that
+ * the user has already worked here in a previous session, so the trust decision
+ * was made by them, earlier, and we are re-affirming it rather than making it.
+ *
+ * A directory with no transcripts is genuinely new to Claude, and there the
+ * dialog is doing its job — we leave it alone for the human. Searches every
+ * config dir, because a second-account session lands under its own root.
+ */
+export function hasPriorSessions(dir: string, scope?: ConfigDirScope): boolean {
+  const slug = pathToProjectSlug(dir)
+  for (const cfg of scopeToDirs(scope)) {
+    const projectDir = join(cfg.projectsRoot, slug)
+    if (!existsSync(projectDir)) continue
+    try {
+      if (readdirSync(projectDir).some((f) => extname(f) === '.jsonl')) return true
+    } catch {
+      // Unreadable project dir tells us nothing; keep looking.
+    }
+  }
+  return false
+}
+
 /** Find the most recent .jsonl session file in a Claude project directory */
 function latestJsonlIn(projectDir: string): string | null {
   if (!existsSync(projectDir)) return null
