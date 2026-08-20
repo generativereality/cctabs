@@ -8,6 +8,7 @@ import { loadConfig, applyPrefix } from '../core/config.js'
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 import { setupWorktree } from '../core/worktree.js'
+import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
 
 export const newCommand = define({
   name: 'new',
@@ -22,6 +23,7 @@ export const newCommand = define({
     resume: { type: 'string', short: 'r', description: 'Resume an existing Claude session ID (passes --resume <id> to claude). Mutually exclusive with --prompt/--file.' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
+    color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
   },
   async run(ctx) {
     const name = ctx.positionals[1]
@@ -35,11 +37,14 @@ export const newCommand = define({
     const backendName = resolveBackendName(explicitBackend)
     const inheritedBackend = !explicitBackend && !!backendName
     const modelOverride = ctx.values.model as string | undefined
+    const colorInput = ctx.values.color as string | undefined
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
+
+    const config = loadConfig()
 
     // Prefix (if configured) rides on the tab title + `claude --name` only —
     // the raw `name` still drives the worktree branch/dir so those stay clean.
-    const displayName = applyPrefix(name, loadConfig().defaults.prefix)
+    const displayName = applyPrefix(name, config.defaults.prefix)
 
     if (resumeId && (promptText || promptFile)) {
       consola.error('--resume cannot be combined with --prompt or --file (you cannot send an initial prompt to a resumed session via this path).')
@@ -66,6 +71,7 @@ export const newCommand = define({
 
     let envVars: Record<string, string> | undefined
     let resolvedModel = modelOverride
+    let backendColor: string | undefined
     if (backendName) {
       const backend = resolveBackend(backendName)
       if (!backend) {
@@ -75,6 +81,17 @@ export const newCommand = define({
       }
       envVars = backendEnvWithMarker(backendName, backend)
       resolvedModel ??= backend.model || undefined
+      backendColor = backend.color
+    }
+
+    // Validate before doing any work — a bad colour should cost nothing, not
+    // leave a worktree and a tab behind.
+    let color: string | null | undefined
+    try {
+      color = resolveColorPreference(colorInput, backendColor, config.defaults.color)
+    } catch (e) {
+      consola.error((e as Error).message)
+      process.exit(1)
     }
 
     // If prompt text provided, write to temp file so we can pass it via --file
@@ -128,6 +145,7 @@ export const newCommand = define({
       envVars,
       modelOverride: resolvedModel,
       afterActive: true,
+      color,
     })
     const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
     const be = backendName ? ` [backend: ${backendName}${inheritedBackend ? ' (inherited)' : ''}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''

@@ -141,4 +141,31 @@ describe('permission mode round-trip', () => {
     const [e] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a' }]))
     expect(e.permissionMode).toBeUndefined()
   })
+
+  it('reads a recorded tab colour, accepting both a palette name and a hex value', () => {
+    // `sessions --json` emits the resolved hex; a hand-written manifest is more
+    // likely to say "blue". Both have to land on the same value.
+    const [byName] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a', color: 'blue' }]))
+    const [byHex] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a', color: '#0275d8' }]))
+    expect(byName.color).toBe('#0275d8')
+    expect(byHex.color).toBe('#0275d8')
+  })
+
+  it('keeps an explicit null — a deliberately uncoloured tab stays uncoloured', () => {
+    // Distinct from absent, which falls back to whatever the config implies.
+    const [e] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a', color: null }]))
+    expect(e.color).toBeNull()
+  })
+
+  it('drops an unusable colour rather than failing the launch', () => {
+    for (const bad of ['chartreuse', '#12345', 42, {}]) {
+      const [e] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a', color: bad }]))
+      expect(e.color).toBeUndefined()
+    }
+  })
+
+  it('leaves the colour unset for a manifest written before the field existed', () => {
+    const [e] = parseManifest(JSON.stringify([{ name: 'a', dir: '/tmp/a' }]))
+    expect(e.color).toBeUndefined()
+  })
 })

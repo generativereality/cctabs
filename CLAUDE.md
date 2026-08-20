@@ -60,6 +60,10 @@ sections your change touches.
 plugin is routinely older than the CLI talking to it. Add behavior that depends
 on a plugin fix as a **new capability token**, never as a version comparison.
 
+- `tab-color` — tabs carry a colour: reported on `/api/tabs`, accepted by `POST /api/tabs/new`, and settable via `PUT /api/tabs/:uuid/color`. `--color` and `cctabs color` probe for this and degrade with one warning, because an older plugin drops the unknown `color` field silently — indistinguishable from a colour that was applied and didn't render.
+
+  The colour is assigned straight to `BaseTabComponent.color`, which is literally what Tabby's own right-click → Color menu does (`tabby-core/src/tabContextMenu.ts`), so a cctabs-set colour is indistinguishable from a hand-set one. `src/core/colors.ts` mirrors Tabby's `TAB_COLORS` **hex values**, not just its names: that menu ticks its radio by comparing `tab.color === color.value`, so a different blue would colour the tab and still leave the menu showing no selection. Tabby persists the colour via `tabRecovery.service.ts` (`token.tabColor`) on a 30s save timer — the `color` setter, unlike `pinned`, doesn't request an earlier save, so a colour set just before a hard quit can be lost. That's upstream behaviour and matching it is deliberate.
+
 - `spawn-waits-for-pty` — `POST /api/tabs/new` serialises concurrent creates and doesn't respond until the new tab's process is actually running. Restore spawns in parallel only when this is present; otherwise one at a time with a settle gap.
 
   Why it exists: a Tabby terminal tab spawns its PTY only after its xterm frontend attaches, which `BaseTerminalTabComponent.ngOnInit` defers until the tab `hasFocus` — and `AppService.addTabRaw → selectTab` blurs the outgoing tab synchronously but emits focus from a `setImmediate` that reads `_activeTab` at callback time. Two creates in one event-loop turn means the first tab is never focused, never attaches, and **never spawns a process at all**. The upstream sources are readable via the sourcemaps in `/Applications/Tabby.app/Contents/Resources/builtin-plugins/*/dist/index.js.map`.

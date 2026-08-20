@@ -7,6 +7,7 @@ import { requireAdapter, type TerminalAdapter } from './adapter.js'
 import { shellQuoteArg } from './shell.js'
 import { autoModeDialogVisible, trustDialogVisible } from './session-status.js'
 import { hasPriorSessions } from './session.js'
+import { applyTabColor, supportsTabColor } from './colors.js'
 
 interface OpenSessionOptions {
   tabName: string
@@ -35,6 +36,12 @@ interface OpenSessionOptions {
    * regardless — a short settle is enough to let the tab animation finish.
    */
   tailDelayMs?: number
+  /**
+   * Tab colour to apply, already resolved to a CSS colour string (or null to
+   * clear it) by `resolveColorPreference`. Leave `undefined` to not touch the
+   * colour at all — that's the common case, and it skips the capability probe.
+   */
+  color?: string | null
 }
 
 function shellQuoteEnv(env: Record<string, string>): string {
@@ -416,6 +423,14 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   // Adding `-i` makes zsh source `.zshrc` even with `-c`, matching what an
   // interactive Terminal/Tabby tab would see. Same logic applies to bash
   // (`-l -i -c` sources both ~/.profile and ~/.bashrc on Linux).
+  // Resolve colour support up front so the colour can ride along with the
+  // create and the tab never renders uncoloured first. An older plugin drops an
+  // unknown `color` field without complaint, so the probe is what turns that
+  // silent no-op into one warning — see supportsTabColor().
+  const color = opts.color !== undefined && (await supportsTabColor(adapter))
+    ? opts.color
+    : undefined
+
   if (adapter.openTabDirect) {
     const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
     // `tabName` is used verbatim for both the tab title and `--name`. Any
@@ -436,6 +451,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
       command: shell,
       args: ['-l', '-i', '-c', launch],
       afterActive,
+      color,
     })
     mark('openTabDirect')
 
@@ -485,6 +501,12 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
   const { blockId, tabId } = result
   await adapter.renameTab(tabId, tabName)
   mark('renameTab')
+
+  // Slow path: no create-time colour field, so colour it right after the rename.
+  if (color !== undefined) {
+    await applyTabColor(adapter, tabId, color)
+    mark('setTabColor')
+  }
 
   // Wait for the shell prompt before sending the cd && claude command.
   // Without this, the input can arrive before the shell is ready and get lost.

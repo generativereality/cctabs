@@ -2,6 +2,7 @@ import { resolve } from 'path'
 import { homedir } from 'os'
 import type { RestoreEntry } from './restore-plan.js'
 import { toLaunchableMode } from './session-status.js'
+import { resolveTabColor } from './colors.js'
 
 /**
  * Parse a restore manifest into entries.
@@ -66,6 +67,17 @@ export function parseManifest(raw: string): RestoreEntry[] {
     // dropped so the entry falls back to the configured flags instead of
     // failing to launch at all.
     const permissionMode = toLaunchableMode(it.permission_mode)
+    // Validated like permission_mode, and for the same reason: a hand-written
+    // manifest may say "blue" where `sessions --json` emits "#0275d8", and an
+    // unusable value must fall back to the configured colour rather than fail
+    // the launch. `null` is meaningful — a tab deliberately left uncoloured —
+    // so it is distinguished from absent.
+    let color: string | null | undefined
+    if (it.color === null) {
+      color = null
+    } else if (typeof it.color === 'string') {
+      try { color = resolveTabColor(it.color) } catch { color = undefined }
+    }
     entries.push({
       name,
       dir: resolve(dir.replace(/^~/, homedir())),
@@ -73,6 +85,7 @@ export function parseManifest(raw: string): RestoreEntry[] {
       backend,
       configDir,
       permissionMode,
+      color,
     })
   }
   return entries

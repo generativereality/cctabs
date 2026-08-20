@@ -70,11 +70,13 @@ curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skill
 cctabs sessions [--json]                 what's running (busy/waiting status + permission mode)
 cctabs list                              all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace]   open tab, start claude
+cctabs new <name> [dir] -c <colour>      ...and colour its tab (also on resume/fork)
 cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by ID
 cctabs resume <name> [dir]               resume that session (reuses its tab, or opens one)
 cctabs fork <tab> [-n new-name]          fork a session into a new tab
 cctabs close <tab>                       close a tab
 cctabs rename <tab> <new-name>           rename a tab (+ on-disk title, so `resume` finds it)
+cctabs color <tab> <colour>              set or clear a tab's colour
 cctabs sort [--dry] [--reverse]          reorder the tab bar by session activity (Tabby only)
 cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines)
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
@@ -232,6 +234,11 @@ flags = ["--allow-dangerously-skip-permissions"]
 # Default workspace for new sessions (inert on Tabby, which has no workspaces)
 # workspace = ""
 
+# Colour every tab opened by new/resume/fork. One of blue, green, orange,
+# purple, red, yellow, none — or a hex value like "#0275d8". Overridden by a
+# backend preset's own `color`, and by `--color` on the command line.
+# color = ""
+
 # Backend presets: another model provider, or another Claude account entirely.
 # Launch with `cctabs new <name> [dir] -b client-x`; tabs spawned from inside
 # that session inherit it. Sessions started under a preset that sets its own
@@ -241,7 +248,31 @@ flags = ["--allow-dangerously-skip-permissions"]
 description = "Client X's Claude account"
 env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
 env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
+# Colour this account's tabs, so which account a tab belongs to is visible in
+# the tab bar rather than something you have to remember.
+color = "blue"
 ```
+
+### Tab colours
+
+`--color` on `new`, `resume` and `fork` sets the Tabby tab colour; `cctabs color
+<tab> <colour>` changes one that already exists (including a tab `resume`
+reused rather than created). Named colours are Tabby's own palette — `blue`,
+`green`, `orange`, `purple`, `red`, `yellow`, plus `none` to clear — and hex
+values like `#0275d8` work too. The named ones map to the exact hex Tabby's
+right-click → **Color** menu uses, so a cctabs-set colour is indistinguishable
+from a hand-set one, radio button included.
+
+Colours survive a reboot. Tabby persists them across its own restart, but
+`cctabs restore` *recreates* a dead tab rather than reviving it, so `restore`
+re-applies the colour — from the manifest, from the tab it is replacing, or
+failing both from whatever the config implies for that session's account. So
+`[backends.enterprise] color = "blue"` plus `[defaults] color = "orange"` keeps
+holding across restarts without anything recorded per tab.
+
+Colouring needs a `tabby-cctabs` build that advertises the `tab-color`
+capability. Against an older plugin the colour is skipped with one warning and
+the tab still opens — a cosmetic field is never worth failing a spawn over.
 
 ## Terminal support
 

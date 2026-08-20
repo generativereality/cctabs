@@ -42,6 +42,13 @@ export const sessionsCommand = define({
          * `claude.flags` dictate. Omitted when the tab couldn't be read.
          */
         permission_mode?: string
+        /**
+         * The tab's colour, so `restore --manifest` can put it back. Restore
+         * recreates a dead tab rather than reviving it, and a fresh tab starts
+         * uncoloured — so unlike Tabby's own tab recovery, this has to be
+         * carried explicitly. Omitted when the plugin doesn't report colours.
+         */
+        color?: string | null
         /** Backend preset owning this session's Claude config dir, if any. */
         backend?: string
         /** Non-default CLAUDE_CONFIG_DIR the session lives in, if any. */
@@ -113,6 +120,7 @@ export const sessionsCommand = define({
             status,
             last_line: lastLine.slice(0, 200),
             session_id: sessionId,
+            ...(b.color !== undefined ? { color: b.color } : {}),
             ...(permissionMode ? { permission_mode: permissionMode } : {}),
             ...(backend ? { backend } : {}),
             ...(configDir ? { config_dir: configDir } : {}),
