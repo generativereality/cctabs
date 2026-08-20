@@ -59,10 +59,23 @@ export interface TerminalAdapter {
     args: string[]
     /** Insert the new tab right after the currently-active tab, not at the end. */
     afterActive?: boolean
+    /**
+     * Tab colour to apply as part of the create, so the tab never renders
+     * uncoloured first. Only send this when the backend advertises `tab-color`
+     * — a backend without it drops the field silently.
+     */
+    color?: string | null
   }): Promise<{ blockId: string; tabId: string }>
 
   /** Reorder the tab bar to match `order` (tab ids); unlisted tabs keep order and sort after. */
   reorderTabs?(order: string[]): Promise<void>
+
+  /**
+   * Set an existing tab's colour, or clear it with `null`. Guard calls with the
+   * `tab-color` capability: an older backend has no such route, so an
+   * unguarded call fails the command over a cosmetic change.
+   */
+  setTabColor?(tabId: string, color: string | null): Promise<void>
 
   /**
    * Capability tokens advertised by the backend, for feature detection.
@@ -76,6 +89,8 @@ export interface TerminalAdapter {
    *   `spawn-waits-for-pty` — openTabDirect serialises concurrent creates and
    *     only resolves once the new tab's process is actually running, making
    *     parallel spawning safe.
+   *   `tab-color` — tabs carry a colour: openTabDirect accepts one, setTabColor
+   *     changes it, and blocksList reports it.
    */
   backendCapabilities?(): Promise<string[]>
 

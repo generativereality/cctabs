@@ -7,7 +7,7 @@ import { loadConfig } from '../core/config.js'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByNameGlobally, locateSessionById, resolveTabSession } from '../core/session.js'
-import { launchEnvFor } from '../core/backends.js'
+import { launchEnvFor, resolveBackend } from '../core/backends.js'
 import type { ConfigDirScope } from '../core/config-dirs.js'
 import { parseManifest } from '../core/manifest.js'
 import {
@@ -18,8 +18,9 @@ import {
   type RestoreEntry,
   type ResolvedSession,
 } from '../core/restore-plan.js'
-import type { Block } from '../types/index.js'
+import type { Block, Config } from '../types/index.js'
 import { shellQuoteArg } from '../core/shell.js'
+import { resolveColorPreference } from '../core/colors.js'
 
 /**
  * Settle after each direct-spawn recreate when the backend can't guarantee the
@@ -168,10 +169,16 @@ async function runRestore(req: RestoreRequest): Promise<void> {
         scopeTabIds.add(tabId)
         if (tabId === currentTab) continue
         if (!(tabsById.get(tabId) ?? []).some((b) => b.view === 'term')) continue
+        // Carry the tab's current colour into the entry. After a reboot Tabby
+        // has recovered these tabs *with* their colours but with dead shells,
+        // and restore replaces a dead tab rather than reviving it — so without
+        // this the recreated tab comes back uncoloured.
+        const termBlock = (tabsById.get(tabId) ?? []).find((b) => b.view === 'term')
         entries.push({
           name: tabNames.get(tabId) ?? tabId.slice(0, 8),
           dir: req.scopedDir ?? undefined,
           tabId,
+          color: termBlock?.color,
         })
       }
     }
@@ -485,6 +492,7 @@ async function executePlan(
           claudeCmd,
           envVars: env,
           modelOverride: model,
+          color: colorForEntry(p, config),
           // Spawned tabs append; the whole bar is reordered below, so don't
           // insert after-active here.
           tailDelayMs: 500,
@@ -563,6 +571,36 @@ export function buildResumeCommand(p: PlannedEntry, extraFlags: string): string 
  */
 export function permissionModeFlag(p: PlannedEntry): string {
   return p.permissionMode ? ` --permission-mode ${p.permissionMode}` : ''
+}
+
+/**
+ * The colour a restored tab should come back with.
+ *
+ * A recorded colour wins — that's the tab as it actually was, whether captured
+ * from a live tab in scan mode or round-tripped through a manifest. `null` is a
+ * real answer there (deliberately uncoloured) and is honoured.
+ *
+ * Nothing recorded falls back to what the config implies for this entry's
+ * backend: `[backends.<name>] color`, else `[defaults] color`. That's what makes
+ * a rule like "the enterprise account's tabs are blue" hold after a reboot even
+ * for manifests written before colours existed — the backend is already inferred
+ * from the config dir the session was found in, so the colour follows it.
+ */
+export function colorForEntry(
+  p: PlannedEntry,
+  config: Config,
+  // Injectable so the fallback chain is testable without a real config file on
+  // disk; production callers take the default.
+  backendColorOf: (name: string) => string | undefined = (name) => resolveBackend(name)?.color,
+): string | null | undefined {
+  if (p.color !== undefined) return p.color
+  const backendColor = p.backend ? backendColorOf(p.backend) : undefined
+  try {
+    return resolveColorPreference(undefined, backendColor, config.defaults.color)
+  } catch {
+    // A bad colour in config must not take a 60-tab restore down with it.
+    return undefined
+  }
 }
 
 /** `KEY="value" ` prefix for a shell command, matching how `resume` builds it. */

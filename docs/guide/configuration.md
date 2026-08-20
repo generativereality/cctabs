@@ -20,6 +20,9 @@ flags = ["--allow-dangerously-skip-permissions"]
 # Default workspace to open new sessions in. Inert on Tabby, which has no
 # workspace concept — kept for config compatibility.
 # workspace = ""
+
+# Colour for every tab opened by new/resume/fork.
+# color = ""
 ```
 
 ## claude.flags
@@ -43,6 +46,28 @@ If set, `cctabs new` will open tabs in this workspace by default (without needin
 [defaults]
 workspace = "work"
 ```
+
+## defaults.color
+
+Colour applied to every tab opened by `cctabs new`, `resume` and `fork`.
+
+```toml
+[defaults]
+color = "blue"
+```
+
+Accepts Tabby's palette names — `blue`, `green`, `orange`, `purple`, `red`,
+`yellow` — plus `none`, or a hex value like `"#0275d8"`. Precedence runs
+`--color` → the backend preset's own `color` → this. Empty (the default) leaves
+tabs uncoloured.
+
+Colours survive a reboot: `cctabs restore` re-applies them, because it *recreates*
+a dead tab rather than reviving it and a fresh tab starts uncoloured. A tab whose
+colour wasn't recorded takes whatever the config implies for its backend, so this
+rule keeps holding for sessions captured before colours existed.
+
+Requires a `tabby-cctabs` plugin advertising the `tab-color` capability; an
+older plugin warns once and opens the tab uncoloured rather than failing.
 
 ## Backends
 
@@ -92,6 +117,41 @@ This matters more than a missing-session error would: `claude --resume <id>` run
 against the wrong config dir doesn't fail, it just can't find that id and opens a
 *fresh* conversation. Carrying the account through is what prevents a restore
 that looks successful and isn't.
+
+Give each account a `color` and which one a tab belongs to becomes visible in the
+tab bar instead of something to remember:
+
+```toml
+[backends.work]
+env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
+env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-work"
+color = "blue"
+```
+
+A preset's `color` applies to every tab launched under it and overrides
+`[defaults] color`; `--color` still wins over both. Because the account is
+inferred from the config dir a session was found in, `cctabs restore` puts those
+tabs back blue after a reboot without anything having to be recorded per tab.
+
+A common pairing is one colour per account plus a catch-all:
+
+```toml
+[defaults]
+color = "orange"          # everything else
+
+[backends.enterprise]
+env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-enterprise"
+color = "blue"            # this account's tabs
+```
+
+Note `[defaults] color` is the right place for the catch-all, not
+`[backends.anthropic]`: a plain `cctabs new foo` resolves to *no* backend at all,
+so a colour on the `anthropic` preset only applies when you pass `-b anthropic`
+explicitly.
+
+A `[backends.<name>]` section **overlays** the builtin preset of that name rather
+than replacing it, so you can add just a `color` to `kimi` or `qwen-cloud` without
+restating its base URL, token and model.
 
 ## Check current config
 

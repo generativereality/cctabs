@@ -175,12 +175,14 @@ cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
+cctabs new <name> [dir] -c <colour>      # new tab, coloured (also -c on resume/fork)
 cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one; picks the session's own account)
 cctabs restore [dir] [--dry]             # resume every empty tab by name search (e.g. after a reboot)
 cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
+cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
 cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
 cctabs scrollback <tab-or-block> [n]    # read terminal output (default: 50 lines)
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
@@ -190,6 +192,26 @@ cctabs import <tarball> [--dry-run] [-f] # restore tabs + sessions from a tarbal
 cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
+
+## Tab colours
+
+`-c/--color` on `new`/`resume`/`fork`, or `cctabs color <tab> <colour>` for a tab
+that already exists. Values: `blue`, `green`, `orange`, `purple`, `red`,
+`yellow`, `none`, or hex (`#0275d8`). Use it when the user asks to colour, tag or
+visually group tabs — e.g. one colour per repo, per PR, or per Claude account.
+
+Set `[defaults] color` in `~/.config/cctabs/config.toml` to colour every new tab,
+or `color` inside a `[backends.<name>]` section to colour one account's tabs.
+Precedence: `--color` → backend preset → `[defaults]`.
+
+Colours survive `cctabs restore` (and therefore a reboot): restore re-applies
+them from the manifest, from the tab being replaced, or from the config rule for
+that session's account. A per-account colour is the recommended setup — it keeps
+holding without anything recorded per tab.
+
+Requires a `tabby-cctabs` plugin that advertises the `tab-color` capability. With
+an older plugin the colour is skipped with a warning and the tab still opens;
+`cctabs color` exits non-zero, since colouring was the whole request.
 
 ## Backends: running Claude Code on Ollama / Kimi / Qwen / local models — or a different Claude account
 
