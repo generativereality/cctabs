@@ -204,6 +204,11 @@ Set `[defaults] color` in `~/.config/cctabs/config.toml` to colour every new tab
 or `color` inside a `[backends.<name>]` section to colour one account's tabs.
 Precedence: `--color` → backend preset → `[defaults]`.
 
+Colours survive `cctabs restore` (and therefore a reboot): restore re-applies
+them from the manifest, from the tab being replaced, or from the config rule for
+that session's account. A per-account colour is the recommended setup — it keeps
+holding without anything recorded per tab.
+
 Requires a `tabby-cctabs` plugin that advertises the `tab-color` capability. With
 an older plugin the colour is skipped with a warning and the tab still opens;
 `cctabs color` exits non-zero, since colouring was the whole request.

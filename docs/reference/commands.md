@@ -206,6 +206,25 @@ capability. Against an older plugin, `cctabs color` warns and exits non-zero
 (colouring was the whole job), while `new`/`resume`/`fork` warn once and open the
 tab anyway.
 
+### Surviving a reboot
+
+Tabby persists a tab's colour across its own restart, but that isn't sufficient:
+[`cctabs restore`](#cctabs-restore) *recreates* a dead tab — closes it and spawns
+a replacement — and a fresh tab starts uncoloured. So colour travels the same
+route `permission_mode` does:
+
+- `cctabs sessions --json` records `color` per tab.
+- `restore --manifest` hands it back.
+- A scan-mode `restore` reads the colour off the tab it is about to replace.
+- An entry with no recorded colour takes whatever the config implies for its
+  backend — `[backends.<name>] color`, else `[defaults] color`. Since the backend
+  is inferred from the Claude config dir the session was found in, a rule like
+  "the enterprise account's tabs are blue" holds after a reboot with nothing
+  recorded per tab at all.
+
+A recorded `null` means "deliberately uncoloured" and is honoured rather than
+treated as missing.
+
 ## cctabs sort
 
 Reorder the tab bar by Claude session activity, most recently active first.

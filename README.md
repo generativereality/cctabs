@@ -236,6 +236,13 @@ values like `#0275d8` work too. The named ones map to the exact hex Tabby's
 right-click → **Color** menu uses, so a cctabs-set colour is indistinguishable
 from a hand-set one, radio button included.
 
+Colours survive a reboot. Tabby persists them across its own restart, but
+`cctabs restore` *recreates* a dead tab rather than reviving it, so `restore`
+re-applies the colour — from the manifest, from the tab it is replacing, or
+failing both from whatever the config implies for that session's account. So
+`[backends.enterprise] color = "blue"` plus `[defaults] color = "orange"` keeps
+holding across restarts without anything recorded per tab.
+
 Colouring needs a `tabby-cctabs` build that advertises the `tab-color`
 capability. Against an older plugin the colour is skipped with one warning and
 the tab still opens — a cosmetic field is never worth failing a spawn over.

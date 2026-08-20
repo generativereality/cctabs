@@ -8,7 +8,7 @@ import { planRestore, type PlannedEntry, type RestoreAction, type RestoreEntry }
 import { DEFAULT_CONFIG_ROOT, type ClaudeConfigDir } from '../core/config-dirs.js'
 import { launchEnvFor } from '../core/backends.js'
 import { pathToProjectSlug } from '../core/session.js'
-import { buildPlanDeps, buildResumeCommand, describeDecision, summarizeDecision } from './restore.js'
+import { buildPlanDeps, buildResumeCommand, colorForEntry, describeDecision, summarizeDecision } from './restore.js'
 
 /**
  * An adapter that answers reads and throws on every mutation.
@@ -320,5 +320,49 @@ describe('buildResumeCommand', () => {
 
   it('omits the flag entirely when no mode was recorded', () => {
     expect(buildResumeCommand(base, '--flag')).not.toContain('--permission-mode')
+  })
+})
+
+describe('colorForEntry', () => {
+  const cfg = (color: string) => ({ claude: { flags: [] }, defaults: { workspace: '', prefix: '', color } })
+  const entry = (over: Partial<PlannedEntry>) =>
+    ({ entry: { name: 'a' }, action: 'spawn', ...over }) as PlannedEntry
+
+  // Stands in for `[backends.enterprise] color = "blue"`.
+  const presets = (name: string) => (name === 'enterprise' ? 'blue' : undefined)
+
+  it('honours a recorded colour over anything in config', () => {
+    // The tab as it actually was, captured from the live tab or a manifest.
+    expect(colorForEntry(entry({ color: '#d9534f', backend: 'enterprise' }), cfg('orange'), presets))
+      .toBe('#d9534f')
+  })
+
+  it('honours a recorded null — a deliberately uncoloured tab is not recoloured', () => {
+    expect(colorForEntry(entry({ color: null }), cfg('orange'))).toBeNull()
+  })
+
+  it("falls back to the backend preset's colour when nothing was recorded", () => {
+    // This is what makes "the enterprise account's tabs are blue" hold after a
+    // reboot even for a manifest written before colours existed: the backend is
+    // inferred from the config dir the session was found in, so the colour
+    // follows it without anything having been recorded.
+    expect(colorForEntry(entry({ backend: 'enterprise' }), cfg('orange'), presets))
+      .toBe('#0275d8')
+  })
+
+  it('falls back to [defaults] color for an entry with no backend', () => {
+    expect(colorForEntry(entry({}), cfg('orange'), presets)).toBe('#f0ad4e')
+  })
+
+  it('falls back to [defaults] color for a preset that names no colour', () => {
+    expect(colorForEntry(entry({ backend: 'kimi' }), cfg('orange'), presets)).toBe('#f0ad4e')
+  })
+
+  it('leaves an uncoloured install alone', () => {
+    expect(colorForEntry(entry({}), cfg(''), presets)).toBeUndefined()
+  })
+
+  it('does not take a restore down over a bad colour in config', () => {
+    expect(colorForEntry(entry({}), cfg('chartreuse'), presets)).toBeUndefined()
   })
 })

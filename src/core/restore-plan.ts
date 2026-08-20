@@ -35,6 +35,18 @@ export interface RestoreEntry extends SessionOrigin {
    */
   permissionMode?: PermissionMode
   /**
+   * Tab colour to restore, as a CSS colour string (or null for "no colour").
+   *
+   * Absent means "not recorded", and the launch falls back to the colour the
+   * config implies for this entry's backend. Present-and-null is different: it
+   * is a tab that was deliberately uncoloured, and stays that way.
+   *
+   * This has to be carried rather than left to Tabby: Tabby does persist a tab's
+   * colour across a restart, but `restore` *recreates* a dead tab — closes it and
+   * spawns a new one — and a fresh tab starts uncoloured.
+   */
+  color?: string | null
+  /**
    * Scan mode only: the existing tab this entry was derived from. A bound entry
    * belongs to that one tab and skips name→tab resolution, which is what lets
    * two empty tabs sharing a name be told apart (one restored, the extra closed)
@@ -87,6 +99,8 @@ export interface PlannedEntry extends SessionOrigin {
   sessionId?: string
   /** Permission mode to relaunch with, when the entry recorded one. */
   permissionMode?: PermissionMode
+  /** Tab colour to restore, when the entry recorded one. See RestoreEntry. */
+  color?: string | null
   /** Directory Claude must be launched from. */
   dir?: string
 }
@@ -310,6 +324,7 @@ export async function planRestore(
         sessionId: session.id,
         dir: session.dir,
         permissionMode: entry.permissionMode,
+        color: entry.color,
         ...originFor(entry, session),
       })
       continue
@@ -323,6 +338,7 @@ export async function planRestore(
         sessionId: session?.id,
         dir: session?.dir ?? entry.dir,
         permissionMode: entry.permissionMode,
+        color: entry.color,
         ...originFor(entry, session),
       })
       continue
@@ -337,6 +353,7 @@ export async function planRestore(
       sessionId: session?.id,
       dir: session?.dir ?? entry.dir,
       permissionMode: entry.permissionMode,
+      color: entry.color,
       ...originFor(entry, session),
     })
   }
