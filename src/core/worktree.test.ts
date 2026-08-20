@@ -3,7 +3,7 @@ import { execFileSync } from 'child_process'
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { setupWorktree } from './worktree.js'
+import { setupWorktree, repoRootOf, isWorktreePath } from './worktree.js'
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-C', cwd, ...args], {
@@ -100,5 +100,37 @@ describe('setupWorktree', () => {
     expect(result.parentHeadSha).toBe(repo.nextHead)
     expect(result.baseSha).toBe(repo.nextHead)
     expect(git(result.worktreePath, 'rev-parse', 'HEAD')).toBe(repo.nextHead)
+  })
+})
+
+describe('repoRootOf', () => {
+  it('maps a worktree path back to its repo root', () => {
+    expect(repoRootOf('/Users/x/Dev/horizon/.claude/worktrees/audit-source'))
+      .toBe('/Users/x/Dev/horizon')
+  })
+
+  it('leaves a plain repo path alone', () => {
+    expect(repoRootOf('/Users/x/Dev/horizon')).toBe('/Users/x/Dev/horizon')
+  })
+
+  it('works on a path whose worktree has already been deleted', () => {
+    // Purely textual on purpose — the callers that need this are running
+    // precisely because the directory is gone.
+    expect(repoRootOf('/nonexistent/repo/.claude/worktrees/gone')).toBe('/nonexistent/repo')
+  })
+
+  it('strips only the first worktree segment', () => {
+    expect(repoRootOf('/r/.claude/worktrees/a/.claude/worktrees/b')).toBe('/r')
+  })
+
+  it('is not fooled by a similarly-named directory', () => {
+    expect(repoRootOf('/Users/x/worktrees/thing')).toBe('/Users/x/worktrees/thing')
+  })
+})
+
+describe('isWorktreePath', () => {
+  it('recognises a cctabs worktree path', () => {
+    expect(isWorktreePath('/r/.claude/worktrees/a')).toBe(true)
+    expect(isWorktreePath('/r/src')).toBe(false)
   })
 })

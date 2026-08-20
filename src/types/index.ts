@@ -15,6 +15,12 @@ export interface Block {
    * pids", so callers must distinguish the two before acting on it.
    */
   pid?: number
+  /**
+   * The tab's header colour as a CSS colour string, or null when it has none.
+   * `undefined` means the backend doesn't report colours at all (see the
+   * `tab-color` capability) — which is not the same as "no colour set".
+   */
+  color?: string | null
 }
 
 export interface WorkspaceData {
@@ -39,6 +45,12 @@ export interface Config {
      * claude.ai remote-control session name). Per-install, empty by default.
      */
     prefix: string
+    /**
+     * Colour applied to every tab minted by `new`/`resume`/`fork` when no
+     * `--color` is passed and the chosen backend preset names no colour of its
+     * own. A palette name or hex value; empty leaves tabs uncoloured.
+     */
+    color: string
   }
 }
 

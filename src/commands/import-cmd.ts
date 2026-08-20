@@ -8,6 +8,12 @@ import { loadConfig } from '../core/config.js'
 import { openSession } from '../core/open-session.js'
 import { pathToProjectSlug } from '../core/session.js'
 import { shellQuoteArg } from '../core/shell.js'
+import { DEFAULT_CONFIG_ROOT } from '../core/config-dirs.js'
+import { launchEnvFor, resolveBackend } from '../core/backends.js'
+import { copyDirRecursive, sidecarDirFor } from '../core/session-copy.js'
+
+/** Must match the export's staged sidecar directory name. */
+const STAGED_SIDECAR = 'sidecar'
 
 interface ExportedTab {
   name: string
@@ -15,6 +21,9 @@ interface ExportedTab {
   sessionId: string
   claudeProjectSlug: string
   workspace?: string
+  /** Preset owning the profile this session came from, when not the default. */
+  backend?: string
+  sidecarFiles?: number
 }
 
 interface ExportMeta {
@@ -35,7 +44,7 @@ export const importCommand = define({
   args: {
     cwd: { type: 'string', short: 'C', description: 'Target working directory. With a single-tab archive, replaces the original cwd. Ignored for multi-tab archives.' },
     workspace: { type: 'string', short: 'w', description: 'Workspace to open the new tab(s) in (defaults to current).' },
-    force: { type: 'boolean', short: 'f', description: 'Overwrite an existing session jsonl in ~/.claude/projects/ if the same session id already exists locally.' },
+    force: { type: 'boolean', short: 'f', description: 'Overwrite an existing session jsonl in the target profile if the same session id already exists locally.' },
     'dry-run': { type: 'boolean', short: 'n', description: 'Report what would happen without copying files or spawning tabs.' },
   },
   async run(ctx) {
@@ -122,10 +131,30 @@ export const importCommand = define({
         continue
       }
 
+      // Put the session back under the account it came from when this machine
+      // has a preset of that name. Importing a second-account session into the
+      // default profile doesn't fail — `claude --resume` just can't find the id
+      // there and silently opens a fresh conversation instead.
+      let targetConfigRoot = DEFAULT_CONFIG_ROOT
+      let targetBackend: string | undefined
+      if (entry.backend) {
+        const spec = resolveBackend(entry.backend)
+        const dir = spec?.env.CLAUDE_CONFIG_DIR
+        if (dir) {
+          targetConfigRoot = expandHome(dir)
+          targetBackend = entry.backend
+        } else {
+          consola.warn(
+            `"${entry.name}" came from backend "${entry.backend}", which isn't defined on this machine — importing into the default profile. Define that preset and re-import if the session belongs to another account.`,
+          )
+        }
+      }
+
       const targetSlug = pathToProjectSlug(targetCwd)
-      const targetProjectDir = join(homedir(), '.claude', 'projects', targetSlug)
+      const targetProjectDir = join(targetConfigRoot, 'projects', targetSlug)
       const targetJsonl = join(targetProjectDir, `${entry.sessionId}.jsonl`)
       const srcJsonl = join(stagedDir, 'session.jsonl')
+      const srcSidecar = join(stagedDir, STAGED_SIDECAR)
 
       if (existsSync(targetJsonl) && !force) {
         results.push({ name: entry.name, status: `already present at ${targetJsonl} (pass --force to overwrite)` })
@@ -133,22 +162,40 @@ export const importCommand = define({
       }
 
       if (dryRun) {
-        results.push({ name: entry.name, status: `dry-run: would copy → ${targetJsonl} and open tab in ${targetCwd}` })
+        const sc = existsSync(srcSidecar) ? ` (+ sidecar)` : ''
+        results.push({ name: entry.name, status: `dry-run: would copy → ${targetJsonl}${sc} and open tab in ${targetCwd}` })
         continue
       }
 
       mkdirSync(targetProjectDir, { recursive: true })
       copyFileSync(srcJsonl, targetJsonl)
 
+      // Restore the sidecar (subagent transcripts, tool results) alongside the
+      // transcript. Archives written before sidecars were bundled simply have
+      // none, so this is a no-op for them.
+      let sidecarRestored = 0
+      if (existsSync(srcSidecar) && statSync(srcSidecar).isDirectory()) {
+        sidecarRestored = copyDirRecursive(srcSidecar, sidecarDirFor(targetJsonl))
+      }
+
       // Spawn the tab
       const config = loadConfig()
       const extraFlags = config.claude.flags.length ? ' ' + config.claude.flags.map(shellQuoteArg).join(' ') : ''
       const claudeCmd = `claude${extraFlags} --resume ${entry.sessionId} --name ${JSON.stringify(entry.name)}`
+      const { env, model } = launchEnvFor(targetBackend, targetBackend ? targetConfigRoot : undefined)
+      const bundled = sidecarRestored ? `, +${sidecarRestored} sidecar files` : ''
       try {
-        await openSession({ tabName: entry.name, dir: targetCwd, claudeCmd, workspaceQuery })
-        results.push({ name: entry.name, status: `imported → ${targetJsonl}, tab opened` })
+        await openSession({
+          tabName: entry.name,
+          dir: targetCwd,
+          claudeCmd,
+          workspaceQuery,
+          envVars: env,
+          modelOverride: model,
+        })
+        results.push({ name: entry.name, status: `imported → ${targetJsonl}${bundled}, tab opened` })
       } catch (err) {
-        results.push({ name: entry.name, status: `jsonl copied but failed to open tab: ${(err as Error).message}` })
+        results.push({ name: entry.name, status: `jsonl copied${bundled} but failed to open tab: ${(err as Error).message}` })
       }
     }
 

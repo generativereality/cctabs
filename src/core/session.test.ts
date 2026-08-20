@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally, findSessionsByName, findSessionFileById, persistSessionTitle, listSessionNames, locateSessionById, expandSessionId } from './session.js'
+import { hasPriorSessions, pathToProjectSlug, resolveTabSession, findSessionsByNameGlobally, findSessionsByName, findSessionFileById, persistSessionTitle, listSessionNames, locateSessionById, expandSessionId } from './session.js'
 import { DEFAULT_CONFIG_ROOT, type ClaudeConfigDir } from './config-dirs.js'
 import { readFileSync } from 'fs'
 
@@ -425,5 +425,42 @@ describe('discovery across Claude config dirs', () => {
     expect(names.map((n) => n.name).sort()).toEqual(['gapminder-one', 'local-one'])
     expect(names.find((n) => n.name === 'gapminder-one')?.backend).toBe('gapminder')
     expect(names.find((n) => n.name === 'local-one')?.backend).toBeUndefined()
+  })
+})
+
+describe('hasPriorSessions', () => {
+  let projectsRoot: string
+  let repo: string
+
+  beforeEach(() => {
+    projectsRoot = mkdtempSync(join(tmpdir(), 'cctabs-projects-'))
+    repo = mkdtempSync(join(tmpdir(), 'cctabs-repo-'))
+  })
+
+  afterEach(() => {
+    rmSync(projectsRoot, { recursive: true, force: true })
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  const scope = () => [{ root: join(projectsRoot, '..'), projectsRoot, backend: undefined }]
+
+  it('is true when the directory already holds a transcript', () => {
+    // This is the whole basis for auto-confirming the trust dialog: the user
+    // already worked here, so we are re-affirming their decision, not making it.
+    const dir = join(projectsRoot, pathToProjectSlug(repo))
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'aaaaaaaa-1111-2222-3333-444444444444.jsonl'), '{}\n')
+    expect(hasPriorSessions(repo, scope())).toBe(true)
+  })
+
+  it('is false for a directory Claude has never opened', () => {
+    // The dialog is doing its job here — leave it for the human.
+    expect(hasPriorSessions(repo, scope())).toBe(false)
+  })
+
+  it('is false when the project dir exists but holds no transcript', () => {
+    // An empty project dir is not evidence of a prior session.
+    mkdirSync(join(projectsRoot, pathToProjectSlug(repo)), { recursive: true })
+    expect(hasPriorSessions(repo, scope())).toBe(false)
   })
 })

@@ -23,6 +23,13 @@ export interface BackendSpec {
   model: string
   /** Human-friendly description shown in error messages */
   description?: string
+  /**
+   * Tab colour for sessions launched under this preset — a palette name or hex
+   * value, as accepted by `--color`. This is what makes one account's tabs
+   * visually distinct from another's when a fleet spans several Claude
+   * profiles. Builtin presets set none; `[backends.<name>] color` supplies it.
+   */
+  color?: string
 }
 
 const OLLAMA_LOCAL = 'http://localhost:11434'
@@ -113,6 +120,17 @@ const BUILTIN_BACKENDS: Record<string, BackendSpec> = {
 }
 
 /**
+ * A `[backends.<name>]` section as written, with unset fields left undefined so
+ * they can fall back to a builtin of the same name rather than blanking it.
+ */
+interface CustomBackendSection {
+  env: Record<string, string>
+  model?: string
+  description?: string
+  color?: string
+}
+
+/**
  * Parse a `[backends.<name>]` section from the config TOML. Each section can
  * override env vars and/or model. Format:
  *
@@ -120,6 +138,7 @@ const BUILTIN_BACKENDS: Record<string, BackendSpec> = {
  *   model = "qwen3-coder-next:cloud"
  *   base_url = "http://localhost:11434"
  *   auth_token = "ollama"          # optional, defaults to "ollama" if base_url is set
+ *   color = "blue"                 # optional, tab colour for this preset's tabs
  *
  * Or for full control:
  *
@@ -128,7 +147,7 @@ const BUILTIN_BACKENDS: Record<string, BackendSpec> = {
  *   env_ANTHROPIC_BASE_URL = "..."
  *   env_ANTHROPIC_AUTH_TOKEN = "..."
  */
-function loadCustomBackends(): Record<string, BackendSpec> {
+function loadCustomBackends(): Record<string, CustomBackendSection> {
   if (!existsSync(CONFIG_PATH)) return {}
 
   const text = readFileSync(CONFIG_PATH, 'utf-8')
@@ -153,7 +172,7 @@ function loadCustomBackends(): Record<string, BackendSpec> {
     }
   }
 
-  const result: Record<string, BackendSpec> = {}
+  const result: Record<string, CustomBackendSection> = {}
   for (const [section, kv] of Object.entries(sections)) {
     if (!section.startsWith('backends.')) continue
     const name = section.slice('backends.'.length)
@@ -178,16 +197,49 @@ function loadCustomBackends(): Record<string, BackendSpec> {
       if (k.startsWith('env_')) env[k.slice(4)] = v
     }
 
-    result[name] = { env, model, description: kv.description ?? `User-defined preset (${CONFIG_PATH})` }
+    result[name] = {
+      env,
+      model: model || undefined,
+      description: kv.description || undefined,
+      color: kv.color || undefined,
+    }
   }
 
   return result
 }
 
+/**
+ * Overlay a config section onto the builtin preset of the same name.
+ *
+ * A *merge*, not a replace, and the difference is not cosmetic: the sections are
+ * how a preset gets a `color`, so "add one key to `[backends.kimi]`" is a
+ * natural thing to write — and a replace would silently drop that preset's
+ * ANTHROPIC_BASE_URL, auth token and model along the way, leaving a preset that
+ * looks configured and quietly talks to the default API instead. Unset fields
+ * fall through to the builtin; `env` is merged key-by-key so a section can
+ * override one variable without restating the rest.
+ */
+function mergeBackendSpec(name: string, custom?: CustomBackendSection): BackendSpec | null {
+  const builtin = BUILTIN_BACKENDS[name]
+  if (!custom) return builtin ?? null
+  const base: BackendSpec = builtin ?? {
+    env: {},
+    model: '',
+    description: `User-defined preset (${CONFIG_PATH})`,
+  }
+  return {
+    env: { ...base.env, ...custom.env },
+    model: custom.model || base.model,
+    description: custom.description ?? base.description,
+    color: custom.color ?? base.color,
+  }
+}
+
 export function resolveBackend(name: string): BackendSpec | null {
   if (!name) return null
   const custom = loadCustomBackends()
-  return custom[name] ?? BUILTIN_BACKENDS[name] ?? null
+  if (!custom[name] && !BUILTIN_BACKENDS[name]) return null
+  return mergeBackendSpec(name, custom[name])
 }
 
 export function listBackends(): { name: string; description: string }[] {
@@ -205,8 +257,18 @@ export function listBackends(): { name: string; description: string }[] {
  * location simply cannot see them.
  */
 export function listBackendSpecs(): Array<{ name: string; spec: BackendSpec }> {
-  const merged = { ...BUILTIN_BACKENDS, ...loadCustomBackends() }
-  return Object.entries(merged).map(([name, spec]) => ({ name, spec }))
+  const custom = loadCustomBackends()
+  // Builtins first, then user-defined ones, matching the previous key order.
+  const names = [...Object.keys(BUILTIN_BACKENDS), ...Object.keys(custom)]
+  const seen = new Set<string>()
+  const out: Array<{ name: string; spec: BackendSpec }> = []
+  for (const name of names) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    const spec = mergeBackendSpec(name, custom[name])
+    if (spec) out.push({ name, spec })
+  }
+  return out
 }
 
 /**

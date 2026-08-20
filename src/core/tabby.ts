@@ -120,7 +120,13 @@ export class TabbyAdapter implements TerminalAdapter {
     )
     if (out.status !== 0 || !out.stdout) return []
     let parsed: {
-      tabs: Array<{ uuid: string; type: string; cwd?: string | null; pid?: number }>
+      tabs: Array<{
+        uuid: string
+        type: string
+        cwd?: string | null
+        pid?: number
+        color?: string | null
+      }>
     }
     try {
       parsed = JSON.parse(out.stdout)
@@ -138,6 +144,9 @@ export class TabbyAdapter implements TerminalAdapter {
         // that Tabby never focused has no pty and therefore no pid — which is
         // the genuine "no live shell" case that scrollback only ever guessed at.
         pid: typeof t.pid === 'number' ? t.pid : undefined,
+        // Only plugins advertising `tab-color` report this. Left undefined
+        // otherwise, which reads as "unknown" rather than "no colour set".
+        color: t.color,
       }))
   }
 
@@ -223,6 +232,7 @@ export class TabbyAdapter implements TerminalAdapter {
     command: string
     args: string[]
     afterActive?: boolean
+    color?: string | null
   }): Promise<{ blockId: string; tabId: string }> {
     this.ensureHealthy()
     const r = (await this.http('POST', '/api/tabs/new', {
@@ -231,6 +241,9 @@ export class TabbyAdapter implements TerminalAdapter {
       command: opts.command,
       args: opts.args,
       afterActive: opts.afterActive ?? false,
+      // Omitted entirely when no colour was asked for, so an older plugin sees
+      // exactly the body it saw before.
+      ...(opts.color !== undefined ? { color: opts.color } : {}),
     })) as { uuid?: string } | null
     const uuid = r?.uuid
     if (!uuid) throw new Error('Tabby plugin did not return a tab uuid')
@@ -253,6 +266,16 @@ export class TabbyAdapter implements TerminalAdapter {
       this.cachedCapabilities = []
       return []
     }
+  }
+
+  /**
+   * Mirrors renameTab: a PUT on one field of an existing tab. Guarded by the
+   * `tab-color` capability at the call site — this route 404s on a plugin that
+   * predates it, and `http()` turns that into a throw.
+   */
+  async setTabColor(tabId: string, color: string | null): Promise<void> {
+    this.ensureHealthy()
+    await this.http('PUT', `/api/tabs/${tabId}/color`, { color })
   }
 
   async reorderTabs(order: string[]): Promise<void> {

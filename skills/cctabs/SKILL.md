@@ -175,21 +175,64 @@ cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
+cctabs new <name> [dir] -c <colour>      # new tab, coloured (also -c on resume/fork)
 cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one; picks the session's own account)
 cctabs restore [dir] [--dry]             # resume every empty tab by name search (e.g. after a reboot)
 cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
+cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
 cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
 cctabs scrollback <tab-or-block> [n]    # read terminal output (default: 50 lines)
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball
 cctabs export --all [-w workspace]       # bundle every tab in a workspace
 cctabs import <tarball> [--dry-run] [-f] # restore tabs + sessions from a tarball
+cctabs profile-copy <tab|session-id> --to <preset> [-n name] [--move] [--dry]  # copy/move a session into another Claude account
 cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
+
+## Tab colours
+
+`-c/--color` on `new`/`resume`/`fork`, or `cctabs color <tab> <colour>` for a tab
+that already exists. Values: `blue`, `green`, `orange`, `purple`, `red`,
+`yellow`, `none`, or hex (`#0275d8`). Use it when the user asks to colour, tag or
+visually group tabs — e.g. one colour per repo, per PR, or per Claude account.
+
+Set `[defaults] color` in `~/.config/cctabs/config.toml` to colour every new tab,
+or `color` inside a `[backends.<name>]` section to colour one account's tabs.
+Precedence: `--color` → backend preset → `[defaults]`.
+
+Colours survive `cctabs restore` (and therefore a reboot): restore re-applies
+them from the manifest, from the tab being replaced, or from the config rule for
+that session's account. A per-account colour is the recommended setup — it keeps
+holding without anything recorded per tab.
+
+Requires a `tabby-cctabs` plugin that advertises the `tab-color` capability. With
+an older plugin the colour is skipped with a warning and the tab still opens;
+`cctabs color` exits non-zero, since colouring was the whole request.
+## Moving a session between Claude accounts
+
+`cctabs profile-copy <tab> --to <preset>` when the user wants a session that lives
+under one Claude account reopened under another (e.g. personal → enterprise).
+`CLAUDE_CONFIG_DIR` isolates transcripts per account, so the session is otherwise
+invisible from the other side.
+
+- Default is a **copy** — the source keeps running and the two diverge cleanly,
+  like `--fork-session`.
+- `--move` removes the source, but **refuses while the source is still running**.
+  Add `--close-source` to close the tab, wait for its process to genuinely exit,
+  and then move. Never work around this by hand: a `mv` is a rename, so the live
+  `claude` keeps writing to the moved file and both tabs interleave into one
+  unusable transcript.
+- Always run `--dry` first when unsure — it reports the target path, the sidecar
+  file count, and any relocation, without touching anything.
+- The copy carries the session's **sidecar** (`subagents/`, `tool-results/`).
+  Never hand-copy just the `.jsonl`; that silently discards all subagent history.
+- The new tab is named `<source>-<preset>` by default so prefix matching stays
+  unambiguous while the source is still open. `-n` overrides.
 
 ## Backends: running Claude Code on Ollama / Kimi / Qwen / local models — or a different Claude account
 

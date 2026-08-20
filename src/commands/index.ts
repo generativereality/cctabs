@@ -7,6 +7,7 @@ import { resumeCommand } from './resume.js'
 import { forkCommand } from './fork.js'
 import { closeCommand } from './close.js'
 import { renameCommand } from './rename.js'
+import { colorCommand } from './color.js'
 import { scrollbackCommand } from './scrollback.js'
 import { sendCommand } from './send.js'
 import { configCommand } from './config-cmd.js'
@@ -16,6 +17,7 @@ import { doctorCommand } from './doctor.js'
 import { installTabbyPluginCommand } from './install-tabby-plugin.js'
 import { exportCommand } from './export-cmd.js'
 import { importCommand } from './import-cmd.js'
+import { profileCopyCommand } from './profile-copy.js'
 import { sortCommand } from './sort.js'
 
 // Default command: show sessions (most common use)
@@ -37,6 +39,7 @@ const subCommands = new Map([
   ['fork', forkCommand],
   ['close', closeCommand],
   ['rename', renameCommand],
+  ['color', colorCommand],
   ['scrollback', scrollbackCommand],
   ['send', sendCommand],
   ['config', configCommand],
@@ -46,6 +49,7 @@ const subCommands = new Map([
   ['install-tabby-plugin', installTabbyPluginCommand],
   ['export', exportCommand],
   ['import', importCommand],
+  ['profile-copy', profileCopyCommand],
   ['sort', sortCommand],
 ])
 

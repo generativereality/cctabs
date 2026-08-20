@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { classifyTerminalBuffer, parsePermissionMode, toLaunchableMode } from './session-status.js'
+import {
+  autoModeDialogVisible,
+  classifyTerminalBuffer,
+  parsePermissionMode,
+  toLaunchableMode,
+  trustDialogVisible,
+} from './session-status.js'
 
 /**
  * Fixtures are trimmed captures from a real 59-tab fleet, taken through the
@@ -155,5 +161,70 @@ describe('toLaunchableMode', () => {
     for (const v of ['dontAsk', 'PLAN', '', undefined, null, 7, {}]) {
       expect(toLaunchableMode(v)).toBeUndefined()
     }
+  })
+})
+
+/**
+ * Verbatim captures of the two dialogs that stranded 10 tabs of a 65-tab
+ * restore, taken through the plugin's buffer endpoint — spaces dropped between
+ * adjacent glyphs exactly as it delivers them.
+ */
+const TRUST_DIALOG = `
+──────────────────────────────────────────
+Accessingworkspace:
+/Users/motin/Dev/Projects/generativereality/cctabs
+Quicksafetycheck:Isthisaprojectyoucreatedoroneyoutrust?(Likeyourowncode,awell-knownopensourceproject,orworkfromyourteam).Ifnot,takeamomenttoreview
+what'sinthisfolderfirst.
+ClaudeCode'llbeabletoread,edit,andexecutefileshere.
+Securityguide
+❯1.Yes,Itrustthisfolder
+2.No,exit
+Entertoconfirm·Esctocancel
+`
+
+const AUTO_MODE_DIALOG = `
+Setupautomodeforyourenvironment?
+Automodelets Claudeactwithoutaskingfirst.Tellingitwhichreposyoutrustandwhatdataissensitivegivesitclearerguardrailsonwhat'ssafetorun.
+❯1.Setitup
+2.Notnow
+3.Don'tshowagain
+Entertoconfirm·Esctocancel
+`
+
+const LIVE_FOOTER = `
+~/RememberThis|Opus5(1Mcontext)|ctx:56%
+⏵⏵automodeon (shift+tabtocycle)·←foragents
+`
+
+describe('trustDialogVisible', () => {
+  it('sees the dialog that stranded 8 tabs of a real restore', () => {
+    expect(trustDialogVisible(TRUST_DIALOG)).toBe(true)
+  })
+
+  it('is not fooled by a live session, whose footer also says "auto mode"', () => {
+    expect(trustDialogVisible(LIVE_FOOTER)).toBe(false)
+    expect(trustDialogVisible('')).toBe(false)
+  })
+
+  it('does not confuse the two dialogs', () => {
+    expect(trustDialogVisible(AUTO_MODE_DIALOG)).toBe(false)
+  })
+})
+
+describe('autoModeDialogVisible', () => {
+  it('sees the dialog whose DEFAULT option is the wrong one', () => {
+    expect(autoModeDialogVisible(AUTO_MODE_DIALOG)).toBe(true)
+  })
+
+  it('matches on the options alone, since the prose wraps at terminal width', () => {
+    expect(autoModeDialogVisible('❯1.Setitup\n2.Notnow\n3.Don\'tshowagain')).toBe(true)
+  })
+
+  it('does not fire on a live session or on the trust dialog', () => {
+    // "auto mode on" in the footer must never read as the setup dialog — that
+    // would send a stray ↓+Enter into a working session's input box.
+    expect(autoModeDialogVisible(LIVE_FOOTER)).toBe(false)
+    expect(autoModeDialogVisible(TRUST_DIALOG)).toBe(false)
+    expect(autoModeDialogVisible('')).toBe(false)
   })
 })

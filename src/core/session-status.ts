@@ -100,6 +100,52 @@ const hasMarker = (haystack: string, marker: string) =>
   haystack.includes(stripWhitespace(marker))
 
 /**
+ * Claude's startup dialogs, which block a tab until answered.
+ *
+ * Both appear *after* the process starts and *before* the session is usable, so
+ * a tab sitting on one looks successfully launched from the outside — `restore`
+ * reports it spawned, the process is alive, and the conversation never loads.
+ * On a 65-tab restore this stranded 10 tabs, and the only symptom that surfaced
+ * was an unreadable permission mode (a blocked tab never paints a footer).
+ *
+ * Detection is deliberately on the *option text* rather than the prose. The
+ * prose is long, wraps at the terminal width, and Tabby's buffer drops spaces
+ * between glyphs — the options are short, stable, and unique to each dialog.
+ */
+
+/**
+ * "Quick safety check: Is this a project you created or one you trust?"
+ *   ❯ 1. Yes, I trust this folder
+ *     2. No, exit
+ *
+ * Enter takes the default (option 1), so answering it needs no navigation.
+ */
+export function trustDialogVisible(buffer: string): boolean {
+  const c = stripWhitespace(buffer)
+  return /Yes,?Itrustthisfolder/i.test(c)
+}
+
+/**
+ * "Set up auto mode for your environment?"
+ *   ❯ 1. Set it up
+ *     2. Not now
+ *     3. Don't show again
+ *
+ * Unlike the trust dialog, the default here is the one we do NOT want: a bare
+ * Enter starts an interactive setup that explores the repo and proposes
+ * settings, which is not something a restore should trigger on the user's
+ * behalf across a whole fleet. Answering it requires ↓ once, then Enter.
+ *
+ * Option 3 is off limits for the same reason as the resume picker's — it
+ * permanently suppresses a prompt the user may want later, and that is the
+ * user's call to make, not ours.
+ */
+export function autoModeDialogVisible(buffer: string): boolean {
+  const c = stripWhitespace(buffer)
+  return /Setupautomodeforyourenvironment/i.test(c) || (/1\.Setitup/i.test(c) && /2\.Notnow/i.test(c))
+}
+
+/**
  * Classify a tab from the text of its captured output.
  *
  * Order is load-bearing:
