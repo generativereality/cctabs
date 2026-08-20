@@ -1,13 +1,13 @@
 ---
 name: cctabs
 description: |
-  Manage Claude Code sessions across terminal tabs (Tabby) — list, open, fork, close, inspect output, send input. Each terminal tab runs its own Claude Code session.
+  cctab / cctabs / terminal tabs — open, list, fork, close, watch and drive Claude Code sessions that each run in their own real Tabby terminal tab. The CLI is `cctabs` (also installed as `cctab`).
 
-  TRIGGER when the user says any of: "open a tab", "open a new tab", "open a tab with prompt …", "open a tab and <do X>", "open a tab that <does X>", "open a new cctab" (singular alias), "spawn a tab", "a new cctabs session", "in another tab", "in a separate tab", "fork this tab", "list my tabs", "close that tab", "send to <tab>", "resume <name>" — anything that refers to a terminal tab running Claude Code. ALSO trigger for: "/cctabs", or when the user mentions Tabby tab management for Claude Code.
+  The word "tab" is DECISIVE, and a subagent is NOT a tab. If the user says "tab" / "cctab" / "cctabs" — even paired with a task, and even when that task sounds like background or parallel work (e.g. "open a tab and fix Y asap") — they mean a real terminal tab running its own Claude Code session: CALL THIS SKILL, never the Agent tool. Most common use: "open a tab with prompt <task>" maps directly to `cctabs new <name> [dir] --prompt "<task>"`. A subagent's output is invisible in the terminal and it cannot be attached to, resumed, watched or driven. Use the Agent tool ONLY when the user explicitly says "subagent", "background agent", or "in parallel without a new tab".
 
-  The word "tab" is DECISIVE. If the user says "tab" / "cctab" / "cctabs" — even paired with a task, and even when that task sounds like background or parallel work (e.g. "open a tab with prompt 'do X asap'", "open a tab and fix Y") — they mean a real terminal tab running its own Claude Code session: CALL THIS SKILL, not the Agent tool. Handing a task to a fresh tab is the single most common use: "open a tab with prompt <task>" maps directly to `cctabs new <name> [dir] --prompt "<task>"`. A background/fork subagent (the Agent tool) is NOT a tab and must never be substituted when the user said "tab" — its output is invisible in the terminal and it cannot be attached to, resumed, watched, or driven as a session. Use the Agent tool ONLY when the user explicitly says "subagent", "background agent", "spawn an agent", "do this in parallel without a new tab", or when the work is tightly interconnected with the current session's filesystem state and must share it.
+  TRIGGER when the user says any of: "open a tab", "open a new tab", "open a tab with prompt …", "open a tab and <do X>", "open a tab that <does X>", "open a new cctab" (singular alias), "spawn a tab", "a new cctabs session", "in another tab", "in a separate tab", "fork this tab", "list my tabs", "close that tab", "send to <tab>", "resume <name>" — anything that refers to a terminal tab running Claude Code. ALSO trigger for: "/cctabs", or Tabby tab management for Claude Code.
 
-  NOT for: browser tabs (use playwright/browser-automation), tmux panes, screen sessions, or non-Claude terminals.
+  NOT for: browser tabs (use browser-automation), tmux panes, or screen sessions.
 ---
 
 You are managing Claude Code sessions using the `cctabs` CLI.
