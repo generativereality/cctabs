@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process'
 import { existsSync } from 'fs'
 import { homedir } from 'os'
-import { join, resolve } from 'path'
+import { join, resolve, sep } from 'path'
 
 export interface WorktreeSetup {
   /** Absolute path of the worktree (`<dir>/.claude/worktrees/<name>`). */
@@ -20,6 +20,27 @@ export interface WorktreeSetup {
 
 function runGit(cwd: string, args: string[]): string {
   return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+}
+
+/** Path segment every cctabs-managed worktree lives under. */
+export const WORKTREE_SEGMENT = join('.claude', 'worktrees')
+
+/**
+ * The repo root a directory belongs to: `<repo>/.claude/worktrees/<name>` maps
+ * back to `<repo>`, and anything else is returned unchanged.
+ *
+ * Purely textual on purpose — it has to keep working after the worktree
+ * directory itself has been deleted, which is exactly when callers need it.
+ */
+export function repoRootOf(dir: string): string {
+  const marker = `${sep}${WORKTREE_SEGMENT}${sep}`
+  const idx = dir.indexOf(marker)
+  return idx === -1 ? dir : dir.slice(0, idx)
+}
+
+/** True when `dir` is a path inside `.claude/worktrees/`. */
+export function isWorktreePath(dir: string): boolean {
+  return dir.includes(`${sep}${WORKTREE_SEGMENT}${sep}`)
 }
 
 /**

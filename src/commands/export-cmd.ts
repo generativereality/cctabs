@@ -2,11 +2,16 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
-import { tmpdir, homedir, hostname } from 'os'
+import { tmpdir, hostname } from 'os'
 import { execFileSync } from 'child_process'
 import { requireAdapter } from '../core/adapter.js'
-import { findSessionsByName, pathToProjectSlug } from '../core/session.js'
+import { findSessionsByName, findSessionFileById, pathToProjectSlug } from '../core/session.js'
+import { DEFAULT_CONFIG_ROOT } from '../core/config-dirs.js'
+import { copyDirRecursive, sidecarDirFor } from '../core/session-copy.js'
 import pkg from '../../package.json'
+
+/** The sidecar's staged name inside a tab dir. Read back by `cctabs import`. */
+const STAGED_SIDECAR = 'sidecar'
 
 interface ExportedTab {
   name: string
@@ -14,6 +19,16 @@ interface ExportedTab {
   sessionId: string
   claudeProjectSlug: string
   workspace?: string
+  /**
+   * Backend preset owning the Claude config dir this session was found in.
+   * Absent for the default profile. `cctabs import` uses it to put the session
+   * back under the same account when a preset of that name exists locally —
+   * without it, a second-account session imports into the default profile and
+   * `--resume` silently opens a fresh conversation instead.
+   */
+  backend?: string
+  /** Number of sidecar files bundled (subagent transcripts, tool results). */
+  sidecarFiles?: number
 }
 
 interface ExportMeta {
@@ -110,27 +125,52 @@ export const exportCommand = define({
       // Claude project slug is different, so fall back to scanning worktrees.
       let sessionId: string | undefined
       let effectiveCwd = cwd
+      // Which Claude config dir the session lives in. A session belonging to a
+      // second account is NOT under ~/.claude, and assuming it was is how
+      // export came to skip those tabs entirely.
+      let sourceConfigRoot = DEFAULT_CONFIG_ROOT
+      let sourceBackend: string | undefined
       try {
         const matches = findSessionsByName(cwd, tabName)
-        if (matches.length) sessionId = matches[0].id
+        if (matches.length) {
+          sessionId = matches[0].id
+          sourceConfigRoot = matches[0].configDir ?? DEFAULT_CONFIG_ROOT
+          sourceBackend = matches[0].backend
+        }
       } catch { /* best-effort */ }
       if (!sessionId) {
         const worktreesDir = join(cwd, '.claude', 'worktrees')
         if (existsSync(worktreesDir)) {
           try {
-            const candidates: Array<{ id: string; mtime: number; path: string }> = []
+            const candidates: Array<{
+              id: string
+              mtime: number
+              path: string
+              configDir?: string
+              backend?: string
+            }> = []
             for (const entry of readdirSync(worktreesDir)) {
               const wtPath = join(worktreesDir, entry)
               if (!statSync(wtPath).isDirectory()) continue
               try {
                 const matches = findSessionsByName(wtPath, tabName)
-                if (matches.length) candidates.push({ id: matches[0].id, mtime: matches[0].mtime, path: wtPath })
+                if (matches.length) {
+                  candidates.push({
+                    id: matches[0].id,
+                    mtime: matches[0].mtime,
+                    path: wtPath,
+                    configDir: matches[0].configDir,
+                    backend: matches[0].backend,
+                  })
+                }
               } catch { /* keep scanning */ }
             }
             if (candidates.length) {
               candidates.sort((a, b) => b.mtime - a.mtime)
               sessionId = candidates[0].id
               effectiveCwd = candidates[0].path
+              sourceConfigRoot = candidates[0].configDir ?? DEFAULT_CONFIG_ROOT
+              sourceBackend = candidates[0].backend
             }
           } catch { /* worktrees dir unreadable */ }
         }
@@ -138,13 +178,39 @@ export const exportCommand = define({
       if (!sessionId) { skipped.push({ name: tabName, reason: 'no Claude session found for this tab name + cwd' }); continue }
 
       const slug = pathToProjectSlug(effectiveCwd)
-      const jsonlPath = join(homedir(), '.claude', 'projects', slug, `${sessionId}.jsonl`)
-      if (!existsSync(jsonlPath)) { skipped.push({ name: tabName, reason: `session file missing: ${jsonlPath}` }); continue }
+      const jsonlPath = findSessionFileById(sessionId, [effectiveCwd, cwd], [
+        { root: sourceConfigRoot, projectsRoot: join(sourceConfigRoot, 'projects') },
+      ])
+      if (!jsonlPath) {
+        skipped.push({
+          name: tabName,
+          reason: `session file missing under ${join(sourceConfigRoot, 'projects')}/${slug}/`,
+        })
+        continue
+      }
 
       const tabDir = join(tabsRoot, safeDirName(tabName))
       mkdirSync(tabDir, { recursive: true })
       copyFileSync(jsonlPath, join(tabDir, 'session.jsonl'))
-      const manifest = { name: tabName, cwd: effectiveCwd, sessionId, claudeProjectSlug: slug, workspace: wsName }
+
+      // The sidecar holds this session's subagent transcripts and tool results
+      // — one real session had 357 files in it. Bundling only the .jsonl
+      // produces an import that resumes and has forgotten every subagent.
+      let sidecarFiles = 0
+      const sidecar = sidecarDirFor(jsonlPath)
+      if (existsSync(sidecar) && statSync(sidecar).isDirectory()) {
+        sidecarFiles = copyDirRecursive(sidecar, join(tabDir, STAGED_SIDECAR))
+      }
+
+      const manifest = {
+        name: tabName,
+        cwd: effectiveCwd,
+        sessionId,
+        claudeProjectSlug: slug,
+        workspace: wsName,
+        ...(sourceBackend ? { backend: sourceBackend } : {}),
+        ...(sidecarFiles ? { sidecarFiles } : {}),
+      }
       writeFileSync(join(tabDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
 
       exported.push({ ...manifest })
@@ -182,7 +248,13 @@ export const exportCommand = define({
     rmSync(stageRoot, { recursive: true, force: true })
 
     consola.success(`Exported ${exported.length} tab${exported.length === 1 ? '' : 's'} → ${resolvedOut}`)
-    for (const t of exported) consola.log(`  ✓ ${t.name}  (${t.sessionId.slice(0, 8)}…)  ${t.cwd}`)
+    for (const t of exported) {
+      const extras = [
+        t.sidecarFiles ? `+${t.sidecarFiles} sidecar files` : null,
+        t.backend ? `backend: ${t.backend}` : null,
+      ].filter(Boolean).join(', ')
+      consola.log(`  ✓ ${t.name}  (${t.sessionId.slice(0, 8)}…)  ${t.cwd}${extras ? `  [${extras}]` : ''}`)
+    }
     if (skipped.length) {
       consola.warn(`Skipped ${skipped.length}:`)
       for (const s of skipped) consola.log(`  - ${s.name}: ${s.reason}`)

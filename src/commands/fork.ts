@@ -1,23 +1,12 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { join } from 'path'
 import { requireAdapter } from '../core/adapter.js'
 import { findLatestSessionId, pathToProjectSlug } from '../core/session.js'
 import { openSession } from '../core/open-session.js'
 import { loadConfig, applyPrefix } from '../core/config.js'
+import { repoRootOf } from '../core/worktree.js'
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
-
-/** If dir is inside .claude/worktrees/<name>, return the repo root instead */
-function resolveSessionDir(dir: string): { sessionLookupDir: string; openDir: string } {
-  const worktreeMarker = `${join('.claude', 'worktrees')}` + '/'
-  const idx = dir.indexOf(worktreeMarker)
-  if (idx !== -1) {
-    const repoRoot = dir.slice(0, idx - 1)
-    return { sessionLookupDir: repoRoot, openDir: repoRoot }
-  }
-  return { sessionLookupDir: dir, openDir: dir }
-}
 
 export const forkCommand = define({
   name: 'fork',
@@ -79,8 +68,12 @@ export const forkCommand = define({
     const termBlocks = (tabsById.get(tabId) ?? []).filter((b) => b.view === 'term')
     if (!termBlocks.length) { consola.error(`Tab "${tabName}" has no terminal block`); process.exit(1) }
 
+    // A worktree tab's session lives under the repo root for lookup purposes,
+    // and that's also where the fork should open. Shared with `profile-copy`,
+    // which needs the same mapping when a worktree has been deleted.
     const rawDir = termBlocks[0].meta?.['cmd:cwd'] ?? process.cwd()
-    const { sessionLookupDir, openDir } = resolveSessionDir(rawDir)
+    const sessionLookupDir = repoRootOf(rawDir)
+    const openDir = sessionLookupDir
 
     const sessionId = findLatestSessionId(sessionLookupDir)
     if (!sessionId) {
