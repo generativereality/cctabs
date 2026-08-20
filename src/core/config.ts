@@ -7,7 +7,7 @@ export const CONFIG_PATH = join(homedir(), '.config', 'cctabs', 'config.toml')
 
 const DEFAULT_CONFIG: Config = {
   claude: { flags: ['--allow-dangerously-skip-permissions'] },
-  defaults: { workspace: '', prefix: '' },
+  defaults: { workspace: '', prefix: '', color: '' },
 }
 
 const DEFAULT_CONFIG_FILE = `# cctabs configuration
@@ -27,6 +27,12 @@ flags = ["--allow-dangerously-skip-permissions"]
 # disambiguate this machine's sessions when several machines share one
 # remote-control list, e.g. "mbp18-". Empty (no prefix) by default.
 # prefix = ""
+
+# Colour for every tab opened by \`new\`/\`resume\`/\`fork\`. One of blue, green,
+# orange, purple, red, yellow, none — or a hex value like "#0275d8". A
+# \`[backends.<name>] color\` overrides this for tabs launched under that preset,
+# and \`--color\` overrides both. Empty (uncoloured) by default.
+# color = ""
 `
 
 function parseToml(text: string): Partial<Record<string, Record<string, unknown>>> {

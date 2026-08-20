@@ -11,7 +11,7 @@ import { bufferLines } from './buffer'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
-const PLUGIN_VERSION = '0.1.4'
+const PLUGIN_VERSION = '0.1.5'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
@@ -22,8 +22,14 @@ const PLUGIN_VERSION = '0.1.4'
  * does not answer until the new tab's PTY has actually spawned. Callers may
  * fire creates in parallel only when this is present; without it they must
  * create tabs one at a time with a settle gap. See openNewTab().
+ *
+ * `tab-color` — tabs report their `color` on GET /api/tabs, POST /api/tabs/new
+ * accepts an optional `color`, and PUT /api/tabs/:uuid/color sets it. Callers
+ * must probe for this rather than just sending a colour: a plugin predating it
+ * ignores the unknown field silently, which is indistinguishable from a colour
+ * that was accepted and then didn't render.
  */
-const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty']
+const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color']
 
 function sleep (ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -48,6 +54,7 @@ interface TabInfo {
   type: string
   cwd?: string | null
   pid?: number
+  color?: string | null
 }
 
 /** Body parser — collects request body up to a small cap. */
@@ -71,6 +78,30 @@ function readJsonBody (req: IncomingMessage, cap = 1_000_000): Promise<any> {
     })
     req.on('error', reject)
   })
+}
+
+/**
+ * Normalise a requested tab colour to what `BaseTabComponent.color` wants: a
+ * CSS colour string, or null to clear it.
+ *
+ * Tabby applies the value straight to a `[style.background-color]` binding, so
+ * anything CSS doesn't understand simply fails to render — silently, which is
+ * the one outcome a caller can't diagnose. We therefore accept only the two
+ * shapes a caller can reasonably mean (a hex literal, or a bare CSS colour
+ * keyword) and reject the rest with a 400. The cctabs CLI validates more
+ * strictly still, against Tabby's own palette; this is the backstop for
+ * anything else talking to the API.
+ *
+ * Returns `undefined` for input that isn't a valid colour.
+ */
+function parseTabColor (value: unknown): string | null | undefined {
+  if (value === null) return null
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.toLowerCase() === 'none') return null
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(trimmed)) return trimmed
+  if (/^[a-z]+$/i.test(trimmed)) return trimmed
+  return undefined
 }
 
 function sendJson (res: ServerResponse, status: number, body: unknown): void {
@@ -209,6 +240,21 @@ export class CctabsServer {
       return sendJson(res, 200, {})
     }
 
+    if (method === 'PUT' && sub === 'color') {
+      const body = await readJsonBody(req)
+      const color = parseTabColor(body?.color)
+      if (color === undefined) {
+        return sendJson(res, 400, {
+          error: `invalid color ${JSON.stringify(body?.color)} — expected a hex literal (#rgb/#rrggbb/#rrggbbaa), a CSS colour keyword, or null to clear`,
+        })
+      }
+      // Exactly what Tabby's own right-click → Color menu does, so a colour set
+      // through the API is indistinguishable from a hand-set one (including the
+      // menu's radio state, which compares against the palette's hex values).
+      tab.color = color
+      return sendJson(res, 200, { color })
+    }
+
     if (method === 'GET' && sub === 'buffer') {
       if (!(tab instanceof BaseTerminalTabComponent)) {
         return sendJson(res, 400, { error: 'tab is not a terminal' })
@@ -264,6 +310,7 @@ export class CctabsServer {
         type: isTerm ? 'terminal' : tab.constructor?.name ?? 'tab',
         cwd: cwd ?? null,
         pid,
+        color: tab.color ?? null,
       })
     }
     return out
@@ -373,6 +420,19 @@ export class CctabsServer {
     if (body?.title) {
       tab.customTitle = body.title
       tab.setTitle(body.title)
+    }
+    // Colour the tab as part of the create so it never renders uncoloured
+    // first. A bad colour is logged and skipped rather than failing the spawn:
+    // losing the tab (and whatever was going to run in it) over a cosmetic
+    // field would be the worse trade. Callers wanting a hard error on bad input
+    // can use PUT /api/tabs/:uuid/color, which 400s.
+    if (body?.color !== undefined) {
+      const color = parseTabColor(body.color)
+      if (color === undefined) {
+        this.logger.warn(`ignoring invalid color ${JSON.stringify(body.color)} for new tab`)
+      } else {
+        tab.color = color
+      }
     }
     // `afterActive`: move the freshly-appended tab to sit right after the tab
     // that was active when it was created (browser-style "open next to me"),

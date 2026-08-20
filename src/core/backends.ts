@@ -23,6 +23,13 @@ export interface BackendSpec {
   model: string
   /** Human-friendly description shown in error messages */
   description?: string
+  /**
+   * Tab colour for sessions launched under this preset — a palette name or hex
+   * value, as accepted by `--color`. This is what makes one account's tabs
+   * visually distinct from another's when a fleet spans several Claude
+   * profiles. Builtin presets set none; `[backends.<name>] color` supplies it.
+   */
+  color?: string
 }
 
 const OLLAMA_LOCAL = 'http://localhost:11434'
@@ -120,6 +127,7 @@ const BUILTIN_BACKENDS: Record<string, BackendSpec> = {
  *   model = "qwen3-coder-next:cloud"
  *   base_url = "http://localhost:11434"
  *   auth_token = "ollama"          # optional, defaults to "ollama" if base_url is set
+ *   color = "blue"                 # optional, tab colour for this preset's tabs
  *
  * Or for full control:
  *
@@ -178,7 +186,12 @@ function loadCustomBackends(): Record<string, BackendSpec> {
       if (k.startsWith('env_')) env[k.slice(4)] = v
     }
 
-    result[name] = { env, model, description: kv.description ?? `User-defined preset (${CONFIG_PATH})` }
+    result[name] = {
+      env,
+      model,
+      description: kv.description ?? `User-defined preset (${CONFIG_PATH})`,
+      color: kv.color || undefined,
+    }
   }
 
   return result

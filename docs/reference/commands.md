@@ -73,6 +73,7 @@ cctabs new <name> [dir] [-w workspace]
 | `name` | Tab name (required) |
 | `dir` | Working directory (default: current) |
 | `-w, --workspace` | Target workspace (legacy Wave concept; no-op on Tabby) |
+| `-c, --color` | Tab colour — see [`cctabs color`](#cctabs-color) |
 
 ## cctabs resume
 
@@ -85,6 +86,7 @@ cctabs resume <name> [dir]
 cctabs resume <name> [dir] -s <session-id>   # when several sessions share the name
 cctabs resume <name> [dir] -b <preset>       # force a backend / Claude account
 cctabs resume <name> [dir] -m <model>        # override the model
+cctabs resume <name> [dir] -c <colour>      # colour the tab, reused or new
 ```
 
 The session is looked up by its `--name` under `dir` (default: cwd), across every
@@ -153,6 +155,8 @@ cctabs fork <tab-name> [-n new-name]
 |----------|-------------|
 | `tab-name` | Source tab (name or ID prefix) |
 | `-n, --name` | Name for the new tab (default: `<source>-fork`) |
+| `-b, --backend` | Backend preset / Claude account |
+| `-c, --color` | Tab colour — see [`cctabs color`](#cctabs-color) |
 
 ## cctabs close
 
@@ -169,6 +173,38 @@ Rename a tab.
 ```bash
 cctabs rename <name-or-id> <new-name>
 ```
+
+## cctabs color
+
+Set or clear a tab's colour.
+
+```bash
+cctabs color <name-or-id> blue
+cctabs color <name-or-id> "#0275d8"
+cctabs color <name-or-id> none        # clear it
+```
+
+Accepts Tabby's own palette names — `blue`, `green`, `orange`, `purple`, `red`,
+`yellow` — plus `none`, or any 3-, 6- or 8-digit hex value. An unrecognised
+colour is rejected before the terminal is touched: Tabby binds the value
+straight into a CSS `background-color`, so a bogus one would silently fail to
+render rather than complain.
+
+The palette names resolve to the exact hex values Tabby's right-click →
+**Color** menu uses, so a colour set here is indistinguishable from a hand-set
+one — including that menu showing the matching radio button as selected.
+
+`--color` on [`new`](#cctabs-new), [`resume`](#cctabs-resume) and
+[`fork`](#cctabs-fork) does the same at launch, and colours ride along with the
+tab's creation so it never renders uncoloured first. `resume` also colours a tab
+it reused rather than created. Without `--color`, a tab takes its backend
+preset's `color`, else `[defaults] color` — see
+[Configuration](/guide/configuration).
+
+Colouring requires a `tabby-cctabs` plugin advertising the `tab-color`
+capability. Against an older plugin, `cctabs color` warns and exits non-zero
+(colouring was the whole job), while `new`/`resume`/`fork` warn once and open the
+tab anyway.
 
 ## cctabs sort
 

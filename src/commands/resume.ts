@@ -9,6 +9,7 @@ import { findSessionsByName, pathToProjectSlug, listSessionNames, locateSessionB
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import type { SessionOrigin } from '../core/config-dirs.js'
 import { shellQuoteArg } from '../core/shell.js'
+import { applyTabColor, resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
 
 function shellQuoteEnv(env: Record<string, string>): string {
   const entries = Object.entries(env)
@@ -39,6 +40,7 @@ export const resumeCommand = define({
     session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the backend whose Claude config dir the session was found in, else the CURRENT session\'s backend (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude).' },
+    color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Applied whether the tab is reused or created. Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
   },
   async run(ctx) {
     const name = ctx.positionals[1]
@@ -49,7 +51,8 @@ export const resumeCommand = define({
     // so resume resolves the tab, looks up the session, and re-launches
     // `--name` all in prefixed-name space. Empty prefix → displayName === name,
     // i.e. unchanged behaviour.
-    const displayName = applyPrefix(name, loadConfig().defaults.prefix)
+    const config = loadConfig()
+    const displayName = applyPrefix(name, config.defaults.prefix)
 
     const explicitSession = ctx.values.session as string | undefined
     const explicitBackend = ctx.values.backend as string | undefined
@@ -104,6 +107,7 @@ export const resumeCommand = define({
     const backendName = explicitBackend || foundOrigin.backend || resolveBackendName(undefined)
     let envVars: Record<string, string> | undefined
     let resolvedModel = modelOverride
+    let backendColor: string | undefined
     if (backendName) {
       const backend = resolveBackend(backendName)
       if (!backend) {
@@ -116,11 +120,20 @@ export const resumeCommand = define({
         envVars.CLAUDE_CONFIG_DIR = foundOrigin.configDir
       }
       resolvedModel ??= backend.model || undefined
+      backendColor = backend.color
     } else if (foundOrigin.configDir) {
       // A config dir nothing has a preset for: pass it through directly, so the
       // resume at least looks for the session where it actually lives.
       envVars = { CLAUDE_CONFIG_DIR: foundOrigin.configDir }
     }
+    let color: string | null | undefined
+    try {
+      color = resolveColorPreference(ctx.values.color as string | undefined, backendColor, config.defaults.color)
+    } catch (e) {
+      consola.error((e as Error).message)
+      process.exit(1)
+    }
+
     const inferredBackend = !explicitBackend && !!foundOrigin.backend
     const inheritedBackend = !explicitBackend && !inferredBackend && !!backendName
     const be = backendName
@@ -199,13 +212,17 @@ export const resumeCommand = define({
             envVars,
             modelOverride: resolvedModel,
             afterActive: true,
+            color,
           })
           consola.success(`Tab "${displayName}" [${newTabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (recreated)${be}`)
           return
         }
       }
 
-      const config = loadConfig()
+      // Resuming into an existing tab is the case a create-time-only colour
+      // would miss — the tab is already there, so colour it in place.
+      if (color !== undefined) await applyTabColor(adapter, tabId, color)
+
       const extraFlags = config.claude.flags.map(shellQuoteArg).join(' ')
       const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
       const modelPart = resolvedModel ? ` --model ${JSON.stringify(resolvedModel)}` : ''
@@ -249,6 +266,7 @@ export const resumeCommand = define({
         envVars,
         modelOverride: resolvedModel,
         afterActive: true,
+        color,
       })
       consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude --resume ${sessionId.slice(0, 8)}… at ${dir} (new tab)${be}`)
     } else {
@@ -260,6 +278,7 @@ export const resumeCommand = define({
         claudeCmd: 'claude',
         envVars,
         modelOverride: resolvedModel,
+        color,
       })
       consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → claude at ${dir} (new tab, no prior session found)${be}`)
     }
