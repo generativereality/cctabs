@@ -242,17 +242,28 @@ The archive layout is:
 
 ```
 meta.json                     # cctabsExportVersion, source machine, tab list
-tabs/<name>/manifest.json     # name, cwd, sessionId, claudeProjectSlug
+tabs/<name>/manifest.json     # name, cwd, sessionId, claudeProjectSlug, backend?
 tabs/<name>/session.jsonl     # Claude conversation
+tabs/<name>/sidecar/          # subagent transcripts + tool results, when present
 ```
 
 Tabs without a resolved Claude session (e.g. a terminal that never started Claude)
 are skipped with a reason.
 
+The `sidecar/` directory is the session's `subagents/` and `tool-results/` trees.
+Without it an imported session resumes having forgotten every subagent — one real
+session had 357 files in there. Archives written before sidecars were bundled
+simply have none, and import handles both.
+
+Sessions belonging to a second Claude account are exported too: the transcript is
+read from whichever config dir it actually lives in, and the owning preset is
+recorded as `backend` so `import` can put it back under the same account.
+
 ## cctabs import
 
-Import a tarball produced by `cctabs export`: copies each session jsonl into the
-local `~/.claude/projects/<slug>/`, then opens a tab and resumes the session.
+Import a tarball produced by `cctabs export`: copies each session jsonl (and its
+sidecar) into the local `projects/<slug>/`, then opens a tab and resumes the
+session.
 
 ```bash
 cctabs import ./auth.tar.gz                    # restore at the original cwd
@@ -265,6 +276,84 @@ If the target cwd doesn't exist on this machine, the entry is skipped with a hin
 clone the repo first. Absolute paths inside the conversation log itself are *not*
 rewritten — they'll reference the source machine's paths historically, but Claude
 adapts to the actual current cwd on resume.
+
+An entry recorded with a `backend` is imported into that preset's config dir and
+relaunched under that account. If this machine has no preset of that name, the
+session lands in the default profile with a warning — worth heeding, because
+`claude --resume` against the wrong config dir doesn't fail, it just opens a
+fresh conversation.
+
+## cctabs profile-copy
+
+Copy (or move) a Claude session into another Claude profile / account, and open it
+in a new tab under that account.
+
+```bash
+cctabs profile-copy auth --to enterprise                  # copy; source keeps running
+cctabs profile-copy auth --to enterprise -n auth-ent      # pick the new name
+cctabs profile-copy auth --to enterprise --dry            # show what would happen
+cctabs profile-copy <session-id> --to enterprise          # when the tab is already gone
+cctabs profile-copy auth --to enterprise --move --close-source
+```
+
+| Argument | Description |
+|----------|-------------|
+| `target` | Source tab name, or a session ID |
+| `-t, --to` | Target backend preset (one that sets `env_CLAUDE_CONFIG_DIR`), or a config dir path |
+| `-n, --name` | Name for the new tab / session (default: `<source>-<preset>`) |
+| `--move` | Remove the session from the source profile afterwards |
+| `--close-source` | Close the source tab and wait for its process to exit, then move |
+| `-f, --force` | Overwrite an existing session file in the target profile |
+| `--no-open` | Copy the files but don't open a tab |
+| `--dry` | Report without copying, removing or opening anything |
+
+### Why this isn't just `cp`
+
+`CLAUDE_CONFIG_DIR` isolates each profile's transcripts, so a session started
+under the default account is invisible to anything running under another one. Five
+things make the hand-copy easy to get wrong, and this command handles each:
+
+- **The sidecar.** A session's `subagents/` and `tool-results/` live in a
+  `<session-id>/` directory beside the `.jsonl` — one real session had 357 files
+  in it. Copying only the transcript loses all of it, silently.
+- **Copy, not move, while the source is alive.** A `mv` within one filesystem is
+  a rename: the inode is unchanged, so a running `claude`'s open descriptor
+  follows the file and both tabs append to the *same* transcript, interleaving
+  two conversations into one unusable file. `--move` refuses while the source is
+  running and tells you to use `--close-source` (or drop `--move`, since a copy
+  diverges cleanly, like `--fork-session`).
+- **Closing a tab isn't the process exiting.** A closing Claude Code writes a
+  metadata trailer — `custom-title`, `agent-name`, `permission-mode` — back to its
+  transcript path *after* the tab is gone. `--close-source` waits for the pid to
+  actually disappear, then re-checks the old path and sweeps the trailer if one
+  reappeared. Left in place it carries a `customTitle` with a fresh mtime, which
+  shadows the session that was just moved.
+- **A dead recorded cwd.** `claude --resume` fails with `No conversation found
+  with session ID` when a transcript is filed under the slug of a directory that
+  no longer exists — a deleted worktree, typically — even though the file is right
+  there. The copy is filed under the last recorded cwd that still exists, and
+  failing that under the repo root, which makes it resumable again.
+- **A stale project dir shadows the relocation.** After a `--move` that relocated
+  the session, an emptied worktree-named project dir is archived to
+  `<config-dir>/cctabs-archived-projects/` — out of `projects/` entirely, since
+  renaming it in place doesn't help: resolution matches the `customTitle` inside
+  the transcripts, not the directory name.
+
+### Why `--to` names a preset
+
+On macOS the Keychain holds one Claude Code login per OS user, and it is *not*
+scoped by `CLAUDE_CONFIG_DIR` — so running a session under another profile depends
+on that profile's `CLAUDE_CODE_OAUTH_TOKEN`. Backend presets already carry it, so
+`--to <preset>` gets both the config dir and the credentials. A bare config-dir
+path is accepted for the case where no preset exists yet, with a warning that
+Claude may not be able to authenticate there.
+
+### Naming
+
+The source usually keeps running, so the copy needs a distinct name or `cctabs`'
+prefix matching becomes ambiguous between the two. Default is
+`<source>-<preset>`; `--name` overrides. The new name is written into the copied
+transcript as a `custom-title` entry, so `cctabs resume <new-name>` finds it.
 
 ## cctabs doctor
 

@@ -187,9 +187,31 @@ cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin 
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball
 cctabs export --all [-w workspace]       # bundle every tab in a workspace
 cctabs import <tarball> [--dry-run] [-f] # restore tabs + sessions from a tarball
+cctabs profile-copy <tab|session-id> --to <preset> [-n name] [--move] [--dry]  # copy/move a session into another Claude account
 cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
+
+## Moving a session between Claude accounts
+
+`cctabs profile-copy <tab> --to <preset>` when the user wants a session that lives
+under one Claude account reopened under another (e.g. personal → enterprise).
+`CLAUDE_CONFIG_DIR` isolates transcripts per account, so the session is otherwise
+invisible from the other side.
+
+- Default is a **copy** — the source keeps running and the two diverge cleanly,
+  like `--fork-session`.
+- `--move` removes the source, but **refuses while the source is still running**.
+  Add `--close-source` to close the tab, wait for its process to genuinely exit,
+  and then move. Never work around this by hand: a `mv` is a rename, so the live
+  `claude` keeps writing to the moved file and both tabs interleave into one
+  unusable transcript.
+- Always run `--dry` first when unsure — it reports the target path, the sidecar
+  file count, and any relocation, without touching anything.
+- The copy carries the session's **sidecar** (`subagents/`, `tool-results/`).
+  Never hand-copy just the `.jsonl`; that silently discards all subagent history.
+- The new tab is named `<source>-<preset>` by default so prefix matching stays
+  unambiguous while the source is still open. `-n` overrides.
 
 ## Backends: running Claude Code on Ollama / Kimi / Qwen / local models — or a different Claude account
 

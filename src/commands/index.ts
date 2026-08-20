@@ -16,6 +16,7 @@ import { doctorCommand } from './doctor.js'
 import { installTabbyPluginCommand } from './install-tabby-plugin.js'
 import { exportCommand } from './export-cmd.js'
 import { importCommand } from './import-cmd.js'
+import { profileCopyCommand } from './profile-copy.js'
 import { sortCommand } from './sort.js'
 
 // Default command: show sessions (most common use)
@@ -46,6 +47,7 @@ const subCommands = new Map([
   ['install-tabby-plugin', installTabbyPluginCommand],
   ['export', exportCommand],
   ['import', importCommand],
+  ['profile-copy', profileCopyCommand],
   ['sort', sortCommand],
 ])
 

@@ -80,6 +80,7 @@ cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
 cctabs restore [dir] [--dry]             bring back every tab that lost its session
 cctabs restore --manifest <file|-> [--create-missing]   ...or drive it from an explicit list
+cctabs profile-copy <tab> --to <preset>  copy/move a session into another Claude account
 cctabs backends                          list backend presets (providers / Claude accounts)
 cctabs config                            show config path and values
 ```
@@ -145,6 +146,32 @@ cctabs restore --manifest /tmp/fleet.json --create-missing
 # Or pipe directly
 cctabs sessions --json | cctabs restore --manifest - --create-missing
 ```
+
+### Move a session to another Claude account
+
+```bash
+cctabs profile-copy auth --to enterprise            # copy, source keeps running
+cctabs profile-copy auth --to enterprise --dry      # preview first
+```
+
+`CLAUDE_CONFIG_DIR` isolates each account's transcripts, so a session started
+under one account is invisible to anything running under another. This copies the
+transcript **and its sidecar** (the `<session-id>/` directory holding `subagents/`
+and `tool-results/` — sometimes hundreds of files) into the target profile, names
+the copy distinctly, and opens it in a tab under that account.
+
+Default is a copy, which diverges cleanly like `--fork-session`. `--move` removes
+the source afterwards, but refuses while the source is still running: a `mv`
+within one filesystem is a rename, so the running `claude` follows the file and
+both tabs interleave into one transcript. `--close-source` closes the tab, waits
+for the process to actually exit, then moves — and sweeps the metadata trailer a
+closing Claude writes back to the old path, which would otherwise shadow the
+session it just moved.
+
+If the session's original directory is gone (a deleted worktree, usually), the
+copy is filed under the repo-root slug instead, because `claude --resume` fails
+with `No conversation found with session ID` when a transcript sits under the slug
+of a directory that no longer exists.
 
 ### Fork a session
 
