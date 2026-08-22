@@ -64,6 +64,21 @@ jobs:
 
       - run: npm ci
 
+      # `prepack` runs `sync-plugin.sh --check`, which refuses to publish a CLI
+      # whose plugin copy in generativereality/plugins is stale. That invariant
+      # is worth keeping in CI — a published CLI whose marketplace skill still
+      # describes the previous version is exactly the drift it exists to catch —
+      # but the script looks for the repo at ../plugins, which does not exist on
+      # a runner. Without this the publish dies in `prepack` with
+      # "Error: plugins repo not found", which reads like a broken workflow
+      # rather than the guard doing its job.
+      #
+      # Clone-only: the check never writes, and CI must not be able to paper
+      # over a mismatch by syncing it away. If this step's check fails, run
+      # `npm run sync-plugin` locally and push that first.
+      - name: Provide the plugins repo for prepack's sync check
+        run: git clone --depth 1 https://github.com/generativereality/plugins.git ../plugins
+
       - name: Verify the tag matches package.json
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
