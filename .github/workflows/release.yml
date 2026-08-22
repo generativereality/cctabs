@@ -33,6 +33,20 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # **The release gate.** Pushing a tag no longer publishes; it queues the job and waits for a
+    # human to approve it in the Actions UI, because the `release` environment requires a
+    # reviewer. There is no way to do this with a step: every step runs unattended, so a job that
+    # has started is already too late to ask.
+    #
+    # This exists because tagging turned out to be the whole release control, and anything that
+    # can push a tag could therefore publish — which is exactly what happened on 2026-08-22, when
+    # three versions went out inside forty minutes without the maintainer approving any of them.
+    # The rule was written down and it was still bypassed, so it is now a gate rather than a rule.
+    #
+    # ⚠️ Keep the npm Trusted Publisher's "Environment" field set to `release` as well. That makes
+    # the gate impossible to remove quietly: a workflow that drops this line no longer matches the
+    # OIDC claim npm expects, so it fails to authenticate instead of silently publishing ungated.
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
