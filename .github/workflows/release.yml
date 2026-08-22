@@ -1,0 +1,82 @@
+name: Release
+
+# Publishes to npm via OIDC trusted publishing — no NPM_TOKEN, no secret of any
+# kind. Mirrors generativereality/browser-automation's release.yml; the traps
+# below were all paid for there, on 2026-08-22.
+#
+# ⚠️ **npm trusts this workflow by FILENAME.** Package → Settings → Trusted
+# Publisher names `generativereality/cctabs` + `release.yml`, so renaming this
+# file silently breaks releases until npm is updated to match.
+#
+# ⚠️ **The Trusted Publisher must actually exist on npmjs.com.** Without it npm
+# never performs the OIDC exchange and `npm publish` fails with `ENEEDAUTH`
+# ("need auth ... you need to authorize this machine"), which reads like a
+# missing token rather than a missing trust relationship. There is no token to
+# add — the fix is the npm-side config.
+#
+# Trigger: push a version tag. The tag must match `package.json`, which the job
+# verifies before publishing — a mismatch is the classic way to ship a tarball
+# that disagrees with its git tag.
+#
+# Note for whoever pushes the tag: `.github/workflows/*` cannot be pushed over
+# an HTTPS remote without the `workflow` OAuth scope (`gh auth refresh -s workflow`).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC; without it npm sees no provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # NOTE: deliberately NO `registry-url`.
+      #
+      # Setting it makes setup-node write an .npmrc containing
+      # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`. With no
+      # NODE_AUTH_TOKEN secret — which is the whole point of trusted publishing
+      # — that expands to setup-node's literal placeholder, and npm publishes
+      # with a credential of `XXXXX-XXXXX-XXXXX-XXXXX`. The registry rejects it
+      # as `E404 Not Found - PUT`, which reads as "the package does not exist"
+      # and sends you off checking names, scopes and permissions. It is an auth
+      # failure wearing a 404.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+
+      # `npm run check` runs `bun test`, so the test runner has to be here too.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Trusted publishing needs npm >= 11.5.1; setup-node still ships older.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - run: npm ci
+
+      - name: Verify the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          echo "tag=$TAG package.json=$PKG"
+          [ "$TAG" = "$PKG" ] || { echo "::error::tag $TAG != package.json $PKG"; exit 1; }
+
+      # typecheck + tests + build. `prepack` may run the build again at publish
+      # time; this is here so a failure is reported against the check rather
+      # than buried in the publish step.
+      - name: Check
+        run: npm run check
+
+      - name: Publish to npm
+        run: npm publish
