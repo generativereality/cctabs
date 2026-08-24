@@ -34,15 +34,39 @@ Only needed when `tabby-plugin/src/` changed. Its version is independent of the
 CLI's, and **npm forbids republishing a version**, so if the currently published
 version already exists with different contents, bump — don't reuse it.
 
+**Publishing is CI's job now** — `.github/workflows/release-tabby-plugin.yml`, triggered by a
+`tabby-v*` tag and gated on the `release` environment, same as the CLI. Bump
+`tabby-plugin/package.json`, push `tabby-v<version>`, approve the run. No token anywhere.
+
+To build locally (for `sideload`, or to check a change before tagging):
+
 ```bash
+# once: Tabby at this exact path, at the ref CI pins (TABBY_REF in the workflow)
+git clone --depth 1 --branch v1.0.235 https://github.com/Eugeny/tabby.git related-repos/tabby
+cd related-repos/tabby && yarn install && npm run build:typings && cd -
+
 cd tabby-plugin
+npm install --legacy-peer-deps                     # peers come from Tabby; only `uuid` installs
 ../related-repos/tabby/node_modules/.bin/webpack   # `npm run build` alone fails: webpack isn't a local dep
 npm run sideload                                   # copy into Tabby's plugins dir for local testing
-npm publish --access public --//registry.npmjs.org/:_authToken=<token-with-tabby-cctabs-access>
 ```
 
-- Building needs a Tabby checkout at `related-repos/tabby` with its deps installed — the webpack config delegates to Tabby's own `webpack.plugin.config.mjs`.
-- `dist/` is gitignored and published from a local build, so **build before publishing** or you ship whatever is stale on disk.
+Three things that each cost a failed build to discover, so they are worth stating plainly:
+
+- **Tabby must live at `related-repos/tabby` exactly.** `webpack.config.mjs` advertises a
+  `TABBY_REPO` override, but `tsconfig.json` hardcodes `../../related-repos/tabby/...` in its
+  `paths`. Setting TABBY_REPO moves webpack's resolution and leaves TypeScript's behind, and you
+  get `Cannot find module '@angular/core'` from a webpack run that is otherwise fine.
+- **`npm run build:typings` in Tabby is not optional.** Its workspace packages point `types` at
+  `typings/index.d.ts`, absent from a fresh clone. Skip it and the build fails on `Cannot find
+  module 'tabby-core'` — *after* the Angular errors clear, so it reads as a new problem.
+- **`--legacy-peer-deps` is required.** The plugin's peers are all `"*"`, so npm resolves each
+  independently, lands on conflicting Angular majors (seen: 20.1.8 vs 22.1.3) and fails ERESOLVE.
+  Those peers are webpack `externals`, supplied by Tabby at runtime.
+
+- `dist/` is gitignored, and CI builds it from source — so a stale local `dist/` can no longer be
+  published by accident, which was the old failure mode. The workflow also refuses to publish an
+  empty bundle, since `files` ships `dist/` alone and npm would happily accept nothing.
 - Keep `PLUGIN_VERSION` in `tabby-plugin/src/server.ts` in step with `tabby-plugin/package.json` — it's what `/api/health` reports, and it silently drifted a release behind once.
 - Sideloading only changes files on disk; **Tabby must be restarted/reloaded** to run the new plugin.
 
