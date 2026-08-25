@@ -11,7 +11,7 @@ import { bufferLines } from './buffer'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
-const PLUGIN_VERSION = '0.1.5'
+const PLUGIN_VERSION = '0.1.4'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
