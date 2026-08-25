@@ -1,7 +1,7 @@
 {
   "name": "tabby-cctabs",
   "version": "0.1.4",
-  "description": "Run a fleet of Claude Code sessions across Tabby tabs \u2014 companion plugin for the cctabs CLI.",
+  "description": "Run a fleet of Claude Code sessions across Tabby tabs — companion plugin for the cctabs CLI.",
   "homepage": "https://cctabs.com",
   "repository": {
     "type": "git",
@@ -45,5 +45,8 @@
     "tabby-local": "*",
     "tabby-settings": "*",
     "tabby-terminal": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
   }
 }
