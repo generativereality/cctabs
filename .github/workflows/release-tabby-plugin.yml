@@ -80,10 +80,32 @@ jobs:
             related-repos/tabby/app/node_modules
           key: tabby-${{ env.TABBY_REF }}-${{ runner.os }}
 
-      - name: Install Tabby, and build its typings
+      # fontmanager-redux compiles against fontconfig headers, which the runner image lacks.
+      # Cheaper and more honest than pruning the dependency: the plugin build does not use it, but
+      # it is reachable from `app`'s own install, and one apt package is less fragile than trying
+      # to route around a transitive native module.
+      - name: System headers for Tabby's native deps
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libfontconfig1-dev
+
+      # Tabby's postinstall is `patch-package && install-deps.mjs && build-native.mjs`. The last
+      # of those runs @electron/rebuild over every native module so Tabby can RUN as an Electron
+      # app — which this job never does. It is pure cost, and on Linux it is the step that failed:
+      #
+      #   ../src/FontManagerLinux.cc:1:10: fatal error: fontconfig/fontconfig.h: No such file
+      #   Error: node-gyp failed to rebuild '.../app/node_modules/fontmanager-redux'
+      #
+      # So run the first two by hand and skip the third. `--ignore-scripts` alone would be too
+      # blunt: patch-package and install-deps are both required — the workspace packages are what
+      # `build:typings` compiles, and without them the plugin build fails on `Cannot find module
+      # 'tabby-core'`.
+      #
+      # Verified locally: this produces a byte-identical bundle to a full install (64,289 bytes).
+      - name: Install Tabby (without the Electron native rebuild), and build its typings
         working-directory: related-repos/tabby
         run: |
-          yarn install --network-timeout 600000
+          yarn install --ignore-scripts --network-timeout 600000
+          npx patch-package
+          node ./scripts/install-deps.mjs
           npm run build:typings
 
       - name: Install the plugin's own dependency
