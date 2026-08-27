@@ -4,10 +4,15 @@ Claude Code tab manager. Terminal tabs as the UI, no tmux.
 
 ## Two packages ship from this repo
 
-| Package | Source | Notes |
+| Package | Source | Released by |
 |---|---|---|
-| `@generativereality/cctabs` | `src/` | the CLI. Scoped — the token in `~/.npmrc` can publish this one. |
-| `tabby-cctabs` | `tabby-plugin/` | the Tabby-side plugin. **Unscoped**, so the `~/.npmrc` token 403s on it; needs a token granted that package explicitly. |
+| `@generativereality/cctabs` | `src/` | the CLI. `release.yml`, on a `v*` tag. |
+| `tabby-cctabs` | `tabby-plugin/` | the Tabby-side plugin. `release-tabby-plugin.yml`, on a `tabby-v*` tag. |
+
+Both publish from CI with no token — trusted publishing, each gated on the `release`
+environment. (Local tokens used to matter and the trap is worth remembering if you
+ever publish by hand: `tabby-cctabs` is **unscoped**, so a token scoped to
+`@generativereality` 403s on it.)
 
 They version independently and are published separately. A CLI release does
 not require a plugin release — the CLI feature-detects what the plugin can do
@@ -15,16 +20,45 @@ not require a plugin release — the CLI feature-detects what the plugin can do
 
 ## Release flow
 
+**Publishing is CI's job. Never `npm publish` by hand** — `.github/workflows/release.yml`
+publishes via npm **OIDC trusted publishing**, so there is no token to hold, and the
+job is gated on the `release` environment. That gate is the whole release control:
+pushing a tag *queues* a publish, it does not perform one. (It exists because on
+2026-08-22 three versions went out inside forty minutes with nobody approving them
+— tagging was the only control, and anything that could push a tag could publish.)
+
 1. Make changes in `src/` and/or `skills/`
-2. Bump version in **both** `package.json` and `.claude-plugin/plugin.json` (keep in sync)
-3. Run `npm run sync-plugin` — syncs plugin.json + SKILL.md to `../plugins` repo, commits, pushes
-4. Publish to npm (requires an **Automation** token to bypass 2FA):
-   ```bash
-   npm publish --registry https://registry.npmjs.org --//registry.npmjs.org/:_authToken=<token>
-   ```
-   `prepack` will block publish if the plugins repo is out of sync.
-5. Commit and push this repo
-6. Users update via Claude Code: `/plugins` → Marketplaces → Update generativereality → update cctabs plugin
+2. Bump the version in **both** `package.json` and `.claude-plugin/plugin.json` — the
+   second is what `sync-plugin.sh` copies to the marketplace, and `prepack`'s sync
+   check fails the publish if it lags
+3. Fold `CHANGELOG.md`'s `## Unreleased` into a dated `## <version> — <date>` section
+4. Run `npm run sync-plugin` — pushes plugin.json + SKILL.md to `../plugins`
+5. Commit and push **this repo first**, then `git tag -a v<version>` and push the tag —
+   push main before the tag, or the run publishes a commit that isn't on main yet.
+   The workflow verifies the tag matches `package.json`
+6. **Approve the run** in the Actions UI. Until someone does, it sits at `waiting` and
+   nothing is published — a queued run is not a release
+7. Users update via Claude Code: `/plugins` → Marketplaces → Update generativereality
+   → update cctabs plugin
+
+### Don't leave gaps in the npm version sequence
+
+A tag can be cut and its run never approved — that has happened, and the tag then sits
+pointing at a commit that later work lands on top of. Approving it afterwards publishes
+the *old* tree under the new number.
+
+When a version was tagged but **never published**, re-point that tag rather than burning
+the number:
+
+```bash
+npm view @generativereality/cctabs versions   # confirm the version really isn't there
+gh run cancel <waiting-run-id>                # the stale queued run, so nobody approves it later
+git tag -f -a v<version> -m "…" <new-sha> && git push -f origin v<version>
+```
+
+Safe only while npm has never seen the version — nothing is being rewritten under anyone.
+Once it is published, the number is spent: bump instead. Force-pushing a tag re-fires the
+workflow, so a fresh run appears for approval.
 
 **Note:** Claude Code only discovers skills from directory-sourced plugins in the marketplace repo (npm source doesn't support skill discovery). The `sync-plugin` script keeps `generativereality/plugins` in sync. Requires the plugins repo checked out at `../plugins`.
 
@@ -37,6 +71,9 @@ version already exists with different contents, bump — don't reuse it.
 **Publishing is CI's job now** — `.github/workflows/release-tabby-plugin.yml`, triggered by a
 `tabby-v*` tag and gated on the `release` environment, same as the CLI. Bump
 `tabby-plugin/package.json`, push `tabby-v<version>`, approve the run. No token anywhere.
+
+The no-gaps rule above applies here too: a `tabby-v*` tag whose run was never
+approved should be re-pointed, not abandoned for the next number.
 
 To build locally (for `sideload`, or to check a change before tagging):
 
