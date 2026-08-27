@@ -20,7 +20,7 @@ import {
 } from '../core/restore-plan.js'
 import type { Block, Config } from '../types/index.js'
 import { shellQuoteArg } from '../core/shell.js'
-import { resolveColorPreference } from '../core/colors.js'
+import { applyTabColor, resolveColorPreference } from '../core/colors.js'
 
 /**
  * Settle after each direct-spawn recreate when the backend can't guarantee the
@@ -447,6 +447,13 @@ async function executePlan(
   // -- attach: send the resume into tabs that still have a live shell --
   const attached = plan.filter((p) => p.action === 'attach')
   for (const p of attached) {
+    // Colour these too, not just the recreated ones. Whether a tab is attached
+    // or recreated turns on whether its shell happens to be alive, which after
+    // a terminal restart comes down to which tabs got focused first — so
+    // colouring only the recreate path makes a restored fleet come back
+    // half-coloured, in an order the user has no reason to predict.
+    const color = colorForEntry(p, config)
+    if (color !== undefined) await applyTabColor(adapter, p.tabId!, color)
     await adapter.sendInput(p.blockId!, buildResumeCommand(p, extraFlags) + '\r')
     await sleep(500)
   }

@@ -67,7 +67,7 @@ Three things that each cost a failed build to discover, so they are worth statin
 - `dist/` is gitignored, and CI builds it from source — so a stale local `dist/` can no longer be
   published by accident, which was the old failure mode. The workflow also refuses to publish an
   empty bundle, since `files` ships `dist/` alone and npm would happily accept nothing.
-- Keep `PLUGIN_VERSION` in `tabby-plugin/src/server.ts` in step with `tabby-plugin/package.json` — it's what `/api/health` reports, and it silently drifted a release behind once.
+- Keep `PLUGIN_VERSION` in `tabby-plugin/src/server.ts` in step with `tabby-plugin/package.json` — it's what `/api/health` reports. It has now drifted twice: once a release behind, once a release *ahead* (a renumbered release caught `package.json` and missed the constant). Neither broke anything, because capabilities are feature-detected rather than version-compared — which is exactly why both survived review. Guarded now by `src/core/plugin-version.test.ts` and, because the plugin's release workflow never runs the test suite, by that workflow's own pre-publish check.
 - Sideloading only changes files on disk; **Tabby must be restarted/reloaded** to run the new plugin.
 
 ### Before releasing, check the docs that ship

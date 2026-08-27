@@ -15,5 +15,6 @@ export const configCommand = define({
     console.log(`claude.flags       = ${config.claude.flags.length ? JSON.stringify(config.claude.flags) : '(none)'}`)
     console.log(`defaults.workspace = ${config.defaults.workspace || '(none)'}`)
     console.log(`defaults.prefix    = ${config.defaults.prefix || '(none)'}`)
+    console.log(`defaults.color     = ${config.defaults.color || '(none)'}`)
   },
 })
