@@ -77,6 +77,7 @@ cctabs fork <tab> [-n new-name]          fork a session into a new tab
 cctabs close <tab>                       close a tab
 cctabs rename <tab> <new-name>           rename a tab (+ on-disk title, so `resume` finds it)
 cctabs color <tab> <colour>              set or clear a tab's colour
+cctabs whoami [--json]                   which tab am I? (for self-attribution)
 cctabs sort [--dry] [--reverse]          reorder the tab bar by session activity (Tabby only)
 cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines)
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe

@@ -3,6 +3,13 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **`cctabs whoami` answers "which tab am I running in?"** Prints the tab name — so `$(cctabs whoami)` drops into a PR body or commit trailer — with `--json` adding `worktree`, `session_id`, `cwd`, `backend`, `config_dir`, `color` and `via`. It exists because self-attribution had no answer: when every session's PRs carry the same GitHub author, "whose work is this, and is it in flight?" is unanswerable, and it gets asked exactly when someone else's files are being written right now.
+- **It identifies the tab two ways, and neither is "the focused tab".** Focus reads *false* for a background tab running the command, so matching on it silently attributes work to the wrong session. Instead: the terminal's process-tree match (`via: "pid"`, definitive when it answers), falling back to the session's own id — `CLAUDE_CODE_SESSION_ID` names the project directory its transcript lives in, and a tab whose cwd maps there is us (`via: "session-slug"`). The fallback is accepted only when exactly one tab matches; two tabs in one directory are indistinguishable that way, and guessing is the failure being avoided.
+- **`unknown` is an answer, not an error.** A session in a plain terminal, over SSH or in CI has no tab; `whoami` prints `unknown` and exits 0, so callers can say "unnamed session" rather than invent one.
+- **It reads no transcripts.** The hand-rolled equivalent pipes `cctabs sessions --json` into a matcher, which resolves *every* tab's session by reading the transcripts in each project dir — measured at **7.7s** on a 65-tab fleet holding ~1.7GB of history, and minutes on a cold cache. `whoami` fetches the tab list and one directory listing: ~1s, mostly process startup. A check meant to run on every PR cannot cost the former.
+
 ## 0.5.2 — 2026-08-26
 
 - **Fix: the Tabby plugin announced the wrong version of itself.** `tabby-cctabs` 0.1.4 shipped with `PLUGIN_VERSION = '0.1.5'`, so `/api/health` — and therefore `cctabs doctor` — reported a version that was never published. Harmless in behaviour, because plugin features are feature-detected through `capabilities` rather than compared by version, which is precisely why this drift has now survived review twice (once a release behind, once, via a renumbered release, a release ahead). There is now a test asserting `PLUGIN_VERSION` matches `tabby-plugin/package.json`, so the next drift fails `npm test` — and, since the plugin's release workflow never runs the test suite, that workflow now checks the same pair itself before publishing.

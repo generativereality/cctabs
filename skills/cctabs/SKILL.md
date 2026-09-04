@@ -183,6 +183,7 @@ cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
 cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
+cctabs whoami [--json]                   # which tab is THIS session in? prints the tab name, or "unknown"
 cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
 cctabs scrollback <tab-or-block> [n]    # read terminal output (default: 50 lines)
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
@@ -193,6 +194,22 @@ cctabs profile-copy <tab|session-id> --to <preset> [-n name] [--move] [--dry]  #
 cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
+
+## Which tab am I in? — `cctabs whoami`
+
+When a session needs to name itself — a PR body, a commit trailer, a status post
+— use `cctabs whoami`. It prints the tab name, so `$(cctabs whoami)` works
+directly. `--json` adds `worktree`, `session_id`, `cwd`, `backend` and how it
+identified the tab (`via`).
+
+- ⛔ **Never guess the tab/session name, and never match on a "focused tab"
+  notion** — focus reads false for a background tab running the command, which
+  silently attributes work to the wrong session.
+- ⚠️ **`unknown` is a real answer, and exits 0.** A session in a plain terminal,
+  over SSH or in CI has no tab: say "unnamed session" rather than inventing one.
+- Prefer it over piping `cctabs sessions --json` into a matcher: that resolves
+  every tab by scanning transcripts (~7.7s on a 65-tab fleet, minutes cold),
+  where `whoami` is ~1s and reads no transcripts.
 
 ## Tab colours
 
