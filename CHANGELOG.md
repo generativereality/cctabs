@@ -3,7 +3,7 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.5.3 — 2026-09-07
 
 - **`cctabs whoami` answers "which tab am I running in?"** Prints the tab name — so `$(cctabs whoami)` drops into a PR body or commit trailer — with `--json` adding `worktree`, `session_id`, `cwd`, `backend`, `config_dir`, `color` and `via`. It exists because self-attribution had no answer: when every session's PRs carry the same GitHub author, "whose work is this, and is it in flight?" is unanswerable, and it gets asked exactly when someone else's files are being written right now.
 - **It identifies the tab two ways, and neither is "the focused tab".** Focus reads *false* for a background tab running the command, so matching on it silently attributes work to the wrong session. Instead: the terminal's process-tree match (`via: "pid"`, definitive when it answers), falling back to the session's own id — `CLAUDE_CODE_SESSION_ID` names the project directory its transcript lives in, and a tab whose cwd maps there is us (`via: "session-slug"`). The fallback is accepted only when exactly one tab matches; two tabs in one directory are indistinguishable that way, and guessing is the failure being avoided.
