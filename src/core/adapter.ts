@@ -117,6 +117,18 @@ export interface TerminalAdapter {
   currentWorkspaceId(): string
 }
 
+/**
+ * The adapter for the running terminal, or `null` when there isn't one.
+ *
+ * For commands that must still answer when cctabs has no terminal to talk to —
+ * `whoami` is the case: a plain terminal, an SSH hop or CI has no tab, and
+ * "unknown" is a real answer there rather than an error. Everything else wants
+ * `requireAdapter()` and its self-documenting exit.
+ */
+export function optionalAdapter(): TerminalAdapter | null {
+  return resolveTerminal() === 'tabby' ? new TabbyAdapter() : null
+}
+
 /** Returns the adapter that matches the running terminal. Exits with a clear
  * error message if none is supported. */
 export function requireAdapter(): TerminalAdapter {

@@ -1,6 +1,7 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
+import { sendTextWithConfirmation } from '../core/open-session.js'
 import { readFileSync } from 'fs'
 
 function readStdin(): Promise<string> {
@@ -101,17 +102,20 @@ export const sendCommand = define({
       }
     }
 
-    // Send the body, then the submit Enter as a SEPARATE event. A Claude TUI
-    // treats a "text + \r" burst as one paste and absorbs the \r as a newline
-    // in the input box instead of submitting; a lone \r a beat later lands as a
-    // real Enter keypress. (Harmless for a plain shell — same as typing then
-    // pressing return.) Skip the body send when it's empty (a bare-Enter send).
+    // Send the body — confirming it actually landed and re-sending if not, since
+    // text sent into a not-yet-ready input handler can be silently lost, front
+    // first (see sendTextWithConfirmation) — then the submit Enter as a
+    // SEPARATE event. A Claude TUI treats a "text + \r" burst as one paste and
+    // absorbs the \r as a newline in the input box instead of submitting; a lone
+    // \r a beat later lands as a real Enter keypress. (Harmless for a plain
+    // shell — same as typing then pressing return.) Skip the body send when
+    // it's empty (a bare-Enter send).
+    let landedOk = true
+    if (rawText.length > 0) landedOk = await sendTextWithConfirmation(adapter, blockId, rawText)
     let resp: unknown
-    if (rawText.length > 0) resp = await adapter.sendInput(blockId, rawText)
     if (sendEnter) {
       if (rawText.length > 0) await new Promise((r) => setTimeout(r, 200))
-      const enterResp = await adapter.sendInput(blockId, '\r')
-      resp ??= enterResp
+      resp = await adapter.sendInput(blockId, '\r')
     }
     adapter.closeSocket()
     if (resp && (resp as Record<string, unknown>).error) {
@@ -119,6 +123,9 @@ export const sendCommand = define({
     }
     const preview = rawText.slice(0, 80).replace(/\n/g, '↵').replace(/\t/g, '→')
     const label = rawText.length > 0 ? `${JSON.stringify(preview)}${rawText.length > 80 ? '…' : ''}${sendEnter ? ' ⏎' : ''}` : '⏎'
+    if (!landedOk) {
+      consola.warn(`Text may not have landed in ${blockId.slice(0, 8)} — its front can be dropped by a not-yet-ready input handler. Check the tab by hand before trusting it arrived.`)
+    }
     consola.success(`Sent to ${blockId.slice(0, 8)}: ${label}`)
   },
 })

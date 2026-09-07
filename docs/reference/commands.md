@@ -174,6 +174,67 @@ Rename a tab.
 cctabs rename <name-or-id> <new-name>
 ```
 
+## cctabs whoami
+
+Print the name of the tab this session is running in.
+
+```bash
+cctabs whoami          # → my-tab-name   (or "unknown")
+cctabs whoami --json
+```
+
+Written for self-attribution: a Claude session that needs to name itself in a PR
+body, a commit trailer or a status post, so a reader can find the session — and
+the worktree — the work came from.
+
+```json
+{
+  "tab": "dropoff-ux",
+  "tab_id": "0ea090fb-cf89-4ebf-b489-8051dc19ffed",
+  "session_id": "550e9d82-4f14-4f93-968f-79c7564348a3",
+  "cwd": "/Users/you/Dev/horizon/.claude/worktrees/dropoff-ux",
+  "worktree": ".claude/worktrees/dropoff-ux",
+  "backend": "enterprise",
+  "config_dir": "/Users/you/.claude-enterprise",
+  "color": "#0275d8",
+  "via": "pid"
+}
+```
+
+Plain output is the bare tab name on stdout, so it drops into a command
+substitution: `$(cctabs whoami)`.
+
+### "unknown" is an answer, not an error
+
+A session in a plain terminal, over SSH, or in CI has no cctabs tab. That prints
+`unknown` and **exits 0** — say so ("opened from an unnamed session") rather than
+inventing a name.
+
+### How the tab is identified
+
+Two independent routes, because neither is sufficient alone:
+
+1. **`via: "pid"`** — the terminal matched this process's tree to a tab.
+   Definitive when it answers.
+2. **`via: "session-slug"`** — the fallback. `CLAUDE_CODE_SESSION_ID` tells the
+   session its own id, which tells us the project directory its transcript lives
+   in; a tab whose cwd maps to that directory is us. Accepted only when exactly
+   one tab matches, since two tabs in one directory are indistinguishable this
+   way and guessing is the thing being avoided.
+
+Neither route is "the focused tab". Focus is a different question, and it reads
+false for a background tab running the command — so a focus-based check silently
+misattributes.
+
+### It does not scan transcripts
+
+The equivalent hand-rolled check pipes `cctabs sessions --json` into a matcher,
+which resolves *every* tab's session by reading the transcripts in each project
+directory: measured at **7.7s** on a 65-tab fleet with ~1.7GB of history, and
+minutes on a cold cache. `whoami` reads the tab list and one directory listing —
+about **1s**, most of it process startup. That difference is why it's a command
+rather than a documented snippet.
+
 ## cctabs color
 
 Set or clear a tab's colour.

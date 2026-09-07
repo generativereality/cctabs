@@ -8,6 +8,7 @@ import { forkCommand } from './fork.js'
 import { closeCommand } from './close.js'
 import { renameCommand } from './rename.js'
 import { colorCommand } from './color.js'
+import { whoamiCommand } from './whoami.js'
 import { scrollbackCommand } from './scrollback.js'
 import { sendCommand } from './send.js'
 import { configCommand } from './config-cmd.js'
@@ -40,6 +41,7 @@ const subCommands = new Map([
   ['close', closeCommand],
   ['rename', renameCommand],
   ['color', colorCommand],
+  ['whoami', whoamiCommand],
   ['scrollback', scrollbackCommand],
   ['send', sendCommand],
   ['config', configCommand],

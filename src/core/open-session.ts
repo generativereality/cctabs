@@ -82,6 +82,72 @@ async function waitForScrollbackMatch(
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+export interface ConfirmedSendOptions {
+  /**
+   * Wrap the text in bracketed-paste markers (`\x1b[200~…\x1b[201~`) before
+   * sending. Claude's TUI and any readline-backed shell strip the markers and
+   * insert the text as one atomic paste; a target that doesn't understand
+   * bracketed paste would see the raw escape bytes, so this defaults to off
+   * for a generic send and is turned on explicitly for Claude's input box.
+   */
+  bracketedPaste?: boolean
+  attempts?: number
+  pollCount?: number
+  pollIntervalMs?: number
+  sleep?: (ms: number) => Promise<void>
+}
+
+/**
+ * Send `text`, confirm it actually landed in the input box, and re-send
+ * (clearing the line first) if not.
+ *
+ * The naive "just send it" is unreliable: text sent into a not-yet-ready
+ * input handler is silently lost — sometimes entirely, sometimes only its
+ * front, which reads as a message arriving with its lead-in truncated. The
+ * fix is the same either way: a distinctive chunk from the *front* of the
+ * text (the part observed to go missing) doubles as the landed-detector, so
+ * a front-clipped send is caught exactly like a fully-dropped one.
+ *
+ * Text too short to fingerprint reliably (under 4 non-whitespace chars, e.g.
+ * a bare "y" answering a prompt) is sent once, unconfirmed, rather than
+ * looping against ambiguous scrollback noise.
+ */
+export async function sendTextWithConfirmation(
+  adapter: TerminalAdapter,
+  blockId: string,
+  text: string,
+  opts: ConfirmedSendOptions = {},
+): Promise<boolean> {
+  const sleepFn = opts.sleep ?? sleep
+  const payload = opts.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text
+  const sentinel = text.replace(/\s+/g, '').slice(0, 24)
+
+  if (sentinel.length < 4) {
+    await adapter.sendInput(blockId, payload)
+    return true
+  }
+
+  const attempts = opts.attempts ?? 3
+  const pollCount = opts.pollCount ?? 8
+  const pollIntervalMs = opts.pollIntervalMs ?? 300
+  const landed = (): boolean => {
+    const c = adapter.scrollback(blockId, 60).replace(/\s+/g, '')
+    return c.includes(sentinel) || c.includes('[Pastedtext')
+  }
+
+  let inBox = false
+  for (let attempt = 0; attempt < attempts && !inBox; attempt++) {
+    // Clear first on retries so a re-send never stacks a second copy.
+    if (attempt > 0) { await adapter.sendInput(blockId, '\x15'); await sleepFn(200) }
+    await adapter.sendInput(blockId, payload)
+    for (let i = 0; i < pollCount; i++) {
+      await sleepFn(pollIntervalMs)
+      if (landed()) { inBox = true; break }
+    }
+  }
+  return inBox
+}
+
 /**
  * Wait for Claude's input prompt, then send the initial task and reliably
  * submit it.
@@ -144,26 +210,9 @@ async function sendInitialPrompt(
   await clearStartupDialogs(adapter, blockId, { trusted: true })
 
   const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
-  // Distinctive chunk for the inline-echo case. Claude's output is append-only
-  // so once this (or the paste chip) shows up it stays — fine within this one
-  // call on a fresh tab.
-  const sentinel = prompt.replace(/\s+/g, '').slice(0, 24)
-  const landed = (): boolean => {
-    const c = adapter.scrollback(blockId, 60).replace(/\s+/g, '')
-    return (sentinel.length >= 4 && c.includes(sentinel)) || c.includes('[Pastedtext')
-  }
 
   // Stage 1: paste, confirm it landed, re-paste if dropped.
-  let inBox = false
-  for (let attempt = 0; attempt < 3 && !inBox; attempt++) {
-    // Clear first on retries so a re-paste never stacks a second copy.
-    if (attempt > 0) { await adapter.sendInput(blockId, '\x15'); await sleep(200) }
-    await adapter.sendInput(blockId, `\x1b[200~${prompt}\x1b[201~`)
-    for (let i = 0; i < 8; i++) {
-      await sleep(300)
-      if (landed()) { inBox = true; break }
-    }
-  }
+  const inBox = await sendTextWithConfirmation(adapter, blockId, prompt, { bracketedPaste: true })
   if (!inBox) {
     consola.warn('Initial prompt may not have landed in the input box — switch to the tab and press Enter (re-type if the box is empty).')
     return
