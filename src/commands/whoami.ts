@@ -2,7 +2,7 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { existsSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { requireAdapter } from '../core/adapter.js'
+import { optionalAdapter } from '../core/adapter.js'
 import { listClaudeConfigDirs, originOf } from '../core/config-dirs.js'
 import { pathToProjectSlug } from '../core/session.js'
 import { resolveIdentity, UNKNOWN_TAB, type WhoamiTab } from '../core/whoami.js'
@@ -40,29 +40,45 @@ export const whoamiCommand = define({
     // own id even when the process-tree walk below can't find its tab.
     const sessionId = process.env.CLAUDE_CODE_SESSION_ID || undefined
 
-    const adapter = requireAdapter()
-    const { tabsById, tabNames } = await adapter.getAllData()
-    const tabs: WhoamiTab[] = [...tabsById.entries()].flatMap(([tabId, blocks]) => {
-      const term = blocks.find((b) => b.view === 'term')
-      if (!term) return []
-      return [{
-        tabId,
-        name: tabNames.get(tabId) ?? tabId.slice(0, 8),
-        cwd: term.meta?.['cmd:cwd'],
-        color: term.color,
-      }]
-    })
+    // This command must not die the way the others do when there is no terminal
+    // to talk to. `unknown` is its documented answer for a plain terminal, an
+    // SSH hop or CI, and `$(cctabs whoami)` is meant to stay safe under
+    // `set -e` — a self-documenting exit(1) would break exactly the callers the
+    // command exists for. So: no tabs, no adapter, still an answer.
+    const adapter = optionalAdapter()
+    let tabs: WhoamiTab[] = []
+    let currentTabId: string | undefined
+    if (adapter) {
+      try {
+        const { tabsById, tabNames } = await adapter.getAllData()
+        tabs = [...tabsById.entries()].flatMap(([tabId, blocks]) => {
+          const term = blocks.find((b) => b.view === 'term')
+          if (!term) return []
+          return [{
+            tabId,
+            name: tabNames.get(tabId) ?? tabId.slice(0, 8),
+            cwd: term.meta?.['cmd:cwd'],
+            color: term.color,
+          }]
+        })
+        currentTabId = adapter.currentTabId() || undefined
+      } catch (err) {
+        // An unreachable plugin is a broken setup, but reporting it by failing
+        // would strand every caller. Say so on stderr; keep stdout an answer.
+        consola.warn(`Could not reach the terminal, so the tab is unknown: ${(err as Error).message}`)
+      }
+    }
 
     const located = sessionId ? findSessionSlug(sessionId) : null
     const identity = resolveIdentity({
       sessionId,
       tabs,
-      currentTabId: adapter.currentTabId() || undefined,
+      currentTabId,
       sessionSlug: located?.slug,
       slugOf: pathToProjectSlug,
       origin: located ? { backend: located.backend, configDir: located.configDir } : undefined,
     })
-    adapter.closeSocket()
+    adapter?.closeSocket()
 
     if (asJson) {
       console.log(JSON.stringify({
@@ -84,7 +100,9 @@ export const whoamiCommand = define({
     // error) is a real answer: a session in a plain terminal, over SSH or in CI
     // has no tab, and callers are meant to say so rather than invent a name.
     console.log(identity.tab ?? UNKNOWN_TAB)
-    if (!identity.tab && !sessionId) {
+    if (!identity.tab && !adapter) {
+      consola.warn('No supported terminal here, so this session has no cctabs tab — run `cctabs doctor` if you expected one.')
+    } else if (!identity.tab && !sessionId) {
       consola.warn('CLAUDE_CODE_SESSION_ID is not set — not running inside a Claude Code session, so only the process-tree match was available.')
     }
   },
