@@ -8,7 +8,7 @@ import { planRestore, type PlannedEntry, type RestoreAction, type RestoreEntry }
 import { DEFAULT_CONFIG_ROOT, type ClaudeConfigDir } from '../core/config-dirs.js'
 import { launchEnvFor } from '../core/backends.js'
 import { pathToProjectSlug } from '../core/session.js'
-import { buildPlanDeps, buildResumeCommand, colorForEntry, describeDecision, summarizeDecision } from './restore.js'
+import { buildPlanDeps, buildResumeCommand, colorForEntry, describeDecision, judgeSpawn, plannedOutcome, summarizeDecision, summarizeOutcomes } from './restore.js'
 
 /**
  * An adapter that answers reads and throws on every mutation.
@@ -364,5 +364,89 @@ describe('colorForEntry', () => {
 
   it('does not take a restore down over a bad colour in config', () => {
     expect(colorForEntry(entry({}), cfg('chartreuse'), presets)).toBeUndefined()
+  })
+})
+
+describe('plannedOutcome', () => {
+  it('marks the three acting actions as pending, not done', () => {
+    for (const a of ['attach', 'recreate', 'spawn'] as const) {
+      expect(plannedOutcome(a)).toBe('unverified')
+    }
+  })
+
+  it('marks everything it never touches as not acted on', () => {
+    for (const a of ['current-tab', 'already-running', 'ambiguous', 'no-terminal', 'no-session', 'unreadable', 'duplicate', 'missing'] as const) {
+      expect(plannedOutcome(a)).toBe('skipped')
+    }
+  })
+})
+
+describe('summarizeOutcomes', () => {
+  // The point of the line: it has to be able to say something other than "0
+  // failed". The old one was computed from "did the spawn call return?".
+  it('counts each category, printing the zeroes too', () => {
+    expect(summarizeOutcomes(['restored', 'restored', 'failed'])).toBe('2 verified, 0 unconfirmed, 1 failed')
+  })
+
+  it('mentions skipped entries only when there are some', () => {
+    expect(summarizeOutcomes(['restored'])).toBe('1 verified, 0 unconfirmed, 0 failed')
+    expect(summarizeOutcomes(['restored', 'skipped'])).toBe('1 verified, 0 unconfirmed, 0 failed, 1 not acted on')
+  })
+
+  it('handles an empty restore', () => {
+    expect(summarizeOutcomes([])).toBe('0 verified, 0 unconfirmed, 0 failed')
+  })
+})
+
+describe('judgeSpawn', () => {
+  const base = { tabPresent: true, hasTermBlock: true, hasProcess: true as boolean | undefined }
+
+  it('verifies a tab that is present, running, and holding the session it asked for', () => {
+    const v = judgeSpawn({ ...base, requestedSessionId: 'sess-1234abcd', resolvedSessionId: 'sess-1234abcd' })
+    expect(v.outcome).toBe('restored')
+  })
+
+  // The tab that was "spawned, 0 failed" and simply wasn't there.
+  it('fails a tab that is missing from the tab list', () => {
+    const v = judgeSpawn({ ...base, tabPresent: false })
+    expect(v.outcome).toBe('failed')
+    expect(v.note).toContain('not in the tab list')
+  })
+
+  it('fails a tab with no terminal in it', () => {
+    expect(judgeSpawn({ ...base, hasTermBlock: false }).outcome).toBe('failed')
+  })
+
+  it('fails a tab whose process is gone', () => {
+    expect(judgeSpawn({ ...base, hasProcess: false }).outcome).toBe('failed')
+  })
+
+  // The other half of the observed failure: the tab looks perfect and the
+  // conversation is gone, because --resume quietly started a fresh one.
+  it('fails a tab that came back as a different session than requested', () => {
+    const v = judgeSpawn({ ...base, requestedSessionId: 'wanted-1', resolvedSessionId: 'other-22' })
+    expect(v.outcome).toBe('failed')
+    expect(v.note).toContain('DIFFERENT session')
+  })
+
+  it('accepts any session for an entry that asked for a fresh one', () => {
+    expect(judgeSpawn({ ...base, resolvedSessionId: 'brand-new-1' }).outcome).toBe('restored')
+  })
+
+  // Not a failure: a running tab whose transcript has not appeared yet.
+  it('leaves a running tab with no session on disk unconfirmed', () => {
+    const v = judgeSpawn({ ...base, requestedSessionId: 'sess-1' })
+    expect(v.outcome).toBe('unverified')
+    expect(v.note).toContain('no session is on disk')
+  })
+
+  // A backend that cannot report pids must not turn every tab into a failure.
+  it('does not fail a tab just because the backend cannot report processes', () => {
+    const v = judgeSpawn({ tabPresent: true, hasTermBlock: true, hasProcess: undefined, resolvedSessionId: 'sess-1' })
+    expect(v.outcome).toBe('restored')
+  })
+
+  it('is unconfirmed, not failed, when neither process nor session can be read', () => {
+    expect(judgeSpawn({ tabPresent: true, hasTermBlock: true, hasProcess: undefined }).outcome).toBe('unverified')
   })
 })

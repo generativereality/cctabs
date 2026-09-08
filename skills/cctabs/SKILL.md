@@ -185,8 +185,13 @@ cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk custom
 cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
 cctabs whoami [--json]                   # which tab is THIS session in? prints the tab name, or "unknown"
 cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
-cctabs scrollback <tab-or-block> [n]    # read terminal output (default: 50 lines)
+cctabs sort --first a,b,c [--dry]        # PIN these tabs to the front, in this order; everything else keeps its relative order
+cctabs scrollback <tab-or-block> [n]    # read terminal output — the last PAINTED FRAME (default: 50 lines)
+cctabs transcript <tab> [n] [--json]    # read what a tab has SAID: its last n assistant messages, from the transcript (alias: `findings`)
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
+cctabs send <tab> --path <file>          # hand the tab a file PATH to read — the safe way to deliver anything large
+cctabs send <tab> --file <f> --verify    # check the target's transcript for what it actually RECEIVED
+cctabs send <tab> --submit               # press Enter only, submitting a prompt already parked in the box
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball
 cctabs export --all [-w workspace]       # bundle every tab in a workspace
 cctabs import <tarball> [--dry-run] [-f] # restore tabs + sessions from a tarball
@@ -210,6 +215,50 @@ identified the tab (`via`).
 - Prefer it over piping `cctabs sessions --json` into a matcher: that resolves
   every tab by scanning transcripts (~7.7s on a 65-tab fleet, minutes cold),
   where `whoami` is ~1s and reads no transcripts.
+
+## What has that tab worked out? — `cctabs transcript`
+
+⛔ **Before you draft a message to another tab, read what it has already
+said.** Briefing a session from a stale picture is how you tell a tab to go
+measure two things it measured an hour ago — and miss the third thing it found
+that you didn't know about.
+
+```bash
+cctabs transcript payments          # last 3 assistant messages
+cctabs transcript payments 10       # last 10
+cctabs transcript payments --json   # for a driver: session_id, cwd, backend, turns[]
+cctabs findings payments            # same command, reads better when you're asking "what did it find?"
+```
+
+- ⚠️ **This is not `scrollback`.** `scrollback` returns the last *painted frame*,
+  so a tab mid-turn shows you a spinner and nothing else — its actual findings
+  are in the transcript, not on the screen. `transcript` reads the transcript.
+- It searches **every Claude config dir**, not just `~/.claude/projects`. A tab
+  running under a backend preset writes beneath that preset's own
+  `CLAUDE_CONFIG_DIR`, and looking in one root reports "no transcript" for a
+  perfectly healthy session — which reads as "that tab is dead".
+- It **exits non-zero and says which failure it is** rather than printing
+  nothing: no session titled after this tab (with a count of how many
+  transcripts *do* exist for its directory — usually means the tab was renamed
+  after Claude started), no transcript on disk, or a lookup that failed
+  outright. "I couldn't read it" and "it hasn't said anything" are different
+  answers.
+- Tool-only and thinking-only messages are skipped; you get the prose.
+
+## Getting a working set in reach — `cctabs sort --first`
+
+Activity order is close to the *opposite* of what a driver wants: a tab that
+just delivered sinks to the bottom. To pin a chosen set instead:
+
+```bash
+cctabs sort --first auth,payments,billing        # these three to the front, in this order
+cctabs sort --first auth,payments --dry          # show the plan first
+```
+
+Every unlisted tab keeps its current relative order and sorts after the pinned
+ones. If any name doesn't resolve to exactly one tab, **nothing is moved** and
+the command exits non-zero — half a working set in reach, with no indication
+which half, is worse than an error. Tabby only.
 
 ## Tab colours
 
@@ -431,6 +480,20 @@ cctabs restore --dry              # preview what would be resumed without doing 
 cctabs restore ~/Dev/myapp        # restrict the search to one project dir
 ```
 
+⚠️ **Read the count at the end, and trust it — it can now fail.** After
+spawning, restore re-reads the tab list, checks each new tab has a process, and
+resolves its session from disk, then reports `N verified, N unconfirmed, N
+failed` and **exits non-zero if anything failed**. A tab that came back as a
+*different* session than the one requested counts as failed, not restored:
+`claude --resume` on an id it can't find quietly opens a fresh conversation, so
+the tab looks perfect and the context is gone. `unconfirmed` is its own answer —
+the tab is up but its session isn't readable yet — and those are named so you
+can check them with `cctabs transcript` before briefing anything from them.
+
+The line this replaced read "78 spawned, 0 failed" while one tab was absent
+entirely and another had lost its context, because it counted spawn calls that
+returned rather than tabs that worked.
+
 If a session was started in a different `cwd` than the tab's current directory (common after `cd`-ing inside the tab), the global search still finds it via the recorded session metadata — no need to guess the right dir.
 
 The search covers **every Claude account**, not just the default one: sessions launched under a backend preset live in that preset's own `CLAUDE_CONFIG_DIR`, and restore looks there too, then relaunches each tab under the account its session came from. Nothing to pass — a mixed-account fleet restores in one command. `--dry` names the account for any tab that isn't on the default one.
@@ -444,6 +507,16 @@ cctabs sessions --json > snapshot.json          # {name, cwd, session_id, backen
 cctabs restore --manifest snapshot.json --dry   # preview first
 cctabs restore --manifest snapshot.json --create-missing   # spawn tabs for entries with none
 ```
+
+**`session_id: null` now says why.** Every row carries `session_lookup`:
+`found`, `not-found` (searched every config dir; nothing is titled after this
+tab — with `sessions_in_dir` counting the transcripts that *do* exist for its
+directory, so a renamed tab is distinguishable from a directory nothing has ever
+run in), `no-cwd` (the tab reported no directory, so nothing was looked up), or
+`lookup-failed` (the search itself threw — `session_lookup_error` has the
+reason). A bare null conflated all four, and they call for opposite responses:
+one is a tab to spawn fresh, the others are problems to fix before touching the
+fleet.
 
 `--manifest -` reads from stdin, so `cctabs sessions --json | cctabs restore --manifest - --create-missing` works as a one-liner. Entries for tabs that are already running are reported as "already running, skipping" — safe to re-run. `backend` / `config_dir` are emitted only for sessions belonging to a non-default Claude account, and restore infers them anyway from wherever it finds the session, so a hand-written manifest can omit them.
 
@@ -530,14 +603,32 @@ cctabs new payments ~/Dev/myapp --prompt "implement the billing endpoint"
 cctabs new payments ~/Dev/myapp --file /tmp/task.txt
 ```
 
-If you need to send a task after the fact, poll first:
+If you need to send a task after the fact, poll first — and for anything
+sizeable, hand over a **path** rather than the text:
 
 ```bash
 cctabs new payments ~/Dev/myapp
-# Poll until ❯ appears (typically 10-15s with MCP servers)
-cctabs scrollback payments 5   # repeat until you see ❯
-cctabs send payments --file /tmp/task.txt
-cctabs send payments "yes\n"   # quick replies
+cctabs send payments --wait-for-prompt --path /tmp/task.txt   # waits, then hands over the path
+cctabs send payments "yes\n"                                  # quick replies go inline
+```
+
+⛔ **Deliver anything large with `--path`, not `--file`.** `--file` pastes the
+contents through the prompt line, and a paste can arrive as a *fraction* of
+itself: a measured 6,835-byte brief landed as its last 756 bytes, beginning
+mid-word, and both ends reported success. `--path` has no truncation surface at
+all — only the path crosses the prompt line — so use it for briefs, specs and
+diffs, and keep inline text for short replies.
+
+⚠️ **The screen cannot tell you whether a big paste arrived whole.** Claude
+collapses it into a `[Pasted text #N +M lines]` chip, and `M` does **not** track
+the payload: a 6,892-byte, 76-line payload was measured arriving *complete* into
+an idle tab while its chip read `+10 lines`. So `send` reports "arrived,
+completeness unverified" rather than a ✔, and if you need certainty add
+`--verify` — it reads the target session's own transcript, which records what it
+actually received, and fails loudly naming which end went missing.
+
+```bash
+cctabs send payments --path /tmp/brief.txt --verify   # belt and braces for a brief that matters
 ```
 
 **Do NOT call `cctabs send` immediately after `cctabs new`** — Claude is still starting up and the text will land as raw shell commands.
@@ -570,10 +661,29 @@ cctabs scrollback auth 200      # last 200 lines
 ```bash
 cctabs send auth "yes\n"        # approve a tool call
 cctabs send auth "\n"           # press enter (confirm a prompt)
+cctabs send auth --submit       # press Enter only — submits a prompt already parked in the box
 cctabs send auth "/clear\n"     # send a slash command
-cctabs send auth --file ~/prompts/task.txt   # send a full prompt from file
+cctabs send auth --path ~/prompts/task.txt   # hand over a path — the safe way for anything large
+cctabs send auth --file ~/prompts/task.txt   # paste the contents (short payloads only, see above)
 echo "do the thing" | cctabs send auth       # pipe via stdin
 ```
+
+**What `send` now refuses to do, and why it matters when driving a fleet:**
+
+- It **distinguishes three claims that used to be one ✔ line**: nothing arrived
+  (a hard failure), something arrived but completeness is unverified (a
+  warning), and verified. "Sent" and "arrived whole" are not the same fact.
+- It **will not submit a body that did not land at all.** Pressing Enter on a
+  fragment sends something that reads as a complete message. The text is left in
+  the input box instead, and the command exits non-zero.
+- `--verify` **compares what the session received** against what was sent, via
+  the target's transcript — the only reliable completeness check there is.
+- It **refuses payloads over 1 KB into a tab with a turn in flight** (`--force`
+  overrides). Short replies into a busy tab still work — that's what they're
+  for.
+- `--wait-for-prompt` reads the whole tail of the buffer, not just its last
+  line, so a `Restart to update` banner rendered *below* a ready prompt no
+  longer makes it time out.
 
 ## Workflow: Remote Control status across the fleet
 

@@ -6,7 +6,7 @@ import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
-import { findSessionsByNameGlobally, locateSessionById, resolveTabSession } from '../core/session.js'
+import { findSessionsByNameGlobally, locateSessionById, resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { launchEnvFor, resolveBackend } from '../core/backends.js'
 import type { ConfigDirScope } from '../core/config-dirs.js'
 import { parseManifest } from '../core/manifest.js'
@@ -230,9 +230,12 @@ async function runRestore(req: RestoreRequest): Promise<void> {
   }
 
   const results = new Map<PlannedEntry, string>(plan.map((p) => [p, summarizeDecision(p, dryRun)]))
+  const outcomes = new Map<PlannedEntry, RestoreOutcome>(
+    plan.map((p) => [p, plannedOutcome(p.action)]),
+  )
 
   if (!dryRun) {
-    await executePlan(adapter, plan, results, {
+    await executePlan(adapter, plan, results, outcomes, {
       baseOrder,
       blocksOf: (tabId) => (tabsById.get(tabId) ?? []).map((b) => b.blockid),
     })
@@ -243,6 +246,28 @@ async function runRestore(req: RestoreRequest): Promise<void> {
   console.log('\nRestore summary:')
   for (const p of plan) {
     console.log(`  ${p.entry.name}: ${results.get(p)}`)
+  }
+
+  if (dryRun) return
+
+  // The count, from what was verified rather than from what was attempted.
+  const acted = plan.filter((p) => plannedOutcome(p.action) !== 'skipped')
+  const finalOutcomes = acted.map((p) => outcomes.get(p) ?? 'unverified')
+  console.log(`\n${acted.length} tab(s) acted on: ${summarizeOutcomes(finalOutcomes)}`)
+
+  const failed = acted.filter((p) => outcomes.get(p) === 'failed')
+  if (failed.length) {
+    // Non-zero exit: a caller scripting a fleet restart has to be able to
+    // notice, and a restore that lost a tab is not a success.
+    consola.error(`${failed.length} tab(s) did not come back: ${failed.map((p) => p.entry.name).join(', ')}`)
+    process.exitCode = 1
+  }
+  const unconfirmed = acted.filter((p) => outcomes.get(p) === 'unverified')
+  if (unconfirmed.length) {
+    consola.warn(
+      `${unconfirmed.length} tab(s) could not be confirmed either way: ${unconfirmed.map((p) => p.entry.name).join(', ')}. ` +
+      `Read them with \`cctabs transcript <tab>\` before briefing anything from them.`,
+    )
   }
 }
 
@@ -418,11 +443,127 @@ export function summarizeDecision(p: PlannedEntry, dry: boolean): string {
   }
 }
 
+/**
+ * What actually became of one entry. Distinct from the display string so the
+ * final count is derived from facts rather than parsed back out of prose.
+ *
+ * `unverified` is a first-class outcome and not a rounding error: a tab can be
+ * up with its process running while its session is not yet confirmable, and
+ * calling that either "restored" or "failed" is a lie in one direction or the
+ * other. It is the honest third answer.
+ */
+export type RestoreOutcome = 'restored' | 'failed' | 'unverified' | 'skipped'
+
+/** The outcome an action implies before execution — pending, or never acted on. */
+export function plannedOutcome(action: PlannedEntry['action']): RestoreOutcome {
+  return action === 'attach' || action === 'recreate' || action === 'spawn'
+    ? 'unverified'
+    : 'skipped'
+}
+
+/**
+ * The count line, built from outcomes rather than from hope.
+ *
+ * The line this replaces read "78 spawned, 0 failed" while one tab was absent
+ * entirely and another had come back with no session — a summary computed from
+ * "did the spawn call return?", which cannot report a failure that happens
+ * after it returns. Every category is printed, including the zeroes, because
+ * "0 failed" only means something when it was possible for it to say otherwise.
+ */
+export function summarizeOutcomes(outcomes: RestoreOutcome[]): string {
+  const n = (o: RestoreOutcome) => outcomes.filter((x) => x === o).length
+  const parts = [
+    `${n('restored')} verified`,
+    `${n('unverified')} unconfirmed`,
+    `${n('failed')} failed`,
+  ]
+  const skipped = n('skipped')
+  if (skipped) parts.push(`${skipped} not acted on`)
+  return parts.join(', ')
+}
+
+/** What a post-spawn check found out about one tab. */
+export interface SpawnEvidence {
+  /** Is the tab still in the tab list at all? */
+  tabPresent: boolean
+  /** Does it hold a terminal block? */
+  hasTermBlock: boolean
+  /** Whether a process is running — `undefined` when the backend can't say. */
+  hasProcess: boolean | undefined
+  /** The session this entry asked to resume, if any. */
+  requestedSessionId?: string
+  /** The session now resolvable for the tab's name and directory, if any. */
+  resolvedSessionId?: string
+}
+
+export interface SpawnVerdict {
+  outcome: RestoreOutcome
+  /** The per-entry line, replacing the optimistic one written at spawn time. */
+  note: string
+}
+
+/**
+ * Judge a spawned tab from what the terminal and the transcripts say afterwards.
+ *
+ * Pure, because these are the rules that decide whether a restore is reported
+ * as successful, and they should be readable and testable without a terminal or
+ * a 78-tab fleet. Each branch is a failure that has actually been observed and
+ * reported as success.
+ */
+export function judgeSpawn(e: SpawnEvidence): SpawnVerdict {
+  if (!e.tabPresent) {
+    return { outcome: 'failed', note: '✘ spawn returned but the tab is not in the tab list' }
+  }
+  if (!e.hasTermBlock) {
+    return { outcome: 'failed', note: '✘ tab exists but has no terminal in it' }
+  }
+  if (e.hasProcess === false) {
+    return { outcome: 'failed', note: '✘ tab exists but nothing is running in it' }
+  }
+
+  // A resume that quietly started a NEW conversation is the loss that hurts:
+  // the tab looks perfect and the context is gone. It shows up as a different
+  // session id now answering to this tab's name.
+  if (e.requestedSessionId && e.resolvedSessionId && e.resolvedSessionId !== e.requestedSessionId) {
+    return {
+      outcome: 'failed',
+      note: `✘ came back as a DIFFERENT session (${e.resolvedSessionId.slice(0, 8)}…, asked for ${e.requestedSessionId.slice(0, 8)}…) — it started a fresh conversation instead of resuming, so the context is not restored`,
+    }
+  }
+
+  if (!e.resolvedSessionId) {
+    return {
+      outcome: 'unverified',
+      note: e.hasProcess
+        ? '? running, but no session is on disk for it yet — check it before relying on its context'
+        : '? tab is there; neither its process nor its session could be confirmed',
+    }
+  }
+
+  return {
+    outcome: 'restored',
+    note: `✔ verified running ${e.resolvedSessionId.slice(0, 8)}…`,
+  }
+}
+
+/**
+ * How long to let a freshly spawned tab settle before verifying it.
+ *
+ * Two things have to have happened: the process has to exist (immediate when
+ * the backend advertises `spawn-waits-for-pty`, a second or so otherwise), and
+ * Claude has to have written its `custom-title` line, which is what makes the
+ * session findable by name. Too short a wait turns healthy tabs into
+ * `unconfirmed`, which is noise; this is deliberately generous because the
+ * check runs once for the whole fleet, not once per tab.
+ */
+const VERIFY_SETTLE_MS = 4000
+
 /** Carry out a plan. Only ever called for a real (non-dry) run. */
 async function executePlan(
   adapter: TerminalAdapter,
   plan: PlannedEntry[],
   results: Map<PlannedEntry, string>,
+  outcomes: Map<PlannedEntry, RestoreOutcome>,
   ctx: {
     /** Scan mode: the full pre-restore tab order to rebuild. */
     baseOrder: string[] | undefined
@@ -471,9 +612,18 @@ async function executePlan(
     await sleep(10_000)
     for (const p of attached) {
       const status = adapter.detectSessionStatus(p.blockId!)
-      if (status === 'active' || status === 'idle') results.set(p, '✔ running')
-      else if (status === 'unreadable') results.set(p, '? no output captured — check it yourself')
-      else results.set(p, '✘ may not have started')
+      if (status === 'active' || status === 'idle') {
+        results.set(p, '✔ running')
+        outcomes.set(p, 'restored')
+      } else if (status === 'unreadable') {
+        // Readability is not liveness (see session-status.ts) — an empty
+        // capture is a statement about the capture. Neither pass nor fail.
+        results.set(p, '? no output captured — check it yourself')
+        outcomes.set(p, 'unverified')
+      } else {
+        results.set(p, '✘ may not have started')
+        outcomes.set(p, 'failed')
+      }
     }
   }
 
@@ -507,9 +657,13 @@ async function executePlan(
         finalTabId.set(p, newTabId)
         if (p.closeTabId) replacements.set(p.closeTabId, newTabId)
         const verb = p.action === 'recreate' ? 'recreated' : 'spawned'
-        results.set(p, `✔ ${verb} [${newTabId.slice(0, 8)}] (${shortId(p.sessionId)})`)
+        // Provisional: the spawn call returning is not the tab working, which
+        // is the whole reason for the verification pass below.
+        results.set(p, `… ${verb} [${newTabId.slice(0, 8)}] (${shortId(p.sessionId)}), not yet verified`)
+        outcomes.set(p, 'unverified')
       } catch (err) {
         results.set(p, `✘ ${p.action} failed: ${(err as Error).message}`)
+        outcomes.set(p, 'failed')
       }
     }
 
@@ -531,6 +685,16 @@ async function executePlan(
     }
   }
 
+  // -- verify what we just spawned, before claiming any of it worked --
+  if (toSpawn.length) {
+    await verifySpawns(
+      adapter,
+      toSpawn.filter((p) => finalTabId.has(p)).map((p) => ({ p, tabId: finalTabId.get(p)! })),
+      results,
+      outcomes,
+    )
+  }
+
   // -- rebuild the tab bar --
   // Best-effort: adapters without reorderTabs keep the append order, and
   // reorderTabs leaves unlisted tabs in their relative slot, sorted after.
@@ -547,6 +711,73 @@ async function executePlan(
         consola.warn(`Could not restore tab order: ${(err as Error).message}`)
       }
     }
+  }
+}
+
+/**
+ * Re-read the terminal after spawning and decide what actually came up.
+ *
+ * This is the fix for a restore that reported "78 spawned, 0 failed" with one
+ * tab missing and one stripped of its context. Nothing here trusts the spawn
+ * call: the tab list is fetched again, the process is looked for, and the
+ * session is resolved from disk — with the title-index cache dropped first,
+ * because the cache was built while planning and would happily confirm the
+ * pre-restore world.
+ *
+ * One fleet-wide settle, then one round of reads. A per-tab wait would turn a
+ * 78-tab restore's verification into minutes.
+ */
+async function verifySpawns(
+  adapter: TerminalAdapter,
+  spawned: Array<{ p: PlannedEntry; tabId: string }>,
+  results: Map<PlannedEntry, string>,
+  outcomes: Map<PlannedEntry, RestoreOutcome>,
+): Promise<void> {
+  if (!spawned.length) return
+
+  consola.info(`Verifying ${spawned.length} spawned tab(s)…`)
+  await sleep(VERIFY_SETTLE_MS)
+  resetTitleIndexCache()
+
+  let tabsById: Map<string, Block[]>
+  try {
+    ({ tabsById } = await adapter.getAllData())
+  } catch (err) {
+    // Losing the terminal at this point tells us nothing about the tabs, so
+    // they stay `unverified` — reporting them as failed would be as wrong as
+    // reporting them as restored.
+    consola.warn(`Could not re-read the tab list to verify the restore: ${(err as Error).message}`)
+    return
+  }
+
+  // Same reasoning as buildPlanDeps: if any tab reports a pid, the ones that
+  // don't genuinely have no process. If none do, the backend can't say.
+  const reportsPids = [...tabsById.values()]
+    .some((blocks) => blocks.some((b) => typeof b.pid === 'number'))
+
+  for (const { p, tabId } of spawned) {
+    const blocks = tabsById.get(tabId) ?? []
+    const term = blocks.find((b) => b.view === 'term')
+
+    let resolvedSessionId: string | undefined
+    if (p.dir) {
+      try {
+        resolvedSessionId = resolveTabSession(p.dir, p.entry.name)?.id
+      } catch {
+        // An unreadable projects dir leaves the session unconfirmed, which
+        // judgeSpawn already treats as its own answer.
+      }
+    }
+
+    const verdict = judgeSpawn({
+      tabPresent: blocks.length > 0,
+      hasTermBlock: !!term,
+      hasProcess: reportsPids ? typeof term?.pid === 'number' : undefined,
+      requestedSessionId: p.sessionId,
+      resolvedSessionId,
+    })
+    results.set(p, `${verdict.note} [${tabId.slice(0, 8)}]`)
+    outcomes.set(p, verdict.outcome)
   }
 }
 

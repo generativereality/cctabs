@@ -8,6 +8,7 @@ import { shellQuoteArg } from './shell.js'
 import { autoModeDialogVisible, trustDialogVisible } from './session-status.js'
 import { hasPriorSessions } from './session.js'
 import { applyTabColor, supportsTabColor } from './colors.js'
+import { countPayloadLines, judgePaste, readPasteEvidence, type PasteVerdict } from './paste-confirm.js'
 
 interface OpenSessionOptions {
   tabName: string
@@ -97,55 +98,78 @@ export interface ConfirmedSendOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
+/** The outcome of a confirmed send, with the evidence behind it. */
+export interface ConfirmedSendResult {
+  /** Something from the payload reached the tab. */
+  landed: boolean
+  /** We could establish that ALL of it reached the tab — see judgePaste. */
+  confirmed: boolean
+  /** Why we concluded that — surfaced verbatim to the operator. */
+  detail: string
+  /** True when the text was too short to fingerprint, so nothing was checked. */
+  unchecked?: boolean
+}
+
 /**
  * Send `text`, confirm it actually landed in the input box, and re-send
  * (clearing the line first) if not.
  *
- * The naive "just send it" is unreliable: text sent into a not-yet-ready
- * input handler is silently lost — sometimes entirely, sometimes only its
- * front, which reads as a message arriving with its lead-in truncated. The
- * fix is the same either way: a distinctive chunk from the *front* of the
- * text (the part observed to go missing) doubles as the landed-detector, so
- * a front-clipped send is caught exactly like a fully-dropped one.
+ * The naive "just send it" is unreliable in three distinct ways, and the third
+ * is the one that cost real work:
+ *
+ *   1. The paste can be dropped entirely by a not-yet-ready input handler.
+ *   2. It can lose its FRONT, which reads as a message whose lead-in was
+ *      trimmed rather than as a failure. A fingerprint of the front doubles as
+ *      the detector, so a front-clip is caught exactly like a full drop.
+ *   3. It can lose most of itself and still LOOK delivered. Claude collapses a
+ *      large paste into a `[Pasted text #N +M lines]` chip, and the chip
+ *      renders no matter how little arrived — so "a chip is on screen" was
+ *      accepted as proof while 89% of a measured 6,835-byte payload was gone.
+ *      The chip's own line count is now compared against what was sent (see
+ *      paste-confirm.ts), which is the only quantitative handle a collapsed
+ *      paste offers.
  *
  * Text too short to fingerprint reliably (under 4 non-whitespace chars, e.g.
  * a bare "y" answering a prompt) is sent once, unconfirmed, rather than
- * looping against ambiguous scrollback noise.
+ * looping against ambiguous scrollback noise — reported as `unchecked` so a
+ * caller doesn't present "not verified" as "verified".
  */
 export async function sendTextWithConfirmation(
   adapter: TerminalAdapter,
   blockId: string,
   text: string,
   opts: ConfirmedSendOptions = {},
-): Promise<boolean> {
+): Promise<ConfirmedSendResult> {
   const sleepFn = opts.sleep ?? sleep
   const payload = opts.bracketedPaste ? `\x1b[200~${text}\x1b[201~` : text
   const sentinel = text.replace(/\s+/g, '').slice(0, 24)
+  const expectedLines = countPayloadLines(text)
 
   if (sentinel.length < 4) {
     await adapter.sendInput(blockId, payload)
-    return true
+    return { landed: true, confirmed: false, unchecked: true, detail: 'too short to fingerprint — sent without confirmation' }
   }
 
   const attempts = opts.attempts ?? 3
   const pollCount = opts.pollCount ?? 8
   const pollIntervalMs = opts.pollIntervalMs ?? 300
-  const landed = (): boolean => {
-    const c = adapter.scrollback(blockId, 60).replace(/\s+/g, '')
-    return c.includes(sentinel) || c.includes('[Pastedtext')
-  }
+  const check = (): PasteVerdict =>
+    judgePaste(readPasteEvidence(adapter.scrollback(blockId, 60), sentinel), expectedLines)
 
-  let inBox = false
-  for (let attempt = 0; attempt < attempts && !inBox; attempt++) {
-    // Clear first on retries so a re-send never stacks a second copy.
+  let verdict: PasteVerdict = { landed: false, confirmed: false, detail: 'the send was never attempted' }
+  for (let attempt = 0; attempt < attempts && !verdict.landed; attempt++) {
+    // Clear first on retries so a re-send never stacks a second copy. This also
+    // clears a TRUNCATED previous attempt, which is why a short-chip verdict
+    // must be a retry rather than an accepted success.
     if (attempt > 0) { await adapter.sendInput(blockId, '\x15'); await sleepFn(200) }
     await adapter.sendInput(blockId, payload)
     for (let i = 0; i < pollCount; i++) {
       await sleepFn(pollIntervalMs)
-      if (landed()) { inBox = true; break }
+      verdict = check()
+      if (verdict.landed) break
     }
   }
-  return inBox
+  return verdict
 }
 
 /**
@@ -212,9 +236,12 @@ async function sendInitialPrompt(
   const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
 
   // Stage 1: paste, confirm it landed, re-paste if dropped.
-  const inBox = await sendTextWithConfirmation(adapter, blockId, prompt, { bracketedPaste: true })
-  if (!inBox) {
-    consola.warn('Initial prompt may not have landed in the input box — switch to the tab and press Enter (re-type if the box is empty).')
+  const sent = await sendTextWithConfirmation(adapter, blockId, prompt, { bracketedPaste: true })
+  if (!sent.landed) {
+    // Do not press Enter. Submitting now would send whatever fraction DID
+    // arrive as though it were the whole prompt, which is worse than not
+    // sending it: a truncated brief reads as a complete one.
+    consola.warn(`Initial prompt did not land in the input box (${sent.detail}) — NOT submitting it, since a partial prompt would look like the whole one. Switch to the tab, clear the box (ctrl+u) and paste it yourself: ${initialPromptFile}`)
     return
   }
 

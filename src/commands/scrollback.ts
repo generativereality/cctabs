@@ -1,47 +1,37 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
+import { resolveTabTarget } from '../core/tab-target.js'
 
 export const scrollbackCommand = define({
   name: 'scrollback',
-  description: 'Show terminal output for a tab or block (default: last 50 lines)',
+  description: 'Show terminal output for a tab or block (default: last 50 lines). This is the last PAINTED FRAME — a tab mid-turn shows a spinner and little else, so use `cctabs transcript` to read what it has actually said.',
   args: {
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
-    lines: { type: 'number', description: 'Number of lines to show', default: 50 },
+    // No gunshi `default` here on purpose: a default fills the value in
+    // unconditionally, which would make the `[n]` positional below unreachable.
+    lines: { type: 'number', description: 'Number of lines to show (default: 50)' },
   },
   async run(ctx) {
     const query = ctx.positionals[1]
-    const lines = (ctx.values.lines as number | undefined) ?? 50
+    // `[n]` as a bare second positional, matching the shape the skill documents
+    // (`cctabs scrollback <tab> [n]`), which --lines alone never supported.
+    const positionalN = Number(ctx.positionals[2])
+    const lines =
+      (ctx.values.lines as number | undefined) ??
+      (Number.isFinite(positionalN) && positionalN > 0 ? positionalN : 50)
     if (!query) { consola.error('Tab name or block ID is required'); process.exit(1) }
 
     const adapter = requireAdapter()
     const { tabsById, tabNames } = await adapter.getAllData()
 
-    // Try tab name resolution first (same logic as `send`)
-    const tabMatches = adapter.resolveTab(query, tabsById, tabNames)
-    let blockId: string
-
-    if (tabMatches.length === 1) {
-      const blocks = (tabsById.get(tabMatches[0]) ?? []).filter((b) => b.view === 'term')
-      if (!blocks.length) { consola.error(`Tab "${tabNames.get(tabMatches[0])}" has no terminal block`); process.exit(1) }
-      blockId = blocks[0].blockid
-    } else if (tabMatches.length > 1) {
-      consola.error(`Multiple tabs match '${query}':`)
-      for (const tid of tabMatches) consola.log(`  "${tabNames.get(tid)}"  [${tid.slice(0, 8)}]`)
+    const resolved = resolveTabTarget(adapter, query, tabsById, tabNames)
+    if (!resolved.ok) {
+      consola.error(resolved.message)
+      for (const line of resolved.lines ?? []) consola.log(line)
       process.exit(1)
-    } else {
-      // Fall back to block ID prefix resolution
-      const allBlocks = adapter.blocksList()
-      const blockMatches = adapter.resolveBlock(query, allBlocks)
-      if (!blockMatches.length) { consola.error(`No tab or block matching '${query}' (tabs in workspaces with no open window are not visible — open that workspace first)`); process.exit(1) }
-      if (blockMatches.length > 1) {
-        consola.error(`Multiple blocks match '${query}':`)
-        for (const b of blockMatches) consola.log(`  ${b.blockid}`)
-        process.exit(1)
-      }
-      blockId = blockMatches[0].blockid
     }
 
-    process.stdout.write(adapter.scrollback(blockId, lines))
+    process.stdout.write(adapter.scrollback(resolved.target.blockId, lines))
   },
 })

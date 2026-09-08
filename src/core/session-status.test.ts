@@ -3,6 +3,7 @@ import {
   autoModeDialogVisible,
   classifyTerminalBuffer,
   parsePermissionMode,
+  promptIsReady,
   toLaunchableMode,
   trustDialogVisible,
 } from './session-status.js'
@@ -226,5 +227,41 @@ describe('autoModeDialogVisible', () => {
     expect(autoModeDialogVisible(LIVE_FOOTER)).toBe(false)
     expect(autoModeDialogVisible(TRUST_DIALOG)).toBe(false)
     expect(autoModeDialogVisible('')).toBe(false)
+  })
+})
+
+describe('promptIsReady', () => {
+  it('accepts a bare shell prompt', () => {
+    expect(promptIsReady('~/Dev/cctabs %')).toBe(true)
+    expect(promptIsReady('user@host:~$')).toBe(true)
+  })
+
+  it("accepts Claude's input line with its placeholder", () => {
+    expect(promptIsReady('❯ Try "fix the failing test"')).toBe(true)
+  })
+
+  it("accepts Claude's input footer", () => {
+    expect(promptIsReady('  ⏵⏵ auto mode on   shift+tab to cycle')).toBe(true)
+  })
+
+  // The measured false negative: --wait-for-prompt timed out at 20s against
+  // tabs whose prompts were ready, because Claude renders this notice BELOW
+  // the input line and only the last line was being tested.
+  it('sees a ready prompt underneath a "Restart to update" banner', () => {
+    const buffer = [
+      '❯ Try "fix the failing test"',
+      '',
+      '  Restart to update to v2.1.4',
+    ].join('\n')
+    expect(promptIsReady(buffer)).toBe(true)
+  })
+
+  it('is false for an empty buffer', () => {
+    expect(promptIsReady('')).toBe(false)
+    expect(promptIsReady('   \n  ')).toBe(false)
+  })
+
+  it('is false for a tab showing no prompt at all', () => {
+    expect(promptIsReady('✽ Dilly-dallying… (14m 5s · ↓34.9k tokens)')).toBe(false)
   })
 })
