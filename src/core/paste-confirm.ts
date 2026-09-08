@@ -114,20 +114,26 @@ export interface DeliveryVerdict {
 }
 
 /**
- * Compare a payload against the text the target session actually received.
+ * Compare a payload against the messages the target session actually received.
  *
  * This is the only trustworthy answer to "did all of it arrive?", and it is
- * available because Claude writes the user message it received to its
+ * available because Claude writes the user messages it received to its
  * transcript. Both sides are whitespace-stripped before comparing: `send`
  * converts newlines to CR on the way out, the transcript stores LF, and the
  * terminal is free to re-wrap in between — none of which is a delivery failure.
+ *
+ * ALL the session's messages are searched, not just its newest, and that is a
+ * fix rather than thoroughness: checking only the newest one raced against the
+ * session's own work. A `--path` handoff tells the tab to read a file, so by the
+ * time the check ran the newest user-role entry was the file it had read, and
+ * the payload was reported as matching neither end of itself.
  *
  * The front and the tail are checked separately and named separately, because
  * which end is missing is the diagnostic: a missing front is the observed
  * clipping mode, while a missing tail would be something else entirely.
  */
-export function judgeDelivery(payload: string, received: string | null): DeliveryVerdict {
-  if (received === null) {
+export function judgeDelivery(payload: string, received: readonly string[] | null): DeliveryVerdict {
+  if (!received || received.length === 0) {
     return {
       delivered: false,
       detail: 'the target session has not recorded any message matching this send — it may not have been submitted, or the session may not have started its turn yet',
@@ -136,27 +142,33 @@ export function judgeDelivery(payload: string, received: string | null): Deliver
 
   const strip = (s: string) => s.replace(/\s+/g, '')
   const want = strip(payload)
-  const got = strip(received)
   const FINGERPRINT = 40
-
   const front = want.slice(0, FINGERPRINT)
   const tail = want.slice(-FINGERPRINT)
-  const frontOk = got.includes(front)
-  const tailOk = got.includes(tail)
 
-  if (frontOk && tailOk) {
-    return {
-      delivered: true,
-      detail: `the session received the whole payload (front and tail both present in its transcript, ${want.length} non-whitespace chars sent)`,
+  let sawFront = false
+  let sawTail = false
+  for (const message of received) {
+    const got = strip(message)
+    const frontOk = got.includes(front)
+    const tailOk = got.includes(tail)
+    if (frontOk && tailOk) {
+      return {
+        delivered: true,
+        detail: `the session received the whole payload (front and tail both present in its transcript, ${want.length} non-whitespace chars sent)`,
+      }
     }
+    sawFront = sawFront || frontOk
+    sawTail = sawTail || tailOk
   }
-  if (!frontOk && tailOk) {
+
+  if (!sawFront && sawTail) {
     return {
       delivered: false,
       detail: 'the session received the END of the payload but not its FRONT — this is the front-clipping failure mode; re-send with --path',
     }
   }
-  if (frontOk && !tailOk) {
+  if (sawFront && !sawTail) {
     return {
       delivered: false,
       detail: 'the session received the FRONT of the payload but not its end — it was cut short; re-send with --path',
@@ -164,6 +176,6 @@ export function judgeDelivery(payload: string, received: string | null): Deliver
   }
   return {
     delivered: false,
-    detail: 'the message the session recorded matches neither end of what was sent',
+    detail: `none of the ${received.length} message(s) the session recorded matches either end of what was sent`,
   }
 }

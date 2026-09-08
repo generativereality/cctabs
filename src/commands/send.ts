@@ -7,8 +7,9 @@ import { sendTextWithConfirmation } from '../core/open-session.js'
 import { resolveTabTarget } from '../core/tab-target.js'
 import { classifyTerminalBuffer, promptIsReady } from '../core/session-status.js'
 import { judgeDelivery } from '../core/paste-confirm.js'
-import { resolveTabSession } from '../core/session.js'
-import { locateTranscriptFile, readLastUserMessage } from '../core/transcript.js'
+import { resetTitleIndexCache, resolveTabSession } from '../core/session.js'
+import { locateTranscriptFile, readUserMessages } from '../core/transcript.js'
+import { parseSendArgv } from '../core/send-argv.js'
 
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
@@ -37,9 +38,20 @@ export const CLIP_RISK_BYTES = 1024
  * from disk by the receiving session. It became the operator's standing
  * practice for briefs after a 6,835-byte paste arrived as 756 bytes, and it is
  * first-class here for that reason rather than as a convenience.
+ *
+ * One consequence worth knowing, because it reads like a bug: the receiving
+ * session obeys this by *reading the file*, so the file's contents land in its
+ * transcript as a tool result. Seeing the contents there means the handoff
+ * worked — it does not mean they were pasted.
  */
 export function buildPathHandoff(absPath: string): string {
   return `Read the file at ${absPath} in full, and treat its entire contents as the message intended for you — it is your instructions, not a document to summarise.`
+}
+
+/** Report a usage failure and exit, before any terminal has been touched. */
+function adapterlessExit(message: string): never {
+  consola.error(message)
+  process.exit(1)
 }
 
 export const sendCommand = define({
@@ -48,7 +60,7 @@ export const sendCommand = define({
   args: {
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     file: { type: 'string', short: 'f', description: 'Read the text to send from a file' },
-    path: { type: 'string', short: 'p', description: 'Hand the tab this file PATH and let the receiving session read it, instead of pasting the contents. The robust way to deliver anything large: nothing but a path crosses the prompt line, so there is no truncation surface.' },
+    path: { type: 'string', short: 'p', description: "Hand the tab this file PATH and let the receiving session read it, instead of pasting the contents. The robust way to deliver anything large: only the path crosses the prompt line, so there is no truncation surface. Note the receiving session then READS the file, so its transcript will contain the contents as a tool result — that is the handoff working, not a paste." },
     submit: { type: 'boolean', description: 'Send Enter only, submitting whatever is already parked in the tab\'s input box. Explicit alternative to guessing at an empty send.' },
     enter: { type: 'boolean', short: 'e', description: 'Append newline after text (default: true)' },
     force: { type: 'boolean', description: `Send even when the target has a turn in flight. Without this, payloads over ${CLIP_RISK_BYTES} bytes are refused for a busy tab, because that is when text gets silently clipped.` },
@@ -59,10 +71,14 @@ export const sendCommand = define({
     'wait-timeout': { type: 'number', description: 'Timeout in seconds for --wait-for-prompt (default: 10)' },
   },
   async run(ctx) {
-    const query = ctx.positionals[1]
-    // Inline text is the second positional — undeclared to keep it optional
-    // (declaring it as a positional makes gunshi require it, breaking --file and stdin)
-    const inlineText = ctx.positionals[2]
+    // Positionals come from the RAW command line, not from the option parser.
+    // The parser drops any argv element containing `--`, which silently ate the
+    // payload of any message that quoted a flag name and left `send` reporting
+    // success for a delivery of nothing. See core/send-argv.ts.
+    const rawArgv = process.argv.slice(2)
+    const cliArgs = parseSendArgv(rawArgv[0] === 'send' ? rawArgv.slice(1) : rawArgv)
+    const query = cliArgs.target
+    const inlineText = cliArgs.text
     const filePath = ctx.values.file as string | undefined
     const handoffPath = ctx.values.path as string | undefined
     const submitOnly = (ctx.values.submit as boolean | undefined) ?? false
@@ -116,14 +132,23 @@ export const sendCommand = define({
     if (rawText.endsWith('\r')) { rawText = rawText.replace(/\r+$/, ''); sendEnter = true }
     if (submitOnly) sendEnter = true
 
-    // An empty body with no explicit --submit is almost always a mistake — an
-    // empty file, or a pipe that produced nothing — and it presses Enter in
-    // someone's session either way. Say what happened instead of doing it
-    // silently, and point at the flag that means it on purpose.
-    if (!submitOnly && rawText.length === 0) {
-      consola.warn(
-        `Nothing to send${filePath ? ` — ${filePath} is empty` : ''}. ` +
-        `Pressing Enter only; pass --submit if that is what you meant.`,
+    // An empty body that nobody asked for is a FAILURE, not a warning.
+    //
+    // This is the tell the operator spotted: `✔ Sent to 5f3e853e: ⏎` with an
+    // empty preview, for a ~900-byte report that arrived nowhere. Pressing
+    // Enter and reporting success is the worst possible response to "I ended up
+    // with no payload" — it looks like a delivery. An explicit empty is still
+    // honoured: `--submit`, or a literal `""` argument, both mean "just submit".
+    const explicitlyEmpty = submitOnly || inlineText === '' || cliArgs.explicitText
+    if (!explicitlyEmpty && rawText.length === 0) {
+      adapterlessExit(
+        filePath
+          ? `${filePath} is empty, so there is nothing to send. Pass --submit if you meant to press Enter on a prompt already in the box.`
+          : handoffPath !== undefined
+            ? `${handoffPath} produced no message to send.`
+            : inlineText === undefined
+              ? `No text to send: no inline argument, no --file, no --path, and stdin was empty. If your text contains \`--\`, put it after a \`--\` terminator: cctabs send ${query ?? '<tab>'} -- <your text>`
+              : 'Nothing to send.',
       )
     }
 
@@ -252,7 +277,10 @@ export const sendCommand = define({
     // different claims. They used to be one ✔ line, which is how a partial
     // delivery came to look like a success.
     if (rawText.length === 0) {
-      consola.success(`Sent to ${blockId.slice(0, 8)}: ${label}`)
+      // Named, not shown as an empty preview. An empty preview after a ✔ was
+      // the tell that a ~900-byte payload had been eaten by the arg parser, so
+      // that shape must never appear for anything but a deliberate bare Enter.
+      consola.success(`Submitted Enter only (no body) to ${blockId.slice(0, 8)}`)
     } else if (unchecked) {
       consola.info(`Sent to ${blockId.slice(0, 8)} (unconfirmed — ${detail}): ${label}`)
     } else if (!confirmed) {
@@ -266,9 +294,16 @@ export const sendCommand = define({
 /**
  * Poll the target's transcript until it records the message, then compare.
  *
- * Waits rather than reading once: the message is written when the turn starts,
- * which is a beat after Enter. A timeout is reported as a failed verification
- * rather than a pass, because "I could not check" must not read as "it arrived".
+ * Everything here retries until the deadline, including finding the session.
+ * Resolving it once up front was a real defect: a freshly spawned tab has no
+ * transcript on disk for a second or two, so `--verify` failed instantly with
+ * "no session resolved for tab" against a tab that was perfectly fine and about
+ * to record the message. The title index is dropped each round for the same
+ * reason — it is cached per process, and the session we are waiting for is
+ * precisely the one that appears after the cache was built.
+ *
+ * A timeout is reported as a failed verification rather than a pass, because
+ * "I could not check" must not read as "it arrived".
  */
 async function verifyDelivered(
   tabName: string,
@@ -276,28 +311,37 @@ async function verifyDelivered(
   payload: string,
   timeoutSec: number,
 ): Promise<{ delivered: boolean; detail: string }> {
-  const session = resolveTabSession(tabCwd, tabName)
-  if (!session) {
-    return { delivered: false, detail: `no session resolved for tab "${tabName}" in ${tabCwd}, so there is no transcript to check` }
-  }
-  const located = locateTranscriptFile(session.id)
-  if (!located) {
-    return { delivered: false, detail: `session ${session.id.slice(0, 8)} has no transcript on disk under any Claude config dir` }
-  }
-
   const deadline = Date.now() + timeoutSec * 1000
   let last = judgeDelivery(payload, null)
+  let sawSession = false
+
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000))
-    let received: string | null = null
+
+    resetTitleIndexCache()
+    const session = resolveTabSession(tabCwd, tabName)
+    if (!session) continue
+    sawSession = true
+
+    const located = locateTranscriptFile(session.id)
+    if (!located) continue
+
+    let messages: string[]
     try {
-      received = readLastUserMessage(located.file)
+      messages = readUserMessages(located.file)
     } catch {
       // A transcript being appended to mid-read; try again.
       continue
     }
-    last = judgeDelivery(payload, received)
+    last = judgeDelivery(payload, messages)
     if (last.delivered) return last
+  }
+
+  if (!sawSession) {
+    return {
+      delivered: false,
+      detail: `no session for tab "${tabName}" in ${tabCwd} appeared within ${timeoutSec}s, so there was no transcript to check`,
+    }
   }
   return last
 }

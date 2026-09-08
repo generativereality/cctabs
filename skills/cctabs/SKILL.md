@@ -192,6 +192,7 @@ cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin 
 cctabs send <tab> --path <file>          # hand the tab a file PATH to read — the safe way to deliver anything large
 cctabs send <tab> --file <f> --verify    # check the target's transcript for what it actually RECEIVED
 cctabs send <tab> --submit               # press Enter only, submitting a prompt already parked in the box
+cctabs send <tab> -- <free text>         # REQUIRED when your text contains `--` (e.g. names a flag)
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball
 cctabs export --all [-w workspace]       # bundle every tab in a workspace
 cctabs import <tarball> [--dry-run] [-f] # restore tabs + sessions from a tarball
@@ -684,6 +685,27 @@ echo "do the thing" | cctabs send auth       # pipe via stdin
 - `--wait-for-prompt` reads the whole tail of the buffer, not just its last
   line, so a `Restart to update` banner rendered *below* a ready prompt no
   longer makes it time out.
+
+⛔ **Text containing `--` needs the `--` terminator.** The option parser drops
+any argv element containing a double dash, so a message that *quotes a flag
+name* — the normal case when one session reports a tool bug to another — used to
+vanish silently while `send` printed a ✔. `send` now recovers its positionals
+from the raw command line, so this works either way, but the terminator is the
+unambiguous form and the only one for text that is *entirely* flag-shaped:
+
+```bash
+cctabs send auth -- --verify is broken and --path too
+```
+
+An empty body is now a **hard error**, not a ✔ — so a swallowed payload fails
+loudly instead of pressing Enter and claiming success. A deliberate bare Enter
+(`--submit`, or a literal `""`) reports itself as `Submitted Enter only (no
+body)`.
+
+⚠️ **`--path` makes the receiving session READ the file, so the file's contents
+appear in its transcript as a tool result.** That is the handoff working — not a
+paste. (`--verify` knows the difference: it skips tool results and searches all
+of the session's real messages, not just the newest.)
 
 ## Workflow: Remote Control status across the fleet
 

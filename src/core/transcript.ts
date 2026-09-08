@@ -150,30 +150,38 @@ export function truncateTurn(text: string, maxChars?: number): string {
 }
 
 /**
- * The text of the most recent user message in a transcript.
+ * Every genuine user message in a transcript, oldest first.
  *
- * Used to verify a delivery against ground truth: this is what the receiving
- * session actually got, as opposed to what the terminal appeared to show. Note
- * that Claude appends its own context (system reminders and the like) to the
- * recorded message, so this is a superset of the payload — which is why callers
- * check that the payload's ends are *contained* in it rather than comparing
- * lengths.
+ * "Genuine" is doing real work here. Claude records a tool's OUTPUT as a
+ * `role: "user"` message too, so the newest user-role entry in a live session is
+ * usually a tool result, not something anyone sent. Measured: handing a tab a
+ * file with `send --path` produced a 284-byte user message (the handoff) and
+ * then a 2,469-byte user-role `tool_result` holding the file's contents — and a
+ * delivery check that read "the last user message" compared the handoff against
+ * the file and reported that the payload matched neither end of itself.
  *
- * Returns null when the transcript holds no user message with text, which is
- * the honest answer for a turn that hasn't started yet.
+ * Tool results are identified by the `toolUseResult` field on the entry, which
+ * a typed message never carries, and dropped. All of them are returned rather
+ * than just the newest, so a caller looking for a specific payload can find it
+ * even after the session has gone on to do work and appended more.
  */
-export function readLastUserMessage(file: string): string | null {
-  let latest: string | null = null
+export function readUserMessages(file: string): string[] {
+  const messages: string[] = []
 
   for (const line of readFileSync(file, 'utf-8').split('\n')) {
     if (!line.trim()) continue
-    let entry: { message?: { role?: string; content?: unknown } }
+    let entry: {
+      message?: { role?: string; content?: unknown }
+      toolUseResult?: unknown
+    }
     try {
       entry = JSON.parse(line)
     } catch {
       continue
     }
     if (entry.message?.role !== 'user') continue
+    // A tool's output, not a message. See above.
+    if (entry.toolUseResult !== undefined) continue
 
     const content = entry.message.content
     const text = Array.isArray(content)
@@ -189,8 +197,8 @@ export function readLastUserMessage(file: string): string | null {
         ? content
         : ''
 
-    if (text.trim()) latest = text
+    if (text.trim()) messages.push(text)
   }
 
-  return latest
+  return messages
 }

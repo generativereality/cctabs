@@ -7,6 +7,7 @@ import {
   locateTranscriptFile,
   parseAssistantTurns,
   readAssistantTurns,
+  readUserMessages,
   truncateTurn,
 } from './transcript.js'
 import { pathToProjectSlug } from './session.js'
@@ -181,5 +182,73 @@ describe('truncateTurn', () => {
     const out = truncateTurn('abcdefghij', 4)
     expect(out.startsWith('abcd')).toBe(true)
     expect(out).toContain('6 more characters')
+  })
+})
+
+describe('readUserMessages', () => {
+  const write = (lines: string[]): string => {
+    const dflt = cfg(join(tmp, '.claude'))
+    return writeTranscript(dflt.projectsRoot, '/work/repo', { id: 'sid-users', lines })
+  }
+
+  it('returns typed user messages oldest first', () => {
+    const file = write([
+      JSON.stringify({ type: 'user', origin: 'cli', message: { role: 'user', content: 'first' } }),
+      assistantLine('an answer'),
+      JSON.stringify({ type: 'user', origin: 'cli', message: { role: 'user', content: 'second' } }),
+    ])
+    expect(readUserMessages(file)).toEqual(['first', 'second'])
+  })
+
+  // THE FIX. Claude records a tool's OUTPUT as a role:"user" message, so the
+  // newest user-role entry in a live session is usually a tool result. A
+  // `--path` handoff makes the tab read a file, and treating that file as "the
+  // last thing sent to this tab" made the delivery check compare the handoff
+  // against the file and report that the payload matched neither end of itself.
+  // The entry shapes here are copied from a real transcript.
+  it('excludes tool results, which are recorded as user messages', () => {
+    const file = write([
+      JSON.stringify({
+        type: 'user', origin: 'cli', promptSource: 'text',
+        message: { role: 'user', content: 'Read the file at /tmp/brief.txt in full' },
+      }),
+      JSON.stringify({
+        type: 'user',
+        toolUseResult: { type: 'text', file: { filePath: '/tmp/brief.txt' } },
+        sourceToolAssistantUUID: 'abc',
+        message: { role: 'user', content: [{ type: 'tool_result', content: 'THE ENTIRE FILE CONTENTS' }] },
+      }),
+    ])
+    expect(readUserMessages(file)).toEqual(['Read the file at /tmp/brief.txt in full'])
+  })
+
+  // Belt and braces: even if a tool result arrives as a plain string rather
+  // than a content block, `toolUseResult` still identifies it.
+  it('excludes a tool result whose content is a bare string', () => {
+    const file = write([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'the real message' } }),
+      JSON.stringify({ type: 'user', toolUseResult: 'anything', message: { role: 'user', content: 'file contents' } }),
+    ])
+    expect(readUserMessages(file)).toEqual(['the real message'])
+  })
+
+  it('joins multiple text blocks and skips empty ones', () => {
+    const file = write([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'image', source: {} }] } }),
+    ])
+    expect(readUserMessages(file)).toEqual(['a\nb'])
+  })
+
+  it('skips a truncated trailing line rather than failing', () => {
+    const file = write([
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'complete' } }),
+      '{"message":{"role":"us',
+    ])
+    expect(readUserMessages(file)).toEqual(['complete'])
+  })
+
+  it('is empty for a transcript with no user messages', () => {
+    expect(readUserMessages(write([assistantLine('only me')]))).toEqual([])
   })
 })

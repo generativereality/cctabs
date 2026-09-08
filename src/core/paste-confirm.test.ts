@@ -86,43 +86,60 @@ describe('judgeDelivery', () => {
   it('confirms a payload whose front and tail both reached the session', () => {
     // Claude appends its own context to the recorded message, so the received
     // text is a superset — hence containment rather than equality.
-    const received = `${payload}\n<system-reminder>some appended context</system-reminder>`
-    const v = judgeDelivery(payload, received)
-    expect(v.delivered).toBe(true)
+    const received = [`${payload}\n<system-reminder>some appended context</system-reminder>`]
+    expect(judgeDelivery(payload, received).delivered).toBe(true)
   })
 
   // Whitespace differs on every hop: send converts LF to CR, the transcript
   // stores LF, and the terminal may re-wrap. None of that is a failure.
   it('ignores whitespace differences between what was sent and what was stored', () => {
-    const received = payload.replace(/\n/g, '\r\n  ')
+    expect(judgeDelivery(payload, [payload.replace(/\n/g, '\r\n  ')]).delivered).toBe(true)
+  })
+
+  // The race that produced a false failure: a `--path` handoff tells the tab to
+  // read a file, so the NEWEST user-role entry becomes the file it read. The
+  // payload has to be found among all the messages, not just the last.
+  it('finds the payload even when later messages have piled on top of it', () => {
+    const received = [
+      'some earlier instruction',
+      payload,
+      'BUG REPORT (test fixture)\nobservation 001: entirely unrelated file contents',
+    ]
     expect(judgeDelivery(payload, received).delivered).toBe(true)
   })
 
   // The observed clipping mode, and the reason each end is named separately.
   it('identifies a front-clipped delivery as such', () => {
-    // The tail arrives, the front does not — the received text must be long
-    // enough to hold the tail fingerprint, as a real clipped payload is.
-    const v = judgeDelivery(payload, payload.slice(-60))
+    const v = judgeDelivery(payload, [payload.slice(-60)])
     expect(v.delivered).toBe(false)
     expect(v.detail).toContain('END of the payload but not its FRONT')
   })
 
   it('identifies a delivery cut short at the end', () => {
-    const v = judgeDelivery(payload, payload.slice(0, 60))
+    const v = judgeDelivery(payload, [payload.slice(0, 60)])
     expect(v.delivered).toBe(false)
     expect(v.detail).toContain('FRONT of the payload but not its end')
   })
 
-  it('reports an unrelated message as matching neither end', () => {
-    const v = judgeDelivery(payload, 'something else entirely')
+  // Both ends present but in DIFFERENT messages is not a delivery: the payload
+  // was never received whole by anything.
+  it('does not accept the two ends arriving in separate messages', () => {
+    const v = judgeDelivery(payload, [payload.slice(0, 60), payload.slice(-60)])
     expect(v.delivered).toBe(false)
-    expect(v.detail).toContain('neither end')
+  })
+
+  it('reports unrelated messages as matching neither end, and says how many it saw', () => {
+    const v = judgeDelivery(payload, ['something else', 'and another thing'])
+    expect(v.delivered).toBe(false)
+    expect(v.detail).toContain('none of the 2 message(s)')
   })
 
   // "I could not check" must never read as "it arrived".
   it('reports nothing recorded as a failed verification, not a pass', () => {
-    const v = judgeDelivery(payload, null)
-    expect(v.delivered).toBe(false)
-    expect(v.detail).toContain('has not recorded any message')
+    for (const empty of [null, []]) {
+      const v = judgeDelivery(payload, empty)
+      expect(v.delivered).toBe(false)
+      expect(v.detail).toContain('has not recorded any message')
+    }
   })
 })
