@@ -141,7 +141,7 @@ describe('sendTextWithConfirmation', () => {
 
     const ok = await sendTextWithConfirmation(adapter, 'b1', TEXT, { sleep: async () => {} })
 
-    expect(ok).toBe(true)
+    expect(ok.landed).toBe(true)
     expect(inputs).toEqual([TEXT]) // no retry needed
   })
 
@@ -150,7 +150,7 @@ describe('sendTextWithConfirmation', () => {
 
     const ok = await sendTextWithConfirmation(adapter, 'b1', TEXT, { sleep: async () => {} })
 
-    expect(ok).toBe(true)
+    expect(ok.landed).toBe(true)
     expect(inputs).toEqual([TEXT, '\x15', TEXT]) // cleared before the re-send, never stacked
   })
 
@@ -167,7 +167,9 @@ describe('sendTextWithConfirmation', () => {
 
     const ok = await sendTextWithConfirmation(adapter, 'b1', 'y', { sleep: async () => {} })
 
-    expect(ok).toBe(true)
+    expect(ok.landed).toBe(true)
+    // Reported as unchecked, so a caller can't present it as verified.
+    expect(ok.unchecked).toBe(true)
     expect(inputs).toEqual(['y'])
   })
 
@@ -183,6 +185,34 @@ describe('sendTextWithConfirmation', () => {
       pollCount: 2,
     })
 
-    expect(ok).toBe(false)
+    expect(ok.landed).toBe(false)
+    expect(ok.confirmed).toBe(false)
+    expect(ok.detail).toContain('nothing from the text appeared')
+  })
+
+  // A collapsed paste is landed but unconfirmed, and that gap is the point:
+  // measured, a 6,892-byte payload delivered COMPLETELY into an idle tab while
+  // its chip read "+10 lines", so a short chip cannot be treated as truncation
+  // — but nor can the chip's presence be treated as proof of completeness.
+  it('reports a collapsed paste as landed without claiming it is complete', async () => {
+    const big = Array.from({ length: 120 }, (_, i) => `line ${i} of the brief`).join('\n')
+    const adapter = {
+      sendInput: async () => undefined,
+      scrollback: () => '[Pasted text #1 +10 lines]',
+    } as unknown as TerminalAdapter
+
+    const verdict = await sendTextWithConfirmation(adapter, 'b1', big, {
+      sleep: async () => {}, attempts: 1, pollCount: 1,
+    })
+
+    expect(verdict.landed).toBe(true)
+    expect(verdict.confirmed).toBe(false)
+    expect(verdict.detail).toContain('unverified')
+  })
+
+  it('confirms a paste it can actually see echoed', async () => {
+    const { adapter } = echoAdapter([0])
+    const verdict = await sendTextWithConfirmation(adapter, 'b1', TEXT, { sleep: async () => {} })
+    expect(verdict.confirmed).toBe(true)
   })
 })

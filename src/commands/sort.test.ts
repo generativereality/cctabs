@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { rankTabsByActivity } from './sort.js'
+import { parseFirstList, planPinnedOrder, rankTabsByActivity } from './sort.js'
 
 const names = (m: Record<string, string>) => new Map(Object.entries(m))
 const times = (m: Record<string, number>) => new Map(Object.entries(m))
@@ -50,5 +50,66 @@ describe('rankTabsByActivity', () => {
       times({ 'career-strategy': 900, other: 100 }),
     )
     expect(ranked.map((r) => r.name)).toEqual(['career-strategy', 'other'])
+  })
+})
+
+describe('parseFirstList', () => {
+  test('splits on commas and tolerates spacing', () => {
+    expect(parseFirstList('auth, payments ,billing')).toEqual(['auth', 'payments', 'billing'])
+  })
+
+  test('drops empty entries from stray commas', () => {
+    expect(parseFirstList('auth,,payments,')).toEqual(['auth', 'payments'])
+    expect(parseFirstList('')).toEqual([])
+  })
+})
+
+describe('planPinnedOrder', () => {
+  // The tab ids each name resolves to, standing in for adapter.resolveTab.
+  const resolver = (map: Record<string, string[]>) => (q: string) => map[q] ?? []
+
+  test('keeps the requested order, not the bar order', () => {
+    const plan = planPinnedOrder(
+      ['payments', 'auth'],
+      resolver({ auth: ['t-auth'], payments: ['t-pay'] }),
+    )
+    expect(plan.order).toEqual(['t-pay', 't-auth'])
+    expect(plan.names).toEqual(['payments', 'auth'])
+    expect(plan.unresolved).toEqual([])
+  })
+
+  test('reports a name that matches nothing', () => {
+    const plan = planPinnedOrder(['auth', 'ghost'], resolver({ auth: ['t-auth'] }))
+    expect(plan.unresolved).toEqual([{ query: 'ghost', reason: 'not-found' }])
+  })
+
+  test('reports an ambiguous name rather than picking one', () => {
+    const plan = planPinnedOrder(['gap'], resolver({ gap: ['t-1', 't-2'] }))
+    expect(plan.unresolved).toEqual([{ query: 'gap', reason: 'ambiguous' }])
+    expect(plan.order).toEqual([])
+  })
+
+  // --first a,b,a can't mean both "a is first" and "a is third".
+  test('collapses a repeated name to its first mention', () => {
+    const plan = planPinnedOrder(
+      ['auth', 'payments', 'auth'],
+      resolver({ auth: ['t-auth'], payments: ['t-pay'] }),
+    )
+    expect(plan.order).toEqual(['t-auth', 't-pay'])
+  })
+
+  // Two names resolving to the same tab is the same contradiction, arriving
+  // via a name and an id prefix instead of a repeat.
+  test('collapses two names that resolve to the same tab', () => {
+    const plan = planPinnedOrder(
+      ['auth', 'aabbccdd'],
+      resolver({ auth: ['t-auth'], aabbccdd: ['t-auth'] }),
+    )
+    expect(plan.order).toEqual(['t-auth'])
+    expect(plan.names).toEqual(['auth'])
+  })
+
+  test('an empty request pins nothing', () => {
+    expect(planPinnedOrder([], resolver({}))).toEqual({ order: [], names: [], unresolved: [] })
   })
 })
