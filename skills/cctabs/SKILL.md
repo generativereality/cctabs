@@ -52,6 +52,24 @@ On your first cctabs invocation in a session, look at the version banner cctabs 
 
 Don't silently work around an outdated CLI: detection heuristics, command flags, and bug fixes diverge between versions, so misbehavior on the user's machine is often "binary on PATH lags behind the plugin docs you're reading." The Claude Code marketplace plugin update path only refreshes this skill — the npm-installed CLI binary is a separate channel and must be upgraded explicitly.
 
+⚠️ **The drift runs the other way too: THIS TEXT can be the stale half.** Because
+those are two channels, the cached skill can lag the CLI by several releases. On
+2026-09-16 a driver was reading
+`<config-dir>/plugins/cache/generativereality/cctabs/0.5.0/skills/cctabs/SKILL.md`
+— **691 lines, zero occurrences of the word "trust"** — while the CLI on PATH was
+`0.5.3` and the source skill was 1030 lines and already documented the failure
+that then cost it five tabs. The cache path carries the version, so compare it
+against `cctabs --version`:
+
+```bash
+ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/cctabs/*/ && cctabs --version
+```
+
+If the cached version is behind, ask the user to run `/plugins` → Marketplaces →
+Update generativereality. Until they do, treat anything *absent* from this file as
+"possibly just missing here", not "not a thing" — and prefer `cctabs <cmd> --help`
+from the installed binary over this text where the two could disagree.
+
 ### A one-time plugin install is needed
 
 Tabby is the terminal cctabs supports, and it **needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
@@ -167,6 +185,86 @@ cctabs new fix-api ~/Dev/myapp --prompt "checkout PR #102 and fix tests"
 cctabs new fix-auth ~/Dev/myapp --worktree --prompt "checkout PR #101 and fix lint"
 cctabs new fix-api ~/Dev/myapp --worktree --prompt "checkout PR #102 and fix tests"
 ```
+
+⚠️ Both ✅ lines carry a precondition: `~/Dev/myapp` must be a repo **Claude Code
+has already been trusted in**. If it isn't, the tab opens on the trust dialog, the
+`--prompt` is never seen, and the spawn still reports fine — see **"The trust
+gate"** immediately below.
+
+## The trust gate: what eats a `--prompt` before Claude ever sees it
+
+⛔ **A tab opened where Claude Code isn't yet trusted never receives its
+`--prompt` or `--file`.** Measured 2026-09-16: seven tabs spawned, five of them
+`cctabs new <name> <dir> --worktree --file <brief>`. All five landed on the trust
+dialog and **none** got its brief. One brief was worse than lost — it reached the
+*shell* instead and started executing, npm-downloading `playwright` and
+`aws-cdk-lib` before that session dropped to a bare prompt.
+
+```
+Accessing workspace: <path>
+Quick safety check: Is this a project you created or one you trust? ...
+Claude Code'll be able to read, edit, and execute files here.
+  > No, exit
+    Yes, I trust this folder
+Enter to confirm   Esc to cancel
+```
+
+⚠️ **The marker starts on `No, exit`, so a bare Enter EXITS the session.** The
+working keystroke is Down-then-Enter — and `cctabs send` appends the Enter itself
+(it logs `sent "\u001b[B" ⏎`), so this is **one** call, never two:
+
+```bash
+printf '\033[B' | cctabs send <tab>   # ✅ Down + send's own Enter → "Yes, I trust this folder"
+cctabs send <tab> --submit            # ⛔ bare Enter confirms "No, exit" and kills the tab
+```
+
+### Which directories are gated — it is NOT "is it a worktree"
+
+Trust is recorded per path in **`${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`** as
+`projects["<abs path>"].hasTrustDialogAccepted` (that default really is
+`~/.claude.json`, a sibling of `~/.claude/` and not inside it). The check walks *up* from the
+tab's directory and takes the first ancestor marked `true` — but the walk **stops
+at the enclosing git repo root**, so trust never leaks in from above that root.
+For a `--worktree` path, that root resolves to the **main repository**, not the
+worktree directory.
+
+| Directory | Gated? |
+|---|---|
+| A repo already trusted at its root | no — **including any `--worktree` of it** |
+| A subdirectory of a trusted repo | no |
+| A repo Claude Code has never run in | **yes**, however many trusted ancestors it has |
+| Same repo, but under a different backend preset | **yes** — each `CLAUDE_CONFIG_DIR` has its own trust list |
+
+⇒ Two measurements from 2026-09-16 that pin this down. `~/Dev` had been marked
+trusted on 2026-08-28 and still did **not** trust `~/Dev/<team>/<repo>` — the walk
+stopped at `<repo>`'s own root. Meanwhile a `--worktree` tab cut from an
+already-trusted repo got no dialog at all. So "never use `--prompt` with
+`--worktree`" would be the wrong rule; the real precondition is **"this path's
+repo root is already trusted, in the config dir this tab will use"**.
+
+⭐ **Check it before you spawn** — cheap, read-only, and answers the question
+exactly:
+
+```bash
+root=$(git -C ~/Dev/myapp rev-parse --path-format=absolute --git-common-dir); root=${root%/.git}
+python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["projects"].get(sys.argv[2],{}).get("hasTrustDialogAccepted"))' \
+  "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" "$root"
+# True -> --prompt/--file will land.   None/False -> it will not; spawn bare.
+```
+
+Anything but `True` ⇒ **spawn bare, clear the gate, then send**, so no brief is in
+flight while a menu is on screen:
+
+```bash
+cctabs new fix-auth ~/Dev/myapp --worktree       # no --prompt/--file yet
+cctabs scrollback fix-auth                       # confirm it IS the trust dialog
+printf '\033[B' | cctabs send fix-auth           # "Yes, I trust this folder"
+cctabs send fix-auth --wait-for-prompt --path /tmp/brief.txt
+```
+
+A human can also pre-clear a repo once (run Claude Code in it and accept, or set
+`hasTrustDialogAccepted` for that root by hand) — that is their call to make, not
+a driver's, since it is the decision the dialog exists to ask.
 
 ## Quick Reference
 
@@ -597,12 +695,17 @@ The forked session shares full conversation history up to the fork point, then d
 
 As a Claude Code session, you can spawn a sibling session for a **genuinely independent** parallel task:
 
-**Preferred: pass the initial task directly to `cctabs new`** using `--prompt` or `--file`. This polls internally until Claude's `❯` prompt appears before sending — no race condition:
+**Preferred: pass the initial task directly to `cctabs new`** using `--prompt` or `--file`. This polls internally until Claude's `❯` prompt appears before sending, which closes the *startup* race:
 
 ```bash
 cctabs new payments ~/Dev/myapp --prompt "implement the billing endpoint"
 cctabs new payments ~/Dev/myapp --file /tmp/task.txt
 ```
+
+⚠️ **That guarantee holds only in an already-trusted directory.** The poll cannot
+see `❯` behind the trust dialog, so in an untrusted repo the brief is not
+delivered at all — and has been measured reaching the *shell* instead. Check the
+precondition first: see **"The trust gate"** above.
 
 If you need to send a task after the fact, poll first — and for anything
 sizeable, hand over a **path** rather than the text:
@@ -818,7 +921,12 @@ a case for `--force`.
   prompt line and is eaten the same way. Do not drive the menu blind either —
   `cctabs scrollback <tab>` shows which menu it is, and the wrong keypress in the
   resume picker silently accepts a summary instead of the session (see the
-  restore section). A human unblocks it; a driver reports it.
+  restore section). For the resume picker and permission prompts, a human
+  unblocks it; a driver reports it. **The trust dialog is the one exception** —
+  two options with the marker parked on `No, exit`, so
+  `printf '\033[B' | cctabs send <tab>` is deterministic rather than a guess. Best
+  of all, don't arrive here: the gate is preventable at spawn time, see **"The
+  trust gate"**.
 - ⚠️ **The 1 KB busy-tab refusal means shorten the message, not force it
   through.** It fired twice in one day of driving and shortening was the right
   response both times — a multi-kilobyte brief aimed at a tab mid-turn is nearly
