@@ -2,6 +2,8 @@ import { define } from 'gunshi'
 import { requireAdapter } from '../core/adapter.js'
 import { resolveTabSession } from '../core/session.js'
 import { classifyTerminalBuffer, parsePermissionMode } from '../core/session-status.js'
+import { countSessionsInDir } from '../core/transcript.js'
+import { classifySessionLookup, type SessionLookup } from '../core/session-lookup.js'
 
 /**
  * Rows of captured output to read per tab.
@@ -36,6 +38,20 @@ export const sessionsCommand = define({
         status: string
         last_line: string
         session_id: string | null
+        /**
+         * Whether `session_id` is absent because we looked and found nothing,
+         * or because we couldn't look — see {@link SessionLookup}. Always
+         * present, so a caller never has to infer it from a bare null.
+         */
+        session_lookup: SessionLookup
+        /**
+         * For `session_lookup: "not-found"`: how many transcripts exist for
+         * this tab's directory under any title. `> 0` means the tab was
+         * renamed out from under a live session rather than having none.
+         */
+        sessions_in_dir?: number
+        /** For `session_lookup: "lookup-failed"`: what went wrong. */
+        session_lookup_error?: string
         /**
          * Permission mode read from the session's own footer, so `restore` can
          * put the tab back the way it was instead of in whatever the global
@@ -97,6 +113,10 @@ export const sessionsCommand = define({
           // CLAUDE_CONFIG_DIR can't be resumed without it.
           let backend: string | undefined
           let configDir: string | undefined
+          // The failure is captured rather than swallowed: a lookup that threw
+          // is reported as `lookup-failed`, which is not the same answer as
+          // "this tab has no session" and must not be flattened into it.
+          let lookupError: Error | undefined
           if (cwd) {
             try {
               const resolved = resolveTabSession(cwd, tabName)
@@ -106,10 +126,16 @@ export const sessionsCommand = define({
                 backend = resolved.backend
                 configDir = resolved.configDir
               }
-            } catch {
-              // ignore — best-effort lookup
+            } catch (err) {
+              lookupError = err as Error
             }
           }
+          const lookup = classifySessionLookup({
+            cwd,
+            found: sessionId !== null,
+            error: lookupError,
+            countInDir: () => countSessionsInDir(cwd),
+          })
 
           wsRow.sessions.push({
             block_id: b.blockid,
@@ -120,6 +146,9 @@ export const sessionsCommand = define({
             status,
             last_line: lastLine.slice(0, 200),
             session_id: sessionId,
+            session_lookup: lookup.status,
+            ...(lookup.sessionsInDir !== undefined ? { sessions_in_dir: lookup.sessionsInDir } : {}),
+            ...(lookup.detail ? { session_lookup_error: lookup.detail } : {}),
             ...(b.color !== undefined ? { color: b.color } : {}),
             ...(permissionMode ? { permission_mode: permissionMode } : {}),
             ...(backend ? { backend } : {}),
