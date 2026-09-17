@@ -105,6 +105,21 @@ Three things that each cost a failed build to discover, so they are worth statin
   published by accident, which was the old failure mode. The workflow also refuses to publish an
   empty bundle, since `files` ships `dist/` alone and npm would happily accept nothing.
 - Keep `PLUGIN_VERSION` in `tabby-plugin/src/server.ts` in step with `tabby-plugin/package.json` — it's what `/api/health` reports. It has now drifted twice: once a release behind, once a release *ahead* (a renumbered release caught `package.json` and missed the constant). Neither broke anything, because capabilities are feature-detected rather than version-compared — which is exactly why both survived review. Guarded now by `src/core/plugin-version.test.ts` and, because the plugin's release workflow never runs the test suite, by that workflow's own pre-publish check.
+  **Still outstanding as of 2026-09-17:** the bundle published as `tabby-cctabs@0.1.4` contains
+  `PLUGIN_VERSION = '0.1.5'` — verified by unpacking the tarball from npm, which holds exactly one
+  version string and it is `0.1.5`. So an installed 0.1.4 answers `/api/health` with 0.1.5 and
+  `cctabs doctor` prints a version that has never existed (PR #23’s Windows notes recorded exactly
+  that). The source now says `0.1.4`, consistent with itself, so the fix can only reach anyone via a
+  **0.1.5 release** — at which point the constant goes back to `0.1.5`. Deliberately held: nothing
+  behaves differently (`doctor` is the only consumer; the CLI feature-detects through
+  `capabilities.includes(...)`, never a version compare), and a plugin release costs every user a
+  manual update in Tabby. Let it ride along with the next substantive plugin change.
+- **Six commits on `main` carry `fredrik.wollsen@f-secure.com`** as author — the work identity, in a
+  public repo. The canonical identity is `Motin <motin@motin.eu>` (110 commits). Nothing new is being
+  added: PR #16’s commit was re-authored before merge on 2026-09-17, and squash-merges land as
+  `motin@motin.eu`. Removing the existing six means rewriting history and force-pushing, which last
+  time left a second machine’s marketplace clone diverged and needing manual realignment. Open
+  decision, not urgent.
 - Sideloading only changes files on disk; **Tabby must be restarted/reloaded** to run the new plugin.
 
 ### Before releasing, check the docs that ship
