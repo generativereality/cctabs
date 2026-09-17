@@ -2,7 +2,7 @@
 
 **Run a fleet of Claude Code sessions. From the CLI — or from Claude itself.**
 
-CLI command: `cctabs` · Website: [cctabs.com](https://cctabs.com)
+CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https://cctabs.com)
 
 ```bash
 cctabs new auth ~/Dev/myapp       # new tab, claude starts
