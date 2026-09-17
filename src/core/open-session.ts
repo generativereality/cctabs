@@ -4,7 +4,7 @@ import { homedir } from 'os'
 import { consola } from 'consola'
 import { loadConfig } from './config.js'
 import { requireAdapter, type TerminalAdapter } from './adapter.js'
-import { shellQuoteArg } from './shell.js'
+import { shellQuoteArg, resolveTabShell, tabLaunchArgv, envPrefixFor } from './shell.js'
 import { autoModeDialogVisible, trustDialogVisible } from './session-status.js'
 import { hasPriorSessions } from './session.js'
 import { applyTabColor, supportsTabColor } from './colors.js'
@@ -516,16 +516,19 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
     // here.
     const namePart = claudeCmd.includes('--resume') ? '' : ` --name ${JSON.stringify(tabName)}`
     const modelPart = modelOverride ? ` --model ${JSON.stringify(modelOverride)}` : ''
-    const envPrefix = envVars ? shellQuoteEnv(envVars) : ''
+    // The shell is resolved rather than assumed: on Windows `SHELL` is either
+    // unset (in a Tabby tab) or PowerShell (over SSH), and handing either of
+    // those a POSIX launch line opens a tab containing nothing but parse
+    // errors while this command reports success. See resolveTabShell().
+    const shell = resolveTabShell()
+    const envPrefix = envPrefixFor(shell, envVars)
     const claudeCore = `claude${extraFlags ? ' ' + extraFlags : ''} ${claudeCmd.replace(/^claude\s*/, '')}${namePart}${modelPart}`.replace(/\s+/g, ' ').trim()
-    const shell = process.env.SHELL ?? '/bin/zsh'
-    const launch = `${envPrefix}${claudeCore}; exec ${shell} -l -i`
 
     const { blockId, tabId } = await adapter.openTabDirect({
       cwd: dir,
       title: tabName,
-      command: shell,
-      args: ['-l', '-i', '-c', launch],
+      command: shell.command,
+      args: tabLaunchArgv(shell, `${envPrefix}${claudeCore}`),
       afterActive,
       color,
     })

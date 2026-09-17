@@ -6,21 +6,7 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { detectTerminal } from '../core/terminal.js'
 import { findLatestSessionId } from '../core/session.js'
-
-function pluginsDir(): string {
-  if (platform() === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'tabby', 'plugins')
-  }
-  if (platform() === 'linux') {
-    const xdg = process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config')
-    return join(xdg, 'tabby', 'plugins')
-  }
-  if (platform() === 'win32') {
-    const app = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')
-    return join(app, 'tabby', 'plugins')
-  }
-  throw new Error(`unsupported platform: ${platform()}`)
-}
+import { tabbyPluginsDir as pluginsDir } from '../core/tabby-plugin-dir.js'
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
@@ -43,9 +29,17 @@ export const installTabbyPluginCommand = define({
       process.exit(1)
     }
 
-    if (platform() !== 'darwin' && platform() !== 'linux') {
-      consola.error(`Auto-restart isn't implemented for ${platform()} yet. Run the manual install snippet from \`cctabs doctor\` and restart Tabby yourself.`)
-      process.exit(1)
+    // Only the AUTO-RESTART half is POSIX-specific (osascript / pkill + a
+    // /bin/zsh launcher script). The install itself is `npm --prefix
+    // <pluginsDir()>`, which works anywhere - and pluginsDir() has known the
+    // Windows path all along. Refusing the whole command left Windows users in
+    // a loop: this said "run the manual snippet from `cctabs doctor`", and
+    // doctor said "run `cctabs install-tabby-plugin`" and then printed a macOS
+    // path. So on an unsupported platform, install and skip the restart.
+    const canAutoRestart = platform() === 'darwin' || platform() === 'linux'
+    if (!canAutoRestart && !noRestart) {
+      consola.warn(`Auto-restart isn't implemented for ${platform()} yet - installing the plugin and leaving Tabby alone.`)
+      consola.info('Quit and reopen Tabby yourself once this finishes, then run `cctabs doctor`.')
     }
 
     const dir = pluginsDir()
@@ -66,8 +60,8 @@ export const installTabbyPluginCommand = define({
     }
     consola.success('Plugin installed.')
 
-    if (noRestart) {
-      consola.info('Skipping restart (--no-restart). Quit and reopen Tabby manually, then run `cctabs doctor`.')
+    if (noRestart || !canAutoRestart) {
+      consola.info('Skipping restart. Quit and reopen Tabby manually, then run `cctabs doctor`.')
       return
     }
 

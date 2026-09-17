@@ -410,10 +410,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Walk `pid → ppid → ...` via `ps`. Caps at 32 levels to avoid pathological
- * loops on misconfigured systems. Returns [pid, ppid, gppid, ...].
+ * Walk `pid → ppid → ...`. Caps at 32 levels to avoid pathological loops on
+ * misconfigured systems. Returns [pid, ppid, gppid, ...].
  */
-function walkAncestorPids(startPid: number, cap = 32): number[] {
+export function walkAncestorPids(startPid: number, cap = 32): number[] {
+  return process.platform === 'win32'
+    ? walkAncestorPidsWindows(startPid, cap)
+    : walkAncestorPidsPosix(startPid, cap)
+}
+
+function walkAncestorPidsPosix(startPid: number, cap: number): number[] {
   const out: number[] = [startPid]
   let cur = startPid
   for (let i = 0; i < cap; i++) {
@@ -424,6 +430,58 @@ function walkAncestorPids(startPid: number, cap = 32): number[] {
     const next = parseInt(r.stdout.trim(), 10)
     if (!Number.isFinite(next) || next <= 1 || next === cur) break
     out.push(next)
+    cur = next
+  }
+  return out
+}
+
+/**
+ * Windows has no `ps`, and Git Bash's MSYS one does not accept `-o`
+ * (`ps: unknown option -- o`, measured on Windows 11, 2026-09-17). So the
+ * POSIX walk exits non-zero on its first call and returns `[self]`.
+ *
+ * That does not fail loudly. `/api/tabs/identify` matches the submitted pids
+ * against each tab's true PID *and its direct children*, so `[self]` still
+ * matches when cctabs is run straight from a tab's own shell — `whoami`
+ * answers `"via": "pid"` and looks entirely healthy. One level deeper it
+ * stops matching and every identity route returns null. Measured both ways on
+ * the same guest: direct child → `{"tab":"intab","via":"pid"}`; the same
+ * command behind one extra `cmd /c` → `{"tab":null,"via":null}`. The nested
+ * case is the normal one, because cctabs is usually invoked from inside Claude
+ * Code's Bash tool rather than typed at the tab's prompt.
+ *
+ * One CIM query returns the whole pid → ppid map, so the walk happens
+ * in-process and costs a single PowerShell start rather than one per level.
+ */
+function walkAncestorPidsWindows(startPid: number, cap: number): number[] {
+  const out: number[] = [startPid]
+  const r = spawnSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId)" }',
+    ],
+    { encoding: 'utf-8', timeout: 15000 },
+  )
+  if (r.status !== 0 || !r.stdout) return out
+
+  const parent = new Map<number, number>()
+  for (const line of r.stdout.split('\n')) {
+    const [a, b] = line.trim().split(/\s+/)
+    const pid = Number(a)
+    const ppid = Number(b)
+    if (Number.isFinite(pid) && Number.isFinite(ppid)) parent.set(pid, ppid)
+  }
+
+  const seen = new Set<number>([startPid])
+  let cur = startPid
+  for (let i = 0; i < cap; i++) {
+    const next = parent.get(cur)
+    if (next === undefined || next <= 0 || seen.has(next)) break
+    out.push(next)
+    seen.add(next)
     cur = next
   }
   return out

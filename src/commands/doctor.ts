@@ -1,6 +1,8 @@
 import { spawnSync } from 'child_process'
 import { define } from 'gunshi'
 import { detectTerminal, resolveTerminal, type KnownTerminal } from '../core/terminal.js'
+import { manualInstallSnippet } from '../core/tabby-plugin-dir.js'
+import { resolveTabShell } from '../core/shell.js'
 
 type CheckStatus = 'ok' | 'warn' | 'fail' | 'skip'
 
@@ -88,7 +90,7 @@ function checkTabbyPlugin (): CheckResult {
     detail: `${host}:${port} unreachable (${health.error ?? 'unknown'})`,
     hint:
       'Run `cctabs install-tabby-plugin` from inside a Tabby tab — it npm-installs the plugin and reopens Tabby. ' +
-      'Or do it by hand: `npm install --legacy-peer-deps --prefix "$HOME/Library/Application Support/tabby/plugins" tabby-cctabs`, then quit + reopen Tabby.',
+      `Or do it by hand: \`${manualInstallSnippet()}\`, then quit + reopen Tabby.`,
   }
 }
 
@@ -103,26 +105,33 @@ function checkTabbyPlugin (): CheckResult {
  * open-session.ts to keep the doctor honest.
  */
 function checkSpawnedShellPath (): CheckResult {
-  const r = spawnSync('zsh', ['-l', '-i', '-c', 'command -v node'], {
-    encoding: 'utf-8',
-    timeout: 3000,
-  })
+  // Probe the shell a tab would ACTUALLY get. Hardcoding zsh made this check
+  // dishonest on Windows twice over: it reported `spawnSync zsh ENOENT` on a
+  // machine with a perfectly good Git Bash, and it said nothing about the
+  // shell the spawn was really going to use.
+  const shell = resolveTabShell()
+  const args = shell.posix
+    ? ['-l', '-i', '-c', 'command -v node']
+    : ['/c', 'where node']
+  const r = spawnSync(shell.command, args, { encoding: 'utf-8', timeout: 5000 })
   if (r.status === 0 && r.stdout?.trim()) {
     return {
       name: 'Spawned shell PATH (node findable)',
       status: 'ok',
-      detail: r.stdout.trim(),
+      detail: `${shell.command} → ${r.stdout.trim().split(/\r?\n/)[0]}`,
     }
   }
   return {
     name: 'Spawned shell PATH',
     status: 'warn',
-    detail: r.error?.message ?? r.stderr?.trim() ?? 'node not found in a login+interactive zsh',
-    hint:
-      'A login+interactive zsh cannot find `node`. Either node is not installed, or PATH is broken. ' +
-      'cctabs spawns tabs with `zsh -l -i -c` so both ~/.zprofile and ~/.zshrc are sourced — ' +
-      'if your PATH-extending logic lives elsewhere (e.g. a sourced file that bails on non-interactive), ' +
-      'move the `export PATH=...` lines into ~/.zshenv as a belt-and-braces fix.',
+    detail: `${shell.command}: ${r.error?.message ?? r.stderr?.trim() ?? 'node not found'}`,
+    hint: shell.posix
+      ? 'A login+interactive shell cannot find `node`. Either node is not installed, or PATH is broken. ' +
+        'cctabs spawns tabs with `<shell> -l -i -c`, so on macOS both ~/.zprofile and ~/.zshrc are sourced — ' +
+        'if your PATH-extending logic lives elsewhere (e.g. a sourced file that bails on non-interactive), ' +
+        'move the `export PATH=...` lines into ~/.zshenv as a belt-and-braces fix.'
+      : 'No POSIX shell was found, so tabs will be spawned with cmd.exe. Install Git for Windows to get ' +
+        'Git Bash (cctabs derives it from whatever `git` is on PATH), or set CCTABS_SHELL to the shell you want.',
   }
 }
 
