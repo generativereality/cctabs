@@ -10,6 +10,7 @@ import { renameCommand } from './rename.js'
 import { colorCommand } from './color.js'
 import { whoamiCommand } from './whoami.js'
 import { scrollbackCommand } from './scrollback.js'
+import { transcriptCommand } from './transcript.js'
 import { sendCommand } from './send.js'
 import { configCommand } from './config-cmd.js'
 import { restoreCommand } from './restore.js'
@@ -43,6 +44,10 @@ const subCommands = new Map([
   ['color', colorCommand],
   ['whoami', whoamiCommand],
   ['scrollback', scrollbackCommand],
+  ['transcript', transcriptCommand],
+  // `findings` reads better at a call site that is asking "what did that tab
+  // work out?", which is the question the command exists for.
+  ['findings', transcriptCommand],
   ['send', sendCommand],
   ['config', configCommand],
   ['restore', restoreCommand],

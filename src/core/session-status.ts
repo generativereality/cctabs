@@ -146,6 +146,33 @@ export function autoModeDialogVisible(buffer: string): boolean {
 }
 
 /**
+ * Is a tab's input ready to receive text?
+ *
+ * Read across the whole window rather than off the last line alone, and that is
+ * the fix rather than a preference: Claude Code renders notices BELOW its input
+ * line — `Restart to update` is the one that caught this — so the last non-empty
+ * line is the banner and the ready prompt is a line or two above it.
+ * `--wait-for-prompt` consequently timed out at 20s against tabs whose prompts
+ * were sitting there ready, which is worse than no check, because the caller
+ * concludes the tab is broken and stops.
+ *
+ * Accepts any of the ready shapes: a bare shell prompt at end-of-line, Claude's
+ * `❯` input line (usually followed by a `Try "…"` placeholder, so the glyph is
+ * NOT at end-of-line), or Claude's input footer.
+ */
+export function promptIsReady(buffer: string): boolean {
+  if (!buffer.trim()) return false
+  const lines = buffer.split('\n').map((l) => l.trim()).filter(Boolean)
+
+  for (const line of lines) {
+    if (/[$%>]\s*$/.test(line)) return true
+    if (/^❯/.test(line)) return true
+  }
+
+  return /automode|foragents/i.test(stripWhitespace(buffer))
+}
+
+/**
  * Classify a tab from the text of its captured output.
  *
  * Order is load-bearing:

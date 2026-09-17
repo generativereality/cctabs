@@ -209,9 +209,24 @@ interface TitleEntry { id: string; cwd: string; mtime: number }
  * scan each directory a single time instead of once per tab.
  *
  * Cleared implicitly per process — cctabs commands are one-shot, so a stale
- * cache is never a concern within a single invocation.
+ * cache is never a concern within a single invocation, with one exception:
+ * see {@link resetTitleIndexCache}.
  */
 const titleIndexCache = new Map<string, Map<string, TitleEntry>>()
+
+/**
+ * Drop the title index, so the next lookup reads what is on disk NOW.
+ *
+ * `restore` is the one command that both reads sessions and *causes* new ones
+ * to be written inside a single invocation. Verifying a spawn against the cache
+ * built while planning would compare the new world against a snapshot of the
+ * old one and always agree with itself — which is precisely the "success line
+ * that cannot fail" being removed. Also used by tests, which reconfigure the
+ * config dirs between cases.
+ */
+export function resetTitleIndexCache(): void {
+  titleIndexCache.clear()
+}
 
 function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
   const cached = titleIndexCache.get(projectDir)
