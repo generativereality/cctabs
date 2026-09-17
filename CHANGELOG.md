@@ -3,6 +3,11 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **The skill description was being silently truncated, and the part cut off was the rule that matters.** Claude Code caps a skill's description at 1535 characters in the available-skills listing; ours ran 1760, so every session ever shown this skill saw it cut mid-sentence at `"do this in parallel without a new tab", or w…` — losing the tail of the anti-substitution rule and the whole `NOT for:` line. The description now runs 1432 characters, and the decisive sentence (*a subagent is NOT a tab*) has moved **ahead** of the TRIGGER list so it can no longer be the thing that gets dropped. Every trigger phrase is preserved verbatim. The opening clause now leads with the literal tokens `cctab` / `cctabs` / `terminal tabs`, because the first clause is what registers in a listing where this skill can sit 75% of the way down 82 entries.
+- **`cctab` is now a real command.** The skill has always advertised "cctab" as a singular alias, but only `cctabs` was ever installed — so a session that went looking for the CLI under the name the docs use got `command not found` and concluded the tool did not exist. `cctab` is now a second bin pointing at the same entry point. This matters precisely in the case the listing cannot help with: Claude Code injects the full skill listing once per session and does **not** re-inject it after a compaction, so in a long session probing the shell is the only route left back to cctabs.
+
 ## 0.5.3 — 2026-09-07
 
 - **`cctabs whoami` answers "which tab am I running in?"** Prints the tab name — so `$(cctabs whoami)` drops into a PR body or commit trailer — with `--json` adding `worktree`, `session_id`, `cwd`, `backend`, `config_dir`, `color` and `via`. It exists because self-attribution had no answer: when every session's PRs carry the same GitHub author, "whose work is this, and is it in flight?" is unanswerable, and it gets asked exactly when someone else's files are being written right now.
