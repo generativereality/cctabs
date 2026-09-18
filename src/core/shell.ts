@@ -51,8 +51,14 @@ function looksPosix(command: string): boolean {
   return POSIX_SHELL_RE.test(base)
 }
 
-/** Git Bash, derived from whatever `git` is on PATH so a custom install works. */
-function findGitBash(): string | undefined {
+/**
+ * Git Bash, derived from whatever `git` is on PATH so a custom install works.
+ *
+ * Exported because `cctabs doctor` needs the same answer for a different question:
+ * cctabs can run without `bash` on PATH, but Claude Code's Bash tool cannot, and the
+ * doctor can only name the directory to add if it knows where Git Bash actually is.
+ */
+export function findGitBash(): string | undefined {
   const r = spawnSync('where', ['git.exe'], { encoding: 'utf-8' })
   const gitExe = (r.stdout ?? '').split(/\r?\n/).find((l) => l.trim().endsWith('git.exe'))?.trim()
   if (gitExe) {
