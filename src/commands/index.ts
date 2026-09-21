@@ -1,5 +1,7 @@
 import { cli, define } from 'gunshi'
+import { consola } from 'consola'
 import pkg from '../../package.json'
+import { findUnknownOptions, unknownOptionMessage } from '../core/unknown-options.js'
 import { sessionsCommand } from './sessions.js'
 import { listCommand } from './list.js'
 import { newCommand } from './new.js'
@@ -32,6 +34,34 @@ const defaultCommand = define({
   },
 })
 
+/**
+ * Refuse to run a command that was given an option it doesn't declare.
+ *
+ * Wrapped here, once, rather than asserted at the top of each command: gunshi
+ * accepts an undeclared flag silently, and the failure it produces — a command
+ * that reports success having quietly ignored half of what it was asked —
+ * is exactly the kind nobody goes looking for. A new command gets this by
+ * being in the map below, with nothing to remember.
+ */
+function rejectUnknownOptions<T extends { name?: string; args?: unknown; run?: unknown }>(command: T): T {
+  const original = command.run
+  if (typeof original !== 'function') return command
+  return {
+    ...command,
+    run: function (this: unknown, ctx: { tokens?: unknown; args?: unknown }) {
+      const unknown = findUnknownOptions(
+        (ctx?.tokens ?? []) as never,
+        (ctx?.args ?? {}) as never,
+      )
+      if (unknown.length > 0) {
+        consola.error(unknownOptionMessage(command.name ?? 'cctabs', unknown))
+        process.exit(1)
+      }
+      return (original as (c: unknown) => unknown).call(this, ctx)
+    },
+  } as T
+}
+
 const subCommands = new Map([
   ['sessions', sessionsCommand],
   ['list', listCommand],
@@ -58,7 +88,7 @@ const subCommands = new Map([
   ['import', importCommand],
   ['profile-copy', profileCopyCommand],
   ['sort', sortCommand],
-])
+].map(([name, command]) => [name, rejectUnknownOptions(command as never)] as const) as Array<[string, never]>)
 
 export async function run(): Promise<void> {
   await cli(process.argv.slice(2), defaultCommand, {

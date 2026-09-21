@@ -272,6 +272,7 @@ a driver's, since it is the decision the dialog exists to ask.
 cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
+cctabs new <name> [dir] --path <file>    # new tab handed a file PATH to read — same handoff as `send --path`, no short flag (`-p` is --prompt here)
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
 cctabs new <name> [dir] -c <colour>      # new tab, coloured (also -c on resume/fork)
 cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one; picks the session's own account)
@@ -722,6 +723,13 @@ itself: a measured 6,835-byte brief landed as its last 756 bytes, beginning
 mid-word, and both ends reported success. `--path` has no truncation surface at
 all — only the path crosses the prompt line — so use it for briefs, specs and
 diffs, and keep inline text for short replies.
+
+⭐ **`--path` also works on `new`**, so a tab can be spawned already holding its
+brief: `cctabs new <name> <dir> --path <file>`. Mind the short flags — `-p` is
+`--path` on `send` but `--prompt` on `new`, so `new --path` must be spelled out.
+(Before 0.5.5 `new` accepted `--path` silently and dropped it: the tab opened,
+the success line printed, and the brief was never delivered. An unknown option
+is now a non-zero exit on every command.)
 
 ⚠️ **The screen cannot tell you whether a big paste arrived whole.** Claude
 collapses it into a `[Pasted text #N +M lines]` chip, and `M` does **not** track

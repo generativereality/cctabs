@@ -2,6 +2,7 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { readFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
+import { buildPathHandoff } from '../core/handoff.js'
 import { requireAdapter } from '../core/adapter.js'
 import { sendTextWithConfirmation } from '../core/open-session.js'
 import { resolveTabTarget } from '../core/tab-target.js'
@@ -30,23 +31,6 @@ function readStdin(): Promise<string> {
  */
 export const CLIP_RISK_BYTES = 1024
 
-/**
- * The message that hands a tab a file to read instead of pasting its contents.
- *
- * This is the only send shape with no truncation surface at all: what crosses
- * the prompt line is a path of a hundred-odd bytes, and the payload is read
- * from disk by the receiving session. It became the operator's standing
- * practice for briefs after a 6,835-byte paste arrived as 756 bytes, and it is
- * first-class here for that reason rather than as a convenience.
- *
- * One consequence worth knowing, because it reads like a bug: the receiving
- * session obeys this by *reading the file*, so the file's contents land in its
- * transcript as a tool result. Seeing the contents there means the handoff
- * worked — it does not mean they were pasted.
- */
-export function buildPathHandoff(absPath: string): string {
-  return `Read the file at ${absPath} in full, and treat its entire contents as the message intended for you — it is your instructions, not a document to summarise.`
-}
 
 /** Report a usage failure and exit, before any terminal has been touched. */
 function adapterlessExit(message: string): never {
@@ -345,3 +329,7 @@ async function verifyDelivered(
   }
   return last
 }
+
+// Re-exported so `send`'s own tests and callers keep one import site for the
+// handoff contract, which now lives in core/ because `new --path` shares it.
+export { buildPathHandoff }

@@ -72,8 +72,44 @@ cctabs new <name> [dir] [-w workspace]
 |----------|-------------|
 | `name` | Tab name (required) |
 | `dir` | Working directory (default: current) |
+| `-p, --prompt` | Initial prompt text, sent once Claude is ready |
+| `-f, --file` | Initial prompt read from a file and pasted |
+| `--path` | Hand the session this file **path** and let it read the file itself |
+| `-r, --resume` | Resume an existing session ID instead of starting fresh |
+| `-W, --worktree` | Launch in an isolated git worktree |
+| `-b, --backend` | Backend preset / Claude account — see [`cctabs backends`](#cctabs-backends) |
+| `-m, --model` | Override the model passed to `claude` |
 | `-w, --workspace` | Target workspace (legacy Wave concept; no-op on Tabby) |
 | `-c, --color` | Tab colour — see [`cctabs color`](#cctabs-color) |
+
+`--prompt`, `--file` and `--path` are mutually exclusive, and none combines with
+`--resume`.
+
+### `--path` vs `--file`
+
+`--file` pastes the file's **contents** through the prompt line. `--path` sends
+only the **path**, with an instruction to read it — the same handoff
+[`cctabs send --path`](#cctabs-send) performs, and the right choice for anything
+large, since nothing long crosses the prompt line and there is no truncation
+surface. The file is checked before the tab is opened: a tab pointed at a file
+that isn't there is worse than no tab, because it looks like it worked.
+
+::: warning `-p` means different things on `new` and `send`
+On `new`, `-p` is `--prompt`. On `send`, `-p` is `--path`. `new --path` therefore
+has **no short form** — spell it out.
+:::
+
+### Unknown options are refused
+
+An option a command doesn't declare is an error, not a silent no-op:
+
+```bash
+$ cctabs new mmm-b2b "~/notes" --path-typo brief.md
+ERROR  `--path-typo` is not an option of `cctabs new`. Nothing was run.
+```
+
+This matters most for flags borrowed from a neighbouring command, which used to
+open the tab and quietly deliver nothing.
 
 ## cctabs resume
 

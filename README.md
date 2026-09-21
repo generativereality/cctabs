@@ -71,6 +71,7 @@ cctabs sessions [--json]                 what's running (busy/waiting status + p
 cctabs list                              all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace]   open tab, start claude
 cctabs new <name> [dir] -c <colour>      ...and colour its tab (also on resume/fork)
+cctabs new <name> [dir] --path <file>    ...or hand it a file to read (no truncation surface)
 cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by ID
 cctabs resume <name> [dir]               resume that session (reuses its tab, or opens one)
 cctabs fork <tab> [-n new-name]          fork a session into a new tab

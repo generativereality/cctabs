@@ -9,6 +9,7 @@ import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends 
 import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 import { setupWorktree } from '../core/worktree.js'
 import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
+import { buildPathHandoff } from '../core/handoff.js'
 
 export const newCommand = define({
   name: 'new',
@@ -20,6 +21,7 @@ export const newCommand = define({
     worktree: { type: 'boolean', short: 'W', description: 'Launch claude with --worktree <name> for isolated branch work' },
     file: { type: 'string', short: 'f', description: 'Send initial prompt from file once Claude is ready' },
     prompt: { type: 'string', short: 'p', description: 'Send initial prompt text once Claude is ready' },
+    path: { type: 'string', description: "Hand the new session this file PATH as its opening instruction and let it read the file itself, instead of pasting the contents through the prompt line. Same handoff as `cctabs send --path`, and the right choice for anything large. NOTE: no short flag — `-p` is `--prompt` here, while on `send` it is `--path`." },
     resume: { type: 'string', short: 'r', description: 'Resume an existing Claude session ID (passes --resume <id> to claude). Mutually exclusive with --prompt/--file.' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
@@ -32,6 +34,7 @@ export const newCommand = define({
     const useWorktree = ctx.values.worktree ?? false
     const promptFile = ctx.values.file as string | undefined
     const promptText = ctx.values.prompt as string | undefined
+    const handoffPath = ctx.values.path as string | undefined
     const resumeId = ctx.values.resume as string | undefined
     const explicitBackend = ctx.values.backend as string | undefined
     const backendName = resolveBackendName(explicitBackend)
@@ -46,8 +49,17 @@ export const newCommand = define({
     // the raw `name` still drives the worktree branch/dir so those stay clean.
     const displayName = applyPrefix(name, config.defaults.prefix)
 
-    if (resumeId && (promptText || promptFile)) {
-      consola.error('--resume cannot be combined with --prompt or --file (you cannot send an initial prompt to a resumed session via this path).')
+    if (resumeId && (promptText || promptFile || handoffPath)) {
+      consola.error('--resume cannot be combined with --prompt, --file or --path (you cannot send an initial prompt to a resumed session via this path).')
+      process.exit(1)
+    }
+    const promptSources = [
+      promptText !== undefined && '--prompt',
+      promptFile !== undefined && '--file',
+      handoffPath !== undefined && '--path',
+    ].filter(Boolean) as string[]
+    if (promptSources.length > 1) {
+      consola.error(`Pick one initial prompt source — ${promptSources.join(', ')} were all given.`)
       process.exit(1)
     }
 
@@ -99,6 +111,18 @@ export const newCommand = define({
     if (promptText) {
       initialPromptFile = join(tmpdir(), `cctabs-prompt-${Date.now()}.txt`)
       writeFileSync(initialPromptFile, promptText)
+    } else if (handoffPath) {
+      // Deliver the PATH, not the contents — the same handoff `send --path`
+      // performs, so a session that learned the pattern there can reach for it
+      // here. Checked before the tab is opened: a tab pointed at a file that
+      // isn't there is worse than no tab, because it looks like it worked.
+      const abs = resolve(handoffPath)
+      if (!existsSync(abs)) {
+        consola.error(`--path ${abs} does not exist. The new session would be handed a path to nothing.`)
+        process.exit(1)
+      }
+      initialPromptFile = join(tmpdir(), `cctabs-prompt-${Date.now()}.txt`)
+      writeFileSync(initialPromptFile, buildPathHandoff(abs))
     } else if (promptFile) {
       initialPromptFile = promptFile
     }
