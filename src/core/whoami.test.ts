@@ -92,6 +92,38 @@ describe('resolveIdentity', () => {
     expect(id.via).toBe('pid')
   })
 
+  it('falls back to its own Claude\'s --name when the pid walk and the slug both miss', () => {
+    // Two tabs share one directory, so the slug route refuses — the case a
+    // stock Tabby hits for every tab older than five minutes.
+    const shared = [...tabs, tab('t4', 'coordination-2', tabs[0].cwd!)]
+    const id = resolveIdentity({
+      sessionId: 's1',
+      tabs: shared,
+      sessionSlug: pathToProjectSlug(tabs[0].cwd!),
+      slugOf: pathToProjectSlug,
+      ownClaudeName: 'coordination-2',
+    })
+    expect(id.tab).toBe('coordination-2')
+    expect(id.via).toBe('argv-name')
+  })
+
+  it('refuses a stale --name that now belongs to a tab in another directory', () => {
+    // Our tab was renamed; its old name was since given to a tab elsewhere.
+    const id = resolveIdentity({
+      sessionId: 's1',
+      tabs,
+      sessionSlug: pathToProjectSlug(tabs[1].cwd!),
+      slugOf: pathToProjectSlug,
+      ownClaudeName: 'other',
+    })
+    expect(id.tab).not.toBe('other')
+  })
+
+  it('refuses a --name two tabs share', () => {
+    const twins = [tab('a', 'same', '/p'), tab('b', 'same', '/p')]
+    expect(resolveIdentity({ sessionId: 's1', tabs: twins, ownClaudeName: 'same' }).tab).toBeNull()
+  })
+
   it('reports no tab rather than guessing when neither route answers', () => {
     const id = resolveIdentity({ sessionId: 's1', tabs })
     expect(id.tab).toBeNull()

@@ -21,6 +21,8 @@ import {
 import type { Block, Config } from '../types/index.js'
 import { shellQuoteArg } from '../core/shell.js'
 import { applyTabColor, resolveColorPreference } from '../core/colors.js'
+import { liveSessionPids, readProcessTable, type ProcRow } from '../core/claude-procs.js'
+import { pidAlive } from '../core/tab-exit.js'
 
 /**
  * Settle after each direct-spawn recreate when the backend can't guarantee the
@@ -118,13 +120,19 @@ function readManifestOrExit(manifestPath: string): RestoreEntry[] {
   return entries
 }
 
-interface RestoreRequest {
+export interface RestoreRequest {
   /** Manifest entries, or null to scan the window's own tabs. */
   manifest: RestoreEntry[] | null
   /** Scan mode: restrict session lookups to this directory. */
   scopedDir: string | null
   createMissing: boolean
   dryRun: boolean
+}
+
+/** What a restore did, for a caller that has to act on it (`restart`). */
+export interface RestoreReport {
+  plan: PlannedEntry[]
+  outcomes: Map<PlannedEntry, RestoreOutcome>
 }
 
 /**
@@ -137,11 +145,13 @@ interface RestoreRequest {
  * `--dry` stops immediately after planning. Planning itself performs no
  * mutations, so a dry run reports exactly the decisions a real run would act on.
  */
-async function runRestore(req: RestoreRequest): Promise<void> {
+export async function runRestore(req: RestoreRequest): Promise<RestoreReport | undefined> {
   const { dryRun } = req
   const adapter = requireAdapter()
   const { tabsById, tabNames, workspaces } = await adapter.getAllData()
   const currentTab = adapter.currentTabId()
+  // Read once for planning: which sessions a live Claude is already running.
+  const procRows = readProcessTable()
 
   // Manifest mode restores into the current workspace. The scan restores what
   // it can see.
@@ -185,7 +195,7 @@ async function runRestore(req: RestoreRequest): Promise<void> {
     if (!entries.length) {
       consola.info('No tabs to restore.')
       adapter.closeSocket()
-      return
+      return undefined
     }
   }
 
@@ -197,6 +207,7 @@ async function runRestore(req: RestoreRequest): Promise<void> {
       scopeTabIds,
       currentTabId: currentTab,
       createMissing: req.createMissing,
+      procRows,
     }),
   )
 
@@ -248,7 +259,7 @@ async function runRestore(req: RestoreRequest): Promise<void> {
     console.log(`  ${p.entry.name}: ${results.get(p)}`)
   }
 
-  if (dryRun) return
+  if (dryRun) return { plan, outcomes }
 
   // The count, from what was verified rather than from what was attempted.
   const acted = plan.filter((p) => plannedOutcome(p.action) !== 'skipped')
@@ -269,6 +280,7 @@ async function runRestore(req: RestoreRequest): Promise<void> {
       `Read them with \`cctabs transcript <tab>\` before briefing anything from them.`,
     )
   }
+  return { plan, outcomes }
 }
 
 /**
@@ -289,8 +301,11 @@ export function buildPlanDeps(
     createMissing: boolean
     /** Which Claude config dirs to search. Defaults to every one on the machine. */
     sessionScope?: ConfigDirScope
+    /** The process table, or null/absent where there isn't one to read. */
+    procRows?: ProcRow[] | null
   },
 ): PlanDeps {
+  const live = opts.procRows ? liveSessionPids(opts.procRows) : undefined
   // Whether this backend reports pids at all. Asked of the whole snapshot
   // rather than per tab, so we can tell "this tab has no process" from "this
   // plugin is too old to say" without a capability probe: if any tab reports a
@@ -302,8 +317,12 @@ export function buildPlanDeps(
     currentTabId: opts.currentTabId,
     scopeTabIds: opts.scopeTabIds,
     hasLiveProcess: (tabId) => {
+      const blocks = opts.tabsById.get(tabId) ?? []
+      // `stable-pid`: the tab's own shell, so alive-or-not is a real answer.
+      const shell = blocks.find((b) => typeof b.shellPid === 'number')?.shellPid
+      if (shell !== undefined) return pidAlive(shell)
       if (!reportsPids) return undefined
-      return (opts.tabsById.get(tabId) ?? []).some((b) => typeof b.pid === 'number')
+      return blocks.some((b) => typeof b.pid === 'number')
     },
     // Exact-name only: a longer-named live tab (`gapminder-login`) must never
     // be taken as proof that `gapminder`'s tab already exists.
@@ -312,6 +331,7 @@ export function buildPlanDeps(
     statusOf: (blockId) => adapter.detectSessionStatus(blockId),
     confirmEmpty: (blockId) => adapter.confirmScrollbackEmpty(blockId),
     resolveSession: (entry) => resolveEntrySession(entry, opts.sessionScope),
+    ...(live ? { liveSessionPids: (id: string) => live.get(id) ?? [] } : {}),
     createMissing: opts.createMissing,
   }
 }
@@ -410,6 +430,10 @@ export function describeDecision(p: PlannedEntry, dry: boolean): string {
       return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}${modeNote(p)}`
     case 'missing':
       return '— no existing tab; pass --create-missing to spawn one'
+    case 'duplicate-session':
+      return `— session ${shortId(p.sessionId)} is already being restored by an earlier entry, skipping`
+    case 'session-live':
+      return `— session ${shortId(p.sessionId)} is already running in another process, skipping (a second Claude on one transcript)`
   }
 }
 
@@ -440,6 +464,10 @@ export function summarizeDecision(p: PlannedEntry, dry: boolean): string {
       return dry ? `dry run: spawn (${shortId(p.sessionId)})${originNote(p)}` : 'queued for spawn'
     case 'missing':
       return 'missing (skipped, no --create-missing)'
+    case 'duplicate-session':
+      return `duplicate of session ${shortId(p.sessionId)} — skipped`
+    case 'session-live':
+      return `session ${shortId(p.sessionId)} already live elsewhere — skipped`
   }
 }
 
@@ -494,6 +522,11 @@ export interface SpawnEvidence {
   requestedSessionId?: string
   /** The session now resolvable for the tab's name and directory, if any. */
   resolvedSessionId?: string
+  /**
+   * Whether a live Claude's argv says `--resume <requestedSessionId>`.
+   * `undefined` where there is no process table to read.
+   */
+  launchedLive?: boolean
 }
 
 export interface SpawnVerdict {
@@ -531,6 +564,15 @@ export function judgeSpawn(e: SpawnEvidence): SpawnVerdict {
     }
   }
 
+  // The process was launched on the id we asked for, and nothing on disk
+  // contradicts it (the check above). No need to wait for a title to be written.
+  if (e.launchedLive && e.requestedSessionId) {
+    return {
+      outcome: 'restored',
+      note: `✔ verified running ${e.requestedSessionId.slice(0, 8)}… (from its process)`,
+    }
+  }
+
   if (!e.resolvedSessionId) {
     return {
       outcome: 'unverified',
@@ -557,6 +599,22 @@ export function judgeSpawn(e: SpawnEvidence): SpawnVerdict {
  * check runs once for the whole fleet, not once per tab.
  */
 const VERIFY_SETTLE_MS = 4000
+
+/**
+ * How long verification keeps re-checking an entry that isn't confirmed yet.
+ *
+ * Measured: a restore under load (load average 35–65, 50+ Claude processes)
+ * reported a tab as "did not come back" that was running, with `--resume`,
+ * the whole time — a single look at 4s saw no process for a tab whose PTY had
+ * not attached yet, and the plugin itself only waits 20s for that. So nothing
+ * is declared failed before this has passed, and the check re-reads every few
+ * seconds rather than once.
+ */
+const VERIFY_DEADLINE_MS = 45_000
+const VERIFY_POLL_MS = 3000
+
+/** Initial wait before the first attach check. */
+const ATTACH_SETTLE_MS = 10_000
 
 /** Carry out a plan. Only ever called for a real (non-dry) run. */
 async function executePlan(
@@ -609,22 +667,23 @@ async function executePlan(
   // -- verify the attaches actually started Claude --
   if (attached.length) {
     consola.info('Waiting for sessions to start…')
-    await sleep(10_000)
-    for (const p of attached) {
+    await sleep(ATTACH_SETTLE_MS)
+    await pollUntilSettled(attached, (p, final) => {
+      // The process's own argv is the strongest answer: a Claude launched on
+      // exactly the id we sent. It needs no readable screen and no title on disk.
+      if (p.sessionId && sessionLaunched(p.sessionId)) {
+        return { outcome: 'restored', note: `✔ running ${shortId(p.sessionId)} (confirmed from its process)` }
+      }
       const status = adapter.detectSessionStatus(p.blockId!)
-      if (status === 'active' || status === 'idle') {
-        results.set(p, '✔ running')
-        outcomes.set(p, 'restored')
-      } else if (status === 'unreadable') {
+      if (status === 'active' || status === 'idle') return { outcome: 'restored', note: '✔ running' }
+      if (!final) return null
+      if (status === 'unreadable') {
         // Readability is not liveness (see session-status.ts) — an empty
         // capture is a statement about the capture. Neither pass nor fail.
-        results.set(p, '? no output captured — check it yourself')
-        outcomes.set(p, 'unverified')
-      } else {
-        results.set(p, '✘ may not have started')
-        outcomes.set(p, 'failed')
+        return { outcome: 'unverified', note: '? no output captured — check it yourself' }
       }
-    }
+      return { outcome: 'failed', note: `✘ no Claude started within ${VERIFY_DEADLINE_MS / 1000}s` }
+    }, results, outcomes)
   }
 
   adapter.closeSocket()
@@ -737,26 +796,32 @@ async function verifySpawns(
 
   consola.info(`Verifying ${spawned.length} spawned tab(s)…`)
   await sleep(VERIFY_SETTLE_MS)
-  resetTitleIndexCache()
 
-  let tabsById: Map<string, Block[]>
-  try {
-    ({ tabsById } = await adapter.getAllData())
-  } catch (err) {
-    // Losing the terminal at this point tells us nothing about the tabs, so
-    // they stay `unverified` — reporting them as failed would be as wrong as
-    // reporting them as restored.
-    consola.warn(`Could not re-read the tab list to verify the restore: ${(err as Error).message}`)
-    return
-  }
+  const tabOf = new Map(spawned.map(({ p, tabId }) => [p, tabId]))
+  // Re-read the terminal once per round, not once per tab.
+  let snapshot: { round: number; tabsById: Map<string, Block[]> | null } = { round: -1, tabsById: null }
+  let round = 0
 
-  // Same reasoning as buildPlanDeps: if any tab reports a pid, the ones that
-  // don't genuinely have no process. If none do, the backend can't say.
-  const reportsPids = [...tabsById.values()]
-    .some((blocks) => blocks.some((b) => typeof b.pid === 'number'))
+  await pollUntilSettled(spawned.map(({ p }) => p), (p, final) => {
+    if (snapshot.round !== round) {
+      snapshot = { round, tabsById: null }
+      try {
+        snapshot.tabsById = adapter.blocksList().reduce((m, b) => {
+          const arr = m.get(b.tabid) ?? []
+          arr.push(b)
+          return m.set(b.tabid, arr)
+        }, new Map<string, Block[]>())
+      } catch (err) {
+        consola.warn(`Could not re-read the tab list to verify the restore: ${(err as Error).message}`)
+      }
+    }
+    const tabsById = snapshot.tabsById
+    // Losing the terminal tells us nothing about the tabs, so they stay
+    // `unverified` — reporting them as failed would be as wrong as reporting
+    // them as restored.
+    if (!tabsById) return final ? { outcome: 'unverified', note: '? could not re-read the tab list' } : null
 
-  for (const { p, tabId } of spawned) {
-    const blocks = tabsById.get(tabId) ?? []
+    const blocks = tabsById.get(tabOf.get(p)!) ?? []
     const term = blocks.find((b) => b.view === 'term')
 
     let resolvedSessionId: string | undefined
@@ -772,12 +837,74 @@ async function verifySpawns(
     const verdict = judgeSpawn({
       tabPresent: blocks.length > 0,
       hasTermBlock: !!term,
-      hasProcess: reportsPids ? typeof term?.pid === 'number' : undefined,
+      hasProcess: processOf(term, tabsById),
       requestedSessionId: p.sessionId,
       resolvedSessionId,
+      launchedLive: p.sessionId ? sessionLaunched(p.sessionId) : undefined,
     })
-    results.set(p, `${verdict.note} [${tabId.slice(0, 8)}]`)
-    outcomes.set(p, verdict.outcome)
+    // Anything short of confirmed is re-checked until the deadline. A tab that
+    // has not attached its PTY yet — which under load can take longer than the
+    // plugin's own 20s wait — reads exactly like one that never will, and a
+    // false "failed" on a fleet command invites a second restore pass over a
+    // healthy tab. Only the deadline turns silence into a verdict.
+    if (verdict.outcome !== 'restored' && !final) return null
+    return { outcome: verdict.outcome, note: `${verdict.note} [${tabOf.get(p)!.slice(0, 8)}]` }
+  }, results, outcomes, () => { round++ ; resetTitleIndexCache() })
+}
+
+/**
+ * Whether a tab has a running process, from the best evidence the backend has.
+ * `stable-pid` backends report the tab's own shell, which is alive or not; an
+ * older plugin reports a spawn-time pid whose mere presence is the only signal.
+ */
+function processOf(term: Block | undefined, tabsById: Map<string, Block[]>): boolean | undefined {
+  if (term?.shellPid !== undefined) return pidAlive(term.shellPid)
+  const reportsPids = [...tabsById.values()].some((blocks) => blocks.some((b) => typeof b.pid === 'number'))
+  return reportsPids ? typeof term?.pid === 'number' : undefined
+}
+
+/**
+ * Is some live Claude process launched on this session id?
+ *
+ * The table is cached for a second: one verification round asks this of every
+ * entry, and a 60-tab round should cost one `ps`, not sixty.
+ */
+let launchedCache: { at: number; ids: Map<string, number[]> | null } | undefined
+function sessionLaunched(sessionId: string): boolean | undefined {
+  if (!launchedCache || Date.now() - launchedCache.at > 1000) {
+    const rows = readProcessTable()
+    launchedCache = { at: Date.now(), ids: rows ? liveSessionPids(rows) : null }
+  }
+  return launchedCache.ids ? launchedCache.ids.has(sessionId) : undefined
+}
+
+/**
+ * Re-check entries until each has a verdict or the deadline passes.
+ *
+ * `check` returns null for "not yet". On the last round it is called with
+ * `final = true` and must decide.
+ */
+async function pollUntilSettled(
+  entries: PlannedEntry[],
+  check: (p: PlannedEntry, final: boolean) => SpawnVerdict | null,
+  results: Map<PlannedEntry, string>,
+  outcomes: Map<PlannedEntry, RestoreOutcome>,
+  beforeRound: () => void = resetTitleIndexCache,
+): Promise<void> {
+  const deadline = Date.now() + VERIFY_DEADLINE_MS
+  let pending = entries.filter((p) => outcomes.get(p) !== 'failed')
+  while (pending.length) {
+    const final = Date.now() >= deadline
+    beforeRound()
+    const still: PlannedEntry[] = []
+    for (const p of pending) {
+      const v = check(p, final)
+      if (!v) { still.push(p); continue }
+      results.set(p, v.note)
+      outcomes.set(p, v.outcome)
+    }
+    pending = still
+    if (pending.length) await sleep(Math.min(VERIFY_POLL_MS, Math.max(0, deadline - Date.now())))
   }
 }
 

@@ -6,6 +6,7 @@ import { optionalAdapter } from '../core/adapter.js'
 import { listClaudeConfigDirs, originOf } from '../core/config-dirs.js'
 import { pathToProjectSlug } from '../core/session.js'
 import { resolveIdentity, UNKNOWN_TAB, type WhoamiTab } from '../core/whoami.js'
+import { ownClaudeProc, readProcessTable } from '../core/claude-procs.js'
 
 /**
  * Locate the project directory holding `sessionId`'s transcript.
@@ -77,6 +78,11 @@ export const whoamiCommand = define({
       sessionSlug: located?.slug,
       slugOf: pathToProjectSlug,
       origin: located ? { backend: located.backend, configDir: located.configDir } : undefined,
+      // One `ps` call and no transcript reads, so whoami stays cheap.
+      ownClaudeName: (() => {
+        const rows = readProcessTable()
+        return rows ? ownClaudeProc(rows)?.name : undefined
+      })(),
     })
     adapter?.closeSocket()
 

@@ -42,9 +42,10 @@ export interface WhoamiIdentity {
   color?: string | null
   /**
    * How the tab was identified, so a miss can be diagnosed rather than guessed
-   * at. `pid` is the process-tree match; `session-slug` is the fallback below.
+   * at. `pid` is the process-tree match; `session-slug` and `argv-name` are the
+   * fallbacks below.
    */
-  via: 'pid' | 'session-slug' | null
+  via: 'pid' | 'session-slug' | 'argv-name' | null
 }
 
 /**
@@ -90,8 +91,10 @@ export function resolveIdentity(opts: {
   /** Maps a tab cwd to its project slug (injected so this stays pure). */
   slugOf?: (cwd: string) => string
   origin?: { backend?: string; configDir?: string }
+  /** `--name` from the argv of the Claude process we are running under. */
+  ownClaudeName?: string
 }): WhoamiIdentity {
-  const { sessionId, tabs, currentTabId, sessionSlug, slugOf, origin } = opts
+  const { sessionId, tabs, currentTabId, sessionSlug, slugOf, origin, ownClaudeName } = opts
 
   const base: WhoamiIdentity = {
     tab: null,
@@ -104,7 +107,7 @@ export function resolveIdentity(opts: {
     ...(origin?.configDir ? { configDir: origin.configDir } : {}),
   }
 
-  const found = (tab: WhoamiTab, via: 'pid' | 'session-slug'): WhoamiIdentity => ({
+  const found = (tab: WhoamiTab, via: NonNullable<WhoamiIdentity['via']>): WhoamiIdentity => ({
     ...base,
     tab: tab.name,
     tabId: tab.tabId,
@@ -122,6 +125,23 @@ export function resolveIdentity(opts: {
   if (sessionSlug && slugOf) {
     const matches = tabs.filter((t) => t.cwd && slugOf(t.cwd) === sessionSlug)
     if (matches.length === 1) return found(matches[0], 'session-slug')
+  }
+
+  // 3. `argv-name` — the name our own Claude was launched with. This is the
+  //    route that answers on a stock Tabby, where the pid walk above finds
+  //    nothing because the plugin's pid for every older tab is a dead helper
+  //    process (see the `stable-pid` capability). A spawn-time name goes stale
+  //    when the tab is renamed, so it is taken only when exactly one tab has it
+  //    and, when both are known, that tab's directory is where our transcript
+  //    lives — a renamed tab whose old name now belongs to a different tab
+  //    elsewhere must not be claimed.
+  if (ownClaudeName) {
+    const named = tabs.filter((t) => t.name === ownClaudeName)
+    if (named.length === 1) {
+      const t = named[0]
+      const agrees = !sessionSlug || !slugOf || !t.cwd || slugOf(t.cwd) === sessionSlug
+      if (agrees) return found(t, 'argv-name')
+    }
   }
 
   return base

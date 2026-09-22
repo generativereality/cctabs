@@ -20,14 +20,35 @@ export class PidIndex {
   async lookup (pids: number[]): Promise<string | undefined> {
     const candidate = new Set(pids)
 
+    // Pass 1: the PTY's own pid. It is the tab's shell and lives as long as the
+    // tab does, so every process in the tab has it as an ancestor — an exact
+    // answer. truePID is NOT that: Tabby computes it once, two seconds after
+    // spawn, and for a `zsh -c claude` tab it lands on a short-lived helper that
+    // is gone five minutes later (see `stable-pid` in server.ts). A dead truePID
+    // can be recycled by the OS into someone's ancestor chain, so it only gets
+    // a say once no tab has matched exactly.
+    for (const { uuid, tab } of this.tabs.entries()) {
+      if (!(tab instanceof BaseTerminalTabComponent)) continue
+      try {
+        const pty: any = (tab as any).session?.pty
+        if (pty && typeof pty.getPID === 'function') {
+          const shellPid: number = await pty.getPID()
+          if (typeof shellPid === 'number' && candidate.has(shellPid)) return uuid
+        }
+      } catch {
+        // pty not ready — the fallbacks below may still answer
+      }
+    }
+
+    // Pass 2: the old heuristics, for a pty that can't report its own pid.
     for (const { uuid, tab } of this.tabs.entries()) {
       if (!(tab instanceof BaseTerminalTabComponent)) continue
       const session = (tab as any).session
       if (!session) continue
 
-      // The shell PID is the PTY's truePID. tabby-local Session keeps the
-      // pty as a private field; reach into it directly. Falls back to
-      // tabby-mcp-style getChildProcesses (matches descendant pids only).
+      // tabby-local Session keeps the pty as a private field; reach into it
+      // directly. Falls back to tabby-mcp-style getChildProcesses (matches
+      // descendant pids of truePID only).
       try {
         const pty: any = session.pty
         if (pty && typeof pty.getTruePID === 'function') {

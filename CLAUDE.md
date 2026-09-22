@@ -147,21 +147,15 @@ Three things that each cost a failed build to discover, so they are worth statin
   published by accident, which was the old failure mode. The workflow also refuses to publish an
   empty bundle, since `files` ships `dist/` alone and npm would happily accept nothing.
 - Keep `PLUGIN_VERSION` in `tabby-plugin/src/server.ts` in step with `tabby-plugin/package.json` — it's what `/api/health` reports. It has now drifted twice: once a release behind, once a release *ahead* (a renumbered release caught `package.json` and missed the constant). Neither broke anything, because capabilities are feature-detected rather than version-compared — which is exactly why both survived review. Guarded now by `src/core/plugin-version.test.ts` and, because the plugin's release workflow never runs the test suite, by that workflow's own pre-publish check.
-  **Still outstanding as of 2026-09-17:** the bundle published as `tabby-cctabs@0.1.4` contains
-  `PLUGIN_VERSION = '0.1.5'` — verified by unpacking the tarball from npm, which holds exactly one
-  version string and it is `0.1.5`. So an installed 0.1.4 answers `/api/health` with 0.1.5 and
-  `cctabs doctor` prints a version that has never existed (PR #23’s Windows notes recorded exactly
-  that). The source now says `0.1.4`, consistent with itself, so the fix can only reach anyone via a
-  **0.1.5 release** — at which point the constant goes back to `0.1.5`. Deliberately held: nothing
-  behaves differently (`doctor` is the only consumer; the CLI feature-detects through
-  `capabilities.includes(...)`, never a version compare), and a plugin release costs every user a
-  manual update in Tabby. Let it ride along with the next substantive plugin change.
-- **Six commits on `main` carry `fredrik.wollsen@f-secure.com`** as author — the work identity, in a
-  public repo. The canonical identity is `Motin <motin@motin.eu>` (110 commits). Nothing new is being
-  added: PR #16’s commit was re-authored before merge on 2026-09-17, and squash-merges land as
-  `motin@motin.eu`. Removing the existing six means rewriting history and force-pushing, which last
-  time left a second machine’s marketplace clone diverged and needing manual realignment. Open
-  decision, not urgent.
+  The 0.1.4 tarball on npm announces itself as `0.1.5` (its bundle was built a release ahead).
+  0.1.5 — the `stable-pid` release — makes that string true, and source and `package.json` both
+  say 0.1.5 now.
+- **Six commits on `main` carry a work-identity author address** instead of the canonical
+  `Motin <motin@motin.eu>` (110 commits). The address is not repeated here: this file is public
+  too, and there is no reason to add another plaintext copy of it. Nothing new is being added:
+  squash-merges land as `motin@motin.eu`. Removing the existing six means rewriting history and
+  force-pushing, which last time left a second machine's marketplace clone diverged and needing
+  manual realignment. Open decision, not urgent.
 - Sideloading only changes files on disk; **Tabby must be restarted/reloaded** to run the new plugin.
 
 ### Before releasing, check the docs that ship
@@ -207,6 +201,8 @@ on a plugin fix as a **new capability token**, never as a version comparison.
 
   The colour is assigned straight to `BaseTabComponent.color`, which is literally what Tabby's own right-click → Color menu does (`tabby-core/src/tabContextMenu.ts`), so a cctabs-set colour is indistinguishable from a hand-set one. `src/core/colors.ts` mirrors Tabby's `TAB_COLORS` **hex values**, not just its names: that menu ticks its radio by comparing `tab.color === color.value`, so a different blue would colour the tab and still leave the menu showing no selection. Tabby persists the colour via `tabRecovery.service.ts` (`token.tabColor`) on a 30s save timer — the `color` setter, unlike `pinned`, doesn't request an earlier save, so a colour set just before a hard quit can be lost. That's upstream behaviour and matching it is deliberate.
 
+- `stable-pid` — `/api/tabs` reports each tab's `shellPid` (`pty.getPID()`, the process the PTY spawned) and `/api/tabs/identify` matches on it first. The older `pid` field is Tabby's `getTruePID()`, which `tabby-electron/src/pty.ts` computes **once**, two seconds after spawn, by descending through single-child chains — for a `zsh -c claude …` tab that lands on Claude's own `caffeinate -t 300` helper, dead five minutes later. Measured: 52 of 57 tabs reported a pid that no longer existed, and `whoami` answered `unknown` in a tab with a clean process chain. Without the capability the CLI falls back to argv (`src/core/claude-procs.ts`): a Claude's `--resume <id>` is exact, its `--name` is a spawn-time snapshot and is only trusted when unique both ways.
+
 - `spawn-waits-for-pty` — `POST /api/tabs/new` serialises concurrent creates and doesn't respond until the new tab's process is actually running. Restore spawns in parallel only when this is present; otherwise one at a time with a settle gap.
 
   Why it exists: a Tabby terminal tab spawns its PTY only after its xterm frontend attaches, which `BaseTerminalTabComponent.ngOnInit` defers until the tab `hasFocus` — and `AppService.addTabRaw → selectTab` blurs the outgoing tab synchronously but emits focus from a `setImmediate` that reads `_activeTab` at callback time. Two creates in one event-loop turn means the first tab is never focused, never attaches, and **never spawns a process at all**. The upstream sources are readable via the sourcemaps in `/Applications/Tabby.app/Contents/Resources/builtin-plugins/*/dist/index.js.map`.
@@ -227,4 +223,5 @@ on a plugin fix as a **new capability token**, never as a version comparison.
 ## Conventions
 
 - `npm run check` = typecheck + test + build. `npm test` is scoped to `src/` on purpose — a bare `bun test` also globs the sibling checkouts under `related-repos/` and reports their failures as ours.
-- Verifying which sessions are alive: use `cctabs sessions` or the plugin's `/api/tabs`. **Never `ps aux | grep`** — it truncates long command lines, so a tab whose `--name` falls past the cutoff reads as dead when it isn't.
+- Verifying which sessions are alive: use `cctabs sessions` or the plugin's `/api/tabs`. **Never `ps aux | grep`** — it truncates long command lines, so a tab whose `--name` falls past the cutoff reads as dead when it isn't. Code that reads the process table goes through `readProcessTable()` in `src/core/claude-procs.ts`, which passes `-ww` for exactly that reason.
+- `src/core/claude-procs.ts` — the process table as a source of truth. Trust a Claude's `--resume` for its **session id**; never trust its `--name` for the **tab's** name (it doesn't follow a rename). `fleet-manifest.ts` and `restart-plan.ts` are the pure halves of `cctabs manifest` / `cctabs restart`, and every rule in them is a correction a hand-run fleet restart needed.

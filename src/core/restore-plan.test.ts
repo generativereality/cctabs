@@ -415,3 +415,51 @@ describe('planRestore — session origin', () => {
     expect(plan[0]).toMatchObject({ action: 'spawn', configDir: '/home/x/.claude-adhoc' })
   })
 })
+
+describe('planRestore — one session, one Claude', () => {
+  // resolveSession keyed on the entry's recorded id, so two names can share one.
+  const byId = (tabs: FakeTab[], live: Record<string, number[]> = {}, createMissing = true): PlanDeps => ({
+    ...makeDeps(tabs, { createMissing }),
+    resolveSession: (entry) => ({ id: entry.sessionId ?? `sess-${entry.name}`, dir: `/dir/${entry.name}` }),
+    liveSessionPids: (id) => live[id] ?? [],
+  })
+
+  it('restores a session once even when the manifest lists it under two names', async () => {
+    // The measured case: a stale spawn-time --name put one session in the
+    // manifest twice, and both entries were spawned.
+    const plan = await planRestore(
+      [mEntry('new-name', { sessionId: 'S1' }), mEntry('old-name', { sessionId: 'S1' })],
+      byId([]),
+    )
+    expect(actionsOf(plan)).toEqual({ 'new-name': 'spawn', 'old-name': 'duplicate-session' })
+  })
+
+  it('never spawns a session that a live Claude is already running', async () => {
+    const plan = await planRestore([mEntry('alpha', { sessionId: 'S1' })], byId([], { S1: [4242] }))
+    expect(plan[0]).toMatchObject({ action: 'session-live', sessionId: 'S1' })
+  })
+
+  it('never attaches to a tab whose session is live elsewhere, however its screen reads', async () => {
+    const plan = await planRestore(
+      [mEntry('alpha', { sessionId: 'S1' })],
+      byId([{ id: 't1', name: 'alpha', status: 'terminal' }], { S1: [4242] }),
+    )
+    expect(plan[0].action).toBe('session-live')
+    expect(plan[0].closeTabId).toBeUndefined()
+  })
+
+  it('restores normally once no process holds the session', async () => {
+    const plan = await planRestore(
+      [mEntry('alpha', { sessionId: 'S1' })],
+      byId([{ id: 't1', name: 'alpha', status: 'terminal' }]),
+    )
+    expect(plan[0].action).toBe('attach')
+  })
+
+  it('works unchanged for a backend with no process table', async () => {
+    const deps = byId([])
+    delete deps.liveSessionPids
+    const plan = await planRestore([mEntry('alpha', { sessionId: 'S1' })], deps)
+    expect(plan[0].action).toBe('spawn')
+  })
+})
