@@ -88,10 +88,21 @@ Check that `origin/main..HEAD` line before resetting: it is what makes this safe
 A local commit that is *not* a sync — an edit made directly in the marketplace
 repo — would be destroyed, and the reset is the wrong tool for that case.
 
-⚠️ Hit on 2026-09-22 cutting 0.5.5: an unpushed `sync cctabs to 0.5.4` here plus
-two commits pushed from elsewhere. Note the corollary — whichever machine made
-the unpushed sync now has a clone that is behind in its own way, and needs the
-same reset before its next release.
+⚠️ Hit on 2026-09-22 cutting 0.5.5. The cause is worth stating precisely, because
+it is the ordinary case rather than a mishap: **nothing was wrong on either side.**
+The other machine synced 0.5.4 and pushed it; this clone had simply not pulled
+since, and `sync-plugin` committed 0.5.5 on top of a stale `main`. The script does
+not pull first, so any clone that is one release behind diverges the moment it
+syncs — no unpushed work and no mistake required.
+
+⇒ So the cheap prevention is `git -C ../plugins pull --ff-only` before a release,
+and the conflict above is what you get for skipping it.
+
+See also `generativereality/plugins`'s own README, which covers the *other*
+marketplace failure: `~/.claude/plugins/marketplaces/<name>` is a git clone and
+`marketplace update` is a pull, so a force-push to that repo leaves every existing
+clone unreconcilable. That one is about consumers of the marketplace; this section
+is about publishing to it.
 
 ### Releasing the Tabby plugin
 
