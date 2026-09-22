@@ -62,6 +62,37 @@ workflow, so a fresh run appears for approval.
 
 **Note:** Claude Code only discovers skills from directory-sourced plugins in the marketplace repo (npm source doesn't support skill discovery). The `sync-plugin` script keeps `generativereality/plugins` in sync. Requires the plugins repo checked out at `../plugins`.
 
+### A conflict in `../plugins` is resolved by RESETTING, never by merging
+
+`npm run sync-plugin` pushes to `generativereality/plugins`. When that clone has
+drifted — a sync commit made here that was never pushed, while another machine
+pushed its own — the push is rejected and `git pull --rebase` conflicts in
+`SKILL.md` and `plugin.json`.
+
+**Do not resolve those conflicts.** Both sides are *generated copies* of files
+that live here; hand-merging them invents a third version matching neither
+source. The marketplace copy has no independent content to preserve, so:
+
+```bash
+cd ../plugins
+git rebase --abort                 # if a rebase is in progress
+git log --oneline origin/main..HEAD   # confirm the only local commits are `chore: sync …`
+git reset --hard origin/main
+cd - && npm run sync-plugin        # regenerates from source and pushes
+```
+
+Then verify rather than assume — `bash scripts/sync-plugin.sh --check`, and
+`diff -q skills/cctabs/SKILL.md ../plugins/plugins/cctabs/skills/cctabs/SKILL.md`.
+
+Check that `origin/main..HEAD` line before resetting: it is what makes this safe.
+A local commit that is *not* a sync — an edit made directly in the marketplace
+repo — would be destroyed, and the reset is the wrong tool for that case.
+
+⚠️ Hit on 2026-09-22 cutting 0.5.5: an unpushed `sync cctabs to 0.5.4` here plus
+two commits pushed from elsewhere. Note the corollary — whichever machine made
+the unpushed sync now has a clone that is behind in its own way, and needs the
+same reset before its next release.
+
 ### Releasing the Tabby plugin
 
 Only needed when `tabby-plugin/src/` changed. Its version is independent of the
