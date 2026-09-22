@@ -3,7 +3,7 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.5.5 — 2026-09-22
 
 - **Fix: an option a command doesn't have was accepted and ignored.** `cctabs new mmm-b2b "…" --path <file>` printed `✔ Tab "mmm-b2b" … → claude` and opened the tab, and the brief it was meant to deliver went nowhere — `--path` is a `send` option, `new` had `--prompt`/`--file`, and nothing said so; the tab sat idle until a human noticed. gunshi parses an undeclared flag into neither `values` nor `positionals` and runs the command as though it were never typed, so this was never specific to `new`: `cctabs sessions --bogus-flag` exited 0 and printed the session list. Every command now refuses to run when given an option it doesn't declare, naming the option and exiting non-zero. `--help`/`--version`, `--no-<flag>` for a declared boolean, and anything after a `--` terminator are all still accepted.
 - **`cctabs new --path <file>` hands the new session a file the way `send --path` does.** The skill calls `--path` the robust way to deliver anything large — only the path crosses the prompt line, so there is no truncation surface — and a session that has read that will reach for it when spawning a tab too. It is the same handoff, now shared from one module rather than reimplemented: the file is checked for existence *before* the tab is opened, because a tab pointed at a file that isn't there is worse than no tab. It takes **no short flag**: `-p` is `--prompt` on `new` while it is `--path` on `send`, and quietly resolving that collision either way would be worse than spelling the option out.
