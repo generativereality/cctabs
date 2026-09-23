@@ -52,23 +52,7 @@ On your first cctabs invocation in a session, look at the version banner cctabs 
 
 Don't silently work around an outdated CLI: detection heuristics, command flags, and bug fixes diverge between versions, so misbehavior on the user's machine is often "binary on PATH lags behind the plugin docs you're reading." The Claude Code marketplace plugin update path only refreshes this skill — the npm-installed CLI binary is a separate channel and must be upgraded explicitly.
 
-⚠️ **The drift runs the other way too: THIS TEXT can be the stale half.** Because
-those are two channels, the cached skill can lag the CLI by several releases. On
-2026-09-16 a driver was reading
-`<config-dir>/plugins/cache/generativereality/cctabs/0.5.0/skills/cctabs/SKILL.md`
-— **691 lines, zero occurrences of the word "trust"** — while the CLI on PATH was
-`0.5.3` and the source skill was 1030 lines and already documented the failure
-that then cost it five tabs. The cache path carries the version, so compare it
-against `cctabs --version`:
-
-```bash
-ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/cctabs/*/ && cctabs --version
-```
-
-If the cached version is behind, ask the user to run `/plugins` → Marketplaces →
-Update generativereality. Until they do, treat anything *absent* from this file as
-"possibly just missing here", not "not a thing" — and prefer `cctabs <cmd> --help`
-from the installed binary over this text where the two could disagree.
+⚠️ **This text can itself be the stale half**: the cached skill can lag the CLI on PATH by several releases. If `cctabs <cmd> --help` disagrees with this file, trust the binary — how to check which version of this skill you are reading: [references/install.md](references/install.md).
 
 ### A one-time plugin install is needed
 
@@ -96,68 +80,7 @@ If the user wants to keep their other Tabby tabs intact, run `cctabs install-tab
 
 `cctabs doctor` is also available for a deliberate environment check: it reports the detected terminal (and how it was detected), whether a login+interactive shell can find `node`, and — on Tabby — whether the cctabs plugin answers its localhost health endpoint. Useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
 
-#### Auto-install + auto-restart (recommended)
-
-```bash
-cctabs install-tabby-plugin --yes
-```
-
-What it does, in order:
-1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs`
-2. Captures the current claude session id from `~/.claude/projects/<slug>/`
-3. Spawns a detached background worker that quits Tabby, waits for it to die, reopens it, then opens a new tab running `claude --resume <id> --fork-session` in your current cwd.
-
-**Other Tabby tabs in the same window get killed.** Tabby's session recovery may or may not bring them back. Use `--no-restart` to skip step 3 if the user wants control.
-
-#### Manual install (fallback)
-
-```bash
-TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
-mkdir -p "$TABBY_PLUGINS"
-[ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
-npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
-# then ask the user to quit + reopen Tabby
-```
-
-`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm. Tabby's GUI plugin manager handles this internally.
-
-Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
-Windows: `%APPDATA%\tabby`.
-
-#### Alternative: install via Tabby's GUI
-
-If the user prefers, point them at Tabby → **Settings → Plugins**, search "cctabs", click install, then quit + reopen Tabby. Same end state.
-
-Do not assume an unfamiliar terminal means cctabs is unusable — check `cctabs doctor` first, and note that over SSH the detection falls back to probing the Tabby plugin.
-
-### Driving a remote Tabby over SSH
-
-cctabs can open/list/close/send tabs on **another machine's** Tabby over SSH,
-as long as that machine's cctabs plugin is running. The plugin listens on
-`127.0.0.1:3300`, and an SSH session on the same host reaches it fine.
-
-The only wrinkle: over SSH the parent terminal never exports `TERM_PROGRAM`,
-so cctabs can't sniff the terminal from the environment. Two ways it copes:
-
-- **Auto-fallback (usually nothing to do):** when env detection comes up
-  `unknown`, cctabs probes the Tabby plugin on `127.0.0.1:3300` and, if it
-  answers, treats the session as Tabby. So a bare
-  `ssh host 'cctabs new foo "~"'` just works when the remote plugin is up.
-- **Explicit override:** set `CCTABS_TERMINAL=tabby` (alias `CCTABS_BACKEND`)
-  to force the Tabby backend regardless of `TERM_PROGRAM` — belt-and-braces
-  when you don't want to rely on the probe, or to force a specific backend.
-
-```bash
-# Open a tab on the other Mac's Tabby, from here:
-ssh motin@motin-mbp21.local 'cctabs new mbp21-task "~/Dev/proj"'
-# Force the backend explicitly if you prefer:
-ssh motin@motin-mbp21.local 'CCTABS_TERMINAL=tabby cctabs new mbp21-task "~/Dev/proj"'
-```
-
-Tabs are still **per-machine** — each host has its own Tabby + plugin, so a tab
-opened via SSH lives on the remote machine. Verify a remote host is ready with
-`ssh host 'cctabs doctor'`: it reports `Terminal — tabby (via plugin probe …)`
-when the fallback is in play.
+What the auto-install does step by step, the manual and GUI installs, and driving a remote Tabby over SSH: [references/install.md](references/install.md).
 
 ---
 
@@ -218,29 +141,7 @@ printf '\033[B' | cctabs send <tab>   # ✅ Down + send's own Enter → "Yes, I 
 cctabs send <tab> --submit            # ⛔ bare Enter confirms "No, exit" and kills the tab
 ```
 
-### Which directories are gated — it is NOT "is it a worktree"
-
-Trust is recorded per path in **`${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`** as
-`projects["<abs path>"].hasTrustDialogAccepted` (that default really is
-`~/.claude.json`, a sibling of `~/.claude/` and not inside it). The check walks *up* from the
-tab's directory and takes the first ancestor marked `true` — but the walk **stops
-at the enclosing git repo root**, so trust never leaks in from above that root.
-For a `--worktree` path, that root resolves to the **main repository**, not the
-worktree directory.
-
-| Directory | Gated? |
-|---|---|
-| A repo already trusted at its root | no — **including any `--worktree` of it** |
-| A subdirectory of a trusted repo | no |
-| A repo Claude Code has never run in | **yes**, however many trusted ancestors it has |
-| Same repo, but under a different backend preset | **yes** — each `CLAUDE_CONFIG_DIR` has its own trust list |
-
-⇒ Two measurements from 2026-09-16 that pin this down. `~/Dev` had been marked
-trusted on 2026-08-28 and still did **not** trust `~/Dev/<team>/<repo>` — the walk
-stopped at `<repo>`'s own root. Meanwhile a `--worktree` tab cut from an
-already-trusted repo got no dialog at all. So "never use `--prompt` with
-`--worktree`" would be the wrong rule; the real precondition is **"this path's
-repo root is already trusted, in the config dir this tab will use"**.
+**Which directories are gated is NOT "is it a worktree".** Trust is recorded per repo root, and each `CLAUDE_CONFIG_DIR` has its own list: a `--worktree` of an already-trusted repo is not gated, a repo Claude Code has never run in is, however many trusted ancestors it has. Details and measurements: [references/trust-gate.md](references/trust-gate.md).
 
 ⭐ **Check it before you spawn** — cheap, read-only, and answers the question
 exactly:
@@ -282,7 +183,7 @@ cctabs manifest [-o file] [--repoint-missing-dirs <dir>]  # snapshot the fleet a
 cctabs restart [--all | --only a,b] [--dry]      # restart Claude in every tab (new Claude Code version): snapshot → stop → restore → audit. Bare = plan only
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
-cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
+cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see references/tabs.md
 cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
 cctabs whoami [--json]                   # which tab is THIS session in? prints the tab name, or "unknown"
 cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
@@ -302,6 +203,22 @@ cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
 
+## Reference files — read the one that fits, when it fits
+
+This file holds what every invocation needs. The rest is in `references/`, and each entry says when to open it:
+
+- [references/install.md](references/install.md) — manual or GUI plugin install, what `install-tabby-plugin` does step by step, this skill text lagging the CLI, driving a remote Tabby over SSH.
+- [references/trust-gate.md](references/trust-gate.md) — exactly which directories show the trust dialog (per repo root, per config dir) and the measurements behind it.
+- [references/sending.md](references/sending.md) — every `send` form, what it refuses and why, `--verify`, the `--` terminator, and what a refusal means. Read before driving a tab with anything but a short reply.
+- [references/routing.md](references/routing.md) — deciding WHICH tab gets a message: resolve the owner from the branch, count what it already knows, relay what was said. Read before relaying anything across a fleet.
+- [references/restore-and-restart.md](references/restore-and-restart.md) — `restore` after a reboot, manifest-driven restore, `cctabs manifest` / `cctabs restart`, and the "Resume from summary" picker.
+- [references/export-import.md](references/export-import.md) — moving tabs and their conversations to another machine.
+- [references/backends-and-accounts.md](references/backends-and-accounts.md) — other model providers (Ollama, Kimi, Qwen, local), another Claude account, and `profile-copy` between accounts.
+- [references/tabs.md](references/tabs.md) — `sort --first`, tab colours, the tab title vs. the live session (RC) name, the `prefix` setting, naming conventions.
+- [references/worktrees.md](references/worktrees.md) — worktrees on an existing branch, why not to create them by hand, recovering a session whose worktree is gone.
+- [references/remote-control.md](references/remote-control.md) — auditing and repairing Remote Control (`/rc`) across the fleet.
+- [references/troubleshooting.md](references/troubleshooting.md) — `cctabs new` timeouts.
+
 ## Which tab am I in? — `cctabs whoami`
 
 When a session needs to name itself — a PR body, a commit trailer, a status post
@@ -318,7 +235,8 @@ identified the tab (`via`).
   tree — exact), `session-slug` (the one tab whose directory holds this
   session's transcript), or `argv-name` (the one tab named what this Claude was
   launched with `--name`). On a `tabby-cctabs` older than 0.1.5 the `pid` route
-  fails for every tab more than five minutes old — see "Restarting the fleet" —
+  fails for every tab more than five minutes old — see "Restarting the fleet" in
+  [references/restore-and-restart.md](references/restore-and-restart.md) —
   so the fallbacks are what answer there.
 - Prefer it over piping `cctabs sessions --json` into a matcher: that resolves
   every tab by scanning transcripts (~7.7s on a 65-tab fleet, minutes cold),
@@ -352,161 +270,6 @@ cctabs findings payments            # same command, reads better when you're ask
   outright. "I couldn't read it" and "it hasn't said anything" are different
   answers.
 - Tool-only and thinking-only messages are skipped; you get the prose.
-
-## Getting a working set in reach — `cctabs sort --first`
-
-Activity order is close to the *opposite* of what a driver wants: a tab that
-just delivered sinks to the bottom. To pin a chosen set instead:
-
-```bash
-cctabs sort --first auth,payments,billing        # these three to the front, in this order
-cctabs sort --first auth,payments --dry          # show the plan first
-```
-
-Every unlisted tab keeps its current relative order and sorts after the pinned
-ones. If any name doesn't resolve to exactly one tab, **nothing is moved** and
-the command exits non-zero — half a working set in reach, with no indication
-which half, is worse than an error. Tabby only.
-
-## Tab colours
-
-`-c/--color` on `new`/`resume`/`fork`, or `cctabs color <tab> <colour>` for a tab
-that already exists. Values: `blue`, `green`, `orange`, `purple`, `red`,
-`yellow`, `none`, or hex (`#0275d8`). Use it when the user asks to colour, tag or
-visually group tabs — e.g. one colour per repo, per PR, or per Claude account.
-
-Set `[defaults] color` in `~/.config/cctabs/config.toml` to colour every new tab,
-or `color` inside a `[backends.<name>]` section to colour one account's tabs.
-Precedence: `--color` → backend preset → `[defaults]`.
-
-Colours survive `cctabs restore` (and therefore a reboot): restore re-applies
-them from the manifest, from the tab being replaced, or from the config rule for
-that session's account. A per-account colour is the recommended setup — it keeps
-holding without anything recorded per tab.
-
-Requires a `tabby-cctabs` plugin that advertises the `tab-color` capability. With
-an older plugin the colour is skipped with a warning and the tab still opens;
-`cctabs color` exits non-zero, since colouring was the whole request.
-## Moving a session between Claude accounts
-
-`cctabs profile-copy <tab> --to <preset>` when the user wants a session that lives
-under one Claude account reopened under another (e.g. personal → enterprise).
-`CLAUDE_CONFIG_DIR` isolates transcripts per account, so the session is otherwise
-invisible from the other side.
-
-- Default is a **copy** — the source keeps running and the two diverge cleanly,
-  like `--fork-session`.
-- `--move` removes the source, but **refuses while the source is still running**.
-  Add `--close-source` to close the tab, wait for its process to genuinely exit,
-  and then move. Never work around this by hand: a `mv` is a rename, so the live
-  `claude` keeps writing to the moved file and both tabs interleave into one
-  unusable transcript.
-- Always run `--dry` first when unsure — it reports the target path, the sidecar
-  file count, and any relocation, without touching anything.
-- The copy carries the session's **sidecar** (`subagents/`, `tool-results/`).
-  Never hand-copy just the `.jsonl`; that silently discards all subagent history.
-- The new tab is named `<source>-<preset>` by default so prefix matching stays
-  unambiguous while the source is still open. `-n` overrides.
-
-## Backends: running Claude Code on Ollama / Kimi / Qwen / local models — or a different Claude account
-
-By default, `cctabs new` runs `claude` against the Anthropic API, using whatever account is logged into Claude Code's default profile. Pass `--backend <preset>` (or `-b`) to launch the tab against a different model provider (Ollama/Kimi/Qwen/local) **or a different Claude account entirely** (e.g. a separate client's or organization's subscription) — useful for cheap/free scratch sessions, privacy-sensitive work, experimenting with frontier open-weight models, or keeping a client's Claude usage cleanly separated from your own.
-
-`cctabs` does this by prepending env vars to the `claude` command in the new tab: for model-provider presets that's `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, etc. plus `--model <name>`; for a different-account preset it's `CLAUDE_CODE_OAUTH_TOKEN` (and optionally `CLAUDE_CONFIG_DIR`) — see below.
-
-### Built-in presets
-
-Run `cctabs backends` for the live list. Common ones:
-
-| Preset | What it is | When to use |
-|---|---|---|
-| `anthropic` (default) | Anthropic API | Production / coding work where capability matters |
-| `kimi` | Kimi K2.6 via Ollama Cloud (Pro tier) | Cheap frontier alternative; ~5s/turn |
-| `qwen-cloud` | Qwen3 Coder Next via Ollama Cloud | Fastest Pro option (~3.8s/turn) |
-| `gemma-cloud` | Gemma4 31B via Ollama Cloud | Cheap general-purpose |
-| `qwen-local` | Qwen3 Coder 30B local (18GB) | Offline / private; slow on M1 |
-| `qwen-next-local` | Qwen3 Coder Next Q3_K_M local (38GB) | Private + most capable local; needs `ollama create` import |
-| `gpt-oss` | gpt-oss 20B local (13GB) | Private; slow; ~100s/turn for 50k system prompt |
-| `llama` | Llama 3.1 8B local | Fast but garbles inside Claude Code's 50k system prompt — capability gate |
-| `*-tee` | Same as above but routed through `:11500` proxy | Wire-level inspection (`ollama-tee` proxy must be running) |
-
-### Cost × privacy framing
-
-Two axes matter:
-
-1. **Cost** — Anthropic Pro $20/mo or Max ($100/$200/mo); Ollama Cloud Pro $20/mo (3 concurrent, includes Kimi/Qwen Cloud); local = free but hardware-bound
-2. **Privacy** — Anthropic API: Anthropic sees prompts. Ollama Cloud: Ollama sees prompts. Local: nothing leaves the laptop
-
-Match the tier to the task:
-- Sensitive prompts (client code, customer data) → `qwen-next-local` or `gpt-oss`
-- Routine exploration / orchestration → `anthropic` (default)
-- Cost-sensitive bulk work → `kimi` or `qwen-cloud`
-
-### Examples
-
-```bash
-# Spin up a tab on Kimi for a side experiment
-cctabs new explore-kimi ~/Dev/myapp -b kimi -p "explore alternative API designs"
-
-# Local privacy session, slower but no data leaves the laptop
-cctabs new private-refactor ~/Dev/clientwork -b qwen-next-local -W
-
-# Compare two models on the same task in parallel
-cctabs new task-anthropic ~/Dev/myapp -p "implement spec X"
-cctabs new task-kimi ~/Dev/myapp -b kimi -p "implement spec X"
-
-# Custom local Ollama tag not in built-in presets:
-cctabs new x ~/Dev/myapp -b qwen-local -m my-custom-tag:latest
-```
-
-### Caveats
-
-- **Local backends are slow on M1.** A Claude Code turn against the local 50k-token system prompt takes ~100s prefill + generation on M1 Max. Only worth it for non-time-sensitive private work.
-- **Llama 3.1 8B garbles tool calls** under Claude Code's system prompt. Capability gate, not a bug.
-- **Ollama Cloud Pro requires `ollama signin`** (one-time). Free tier denies cloud-tagged models.
-- **Backend carries into child tabs.** Each launched tab's claude process gets `CCTABS_ACTIVE_BACKEND=<name>`, so a `new`/`resume`/`fork` run from *inside* that session defaults `-b` to the same preset instead of quietly falling back to `anthropic` (your default account). Explicit `-b` still wins, and `-b anthropic` forces the default back. This matters most for account-switching presets (below): a spawned sub-task tab stays on the client's account rather than billing your own.
-- **`resume` prefers the account the session actually belongs to.** Sessions live under their preset's `CLAUDE_CONFIG_DIR`, so cctabs knows which account each one came from and resumes it there — ahead of any inherited backend, which would otherwise be whichever account the *calling* tab happened to run under. Precedence: explicit `-b` → the session's own account → inherited. The success line says which (`[backend: client-x (from session)]`).
-- **Custom presets** can be added in `~/.config/cctabs/config.toml`. Two forms:
-  ```toml
-  # Different model/provider — base_url + auth_token shorthand:
-  [backends.my-preset]
-  model = "qwen3-coder-next:cloud"
-  base_url = "http://localhost:11434"
-  description = "My custom preset"
-
-  # Fully custom env vars via env_<NAME> — use this for anything not covered
-  # by the base_url shorthand, including a different Claude account:
-  [backends.client-x]
-  description = "Client X's Claude account"
-  env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
-  env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
-  ```
-  `env_<NAME>` sets any env var verbatim on the spawned `claude` process — not limited to the Ollama-oriented fields.
-
-### Running Claude Code as a different account (e.g. a client's or org's subscription)
-
-macOS stores Claude Code's OAuth login in the Keychain as a single global entry per macOS user (service `Claude Code-credentials`, account `<your OS username>`) — it is **not** scoped by `CLAUDE_CONFIG_DIR`. So `CLAUDE_CONFIG_DIR` alone isolates settings/history/MCP config between profiles, but **not** login — two interactive `/login` sessions under different config dirs still fight over the same Keychain slot, and the most recent login wins for both.
-
-The fix: mint a **long-lived OAuth token** for the other account (`claude setup-token`, requires that account to have a Claude subscription) and pass it via `CLAUDE_CODE_OAUTH_TOKEN`, which Claude Code's auth precedence honors *before* falling back to the Keychain default — so a tab exporting that token runs as the other account with zero Keychain collision, concurrently with your own default-profile sessions.
-
-One-time bootstrap (the interactive login step must be done by the account owner — an agent cannot drive OAuth):
-```bash
-# 1. Log into the OTHER account in an isolated profile:
-export CLAUDE_CONFIG_DIR=~/.claude-client-x
-claude
-#   -> /login -> sign in as the other account
-
-# 2. Still in that same shell/profile, mint the long-lived token:
-claude setup-token
-#   -> prints a token; this is a real credential, handle like a password
-
-# 3. Restore YOUR OWN login in the default profile (step 1 temporarily
-#    overwrote the shared Keychain slot):
-unset CLAUDE_CONFIG_DIR
-claude
-#   -> /login -> sign in as yourself again
-```
-Then add the token to a preset as shown above (`env_CLAUDE_CODE_OAUTH_TOKEN`), `chmod 600 ~/.config/cctabs/config.toml` (it now holds a live credential in plaintext TOML — no dynamic Keychain lookup is supported by the preset loader), and `cctabs new <name> <dir> -b client-x` just works from then on, no further login needed.
 
 ## Workflow: Checking What's Running
 
@@ -576,159 +339,7 @@ cctabs resume api ~/Dev/myapp
 **Use `cctabs resume` instead of `cctabs new` when you want to continue a previous conversation.**
 `cctabs new` always starts a fresh Claude session. `cctabs resume` picks up where the last session left off.
 
-## Workflow: Restoring tabs after a reboot
-
-After a terminal restart or computer reboot, every tab loses its Claude session and shows up with `terminal` or `? unreadable` status. `cctabs restore` walks every such tab, looks up its session by name across **all** Claude project directories, and re-attaches in place.
-
-A tab is only rebuilt when it has **no captured output AND no running process**. An unreadable tab whose process is alive is reported and left alone — restore can neither send `claude --resume` into it (that types into whatever is already there) nor recreate it (that closes it), so it does neither.
-
-```bash
-cctabs restore                    # search all projects (default)
-cctabs restore --dry              # preview what would be resumed without doing it
-cctabs restore ~/Dev/myapp        # restrict the search to one project dir
-```
-
-⚠️ **Read the count at the end, and trust it — it can now fail.** After
-spawning, restore re-reads the tab list, checks each new tab has a process, and
-resolves its session from disk, then reports `N verified, N unconfirmed, N
-failed` and **exits non-zero if anything failed**. A tab counts as verified once
-a Claude whose own command line says `--resume <the id asked for>` has **stayed
-running** for a few seconds — without waiting for its title to reach disk. A
-Claude that appears and exits (typically printing `No conversation found`, which
-means the session isn't in the account it was launched under) is a failure, not
-a pass. Anything short of that is
-re-checked every few seconds for up to 45s before it is called failed: under
-load a healthy tab can take longer than one look to attach its process, and a
-false "did not come back" invites a second restore over a tab that is fine. A tab that came back as a
-*different* session than the one requested counts as failed, not restored:
-`claude --resume` on an id it can't find quietly opens a fresh conversation, so
-the tab looks perfect and the context is gone. `unconfirmed` is its own answer —
-the tab is up but its session isn't readable yet — and those are named so you
-can check them with `cctabs transcript` before briefing anything from them.
-
-The line this replaced read "78 spawned, 0 failed" while one tab was absent
-entirely and another had lost its context, because it counted spawn calls that
-returned rather than tabs that worked.
-
-If a session was started in a different `cwd` than the tab's current directory (common after `cd`-ing inside the tab), the global search still finds it via the recorded session metadata — no need to guess the right dir.
-
-The search covers **every Claude account**, not just the default one: sessions launched under a backend preset live in that preset's own `CLAUDE_CONFIG_DIR`, and restore looks there too, then relaunches each tab under the account its session came from. Nothing to pass — a mixed-account fleet restores in one command. `--dry` names the account for any tab that isn't on the default one.
-
-### Manifest-driven restore (precise, scriptable bulk resume)
-
-When you already know exactly which sessions to bring back — e.g. you deliberately closed a batch of tabs, or you're recreating a fleet from a snapshot — skip the by-name search and drive `restore` from an explicit manifest instead:
-
-```bash
-cctabs sessions --json > snapshot.json          # {name, cwd, session_id, backend?, config_dir?} per live tab
-cctabs restore --manifest snapshot.json --dry   # preview first
-cctabs restore --manifest snapshot.json --create-missing   # spawn tabs for entries with none
-```
-
-**`session_id: null` now says why.** Every row carries `session_lookup`:
-`found`, `not-found` (searched every config dir; nothing is titled after this
-tab — with `sessions_in_dir` counting the transcripts that *do* exist for its
-directory, so a renamed tab is distinguishable from a directory nothing has ever
-run in), `no-cwd` (the tab reported no directory, so nothing was looked up), or
-`lookup-failed` (the search itself threw — `session_lookup_error` has the
-reason). A bare null conflated all four, and they call for opposite responses:
-one is a tab to spawn fresh, the others are problems to fix before touching the
-fleet.
-
-Rows also carry `claude_pid` (the Claude running in the tab, when it could be matched) and `claude_pid_via` — `shell-pid` (exact) or `argv-name` (the only Claude launched with this tab's name).
-
-`--manifest -` reads from stdin, so `cctabs sessions --json | cctabs restore --manifest - --create-missing` works as a one-liner. Entries for tabs that are already running are reported as "already running, skipping" — safe to re-run. `backend` / `config_dir` are emitted only for sessions belonging to a non-default Claude account, and restore infers them anyway from wherever it finds the session, so a hand-written manifest can omit them.
-
-**Permission mode travels with the manifest.** `cctabs sessions --json` records each tab's mode as `permission_mode`, read from Claude's own footer, and restore hands it back with `claude --permission-mode <mode>` — so a tab that was in plan mode comes back in plan mode instead of in whatever the global `claude.flags` produce. The flag is appended after those flags and wins; it composes with `--allow-dangerously-skip-permissions`, which only makes bypass *available* rather than selecting it. Entries with no recorded mode fall back to the configured flags, and restore says how many did so rather than doing it silently.
-
-Two consequences worth knowing:
-
-- **The footer is the source, not the transcript.** The transcript's `permission-mode` entries are written at turn boundaries, not when the mode changes — cycling a session shift+tab through manual → plan → bypass leaves its recorded value untouched until the next prompt is submitted. Reading the footer is what makes a mode change with no subsequent turn survive a restore.
-- **Scan mode can't capture it.** A bare `cctabs restore` rebuilds tabs whose sessions are already gone, and a tab with no session has no footer to read. Modes round-trip through `--manifest` only, which means capturing the manifest *before* you close anything.
-
-**One session, one Claude — restore now enforces it.** Two entries with different names on the same `session_id` used to spawn two tabs racing to be the active worker for one conversation (Remote Control's "this connection is no longer the active worker for the session (code 4090)"). Restore now keys on the id as well as the name: the second entry is reported `duplicate-session` and skipped, and an entry whose session a live Claude is *already running* — its argv says `--resume <id>`, in any tab — is reported `session-live` and never spawned or typed into. The shape is easy to produce by hand: a process's `--name` is a spawn-time snapshot, so reading tab names from `ps` lists a renamed tab twice. `cctabs manifest` builds the manifest from the tab list instead and refuses a collision.
-
-**Bulk restore is reliable — with the current plugin.** A 45-tab close-and-restore completes in under a minute with tab order preserved. This used to be the opposite: spawning ~35+ tabs in one call left most of them registered in Tabby but sitting as empty shells at `? unreadable` status, because a Tabby tab only spawns its process once its terminal frontend attaches, which only happens once the tab has been focused — and each new tab stole focus from the last. `tabby-cctabs` ≥ 0.1.3 serialises tab creation internally and doesn't answer until the process is actually running, advertising `spawn-waits-for-pty` on `/api/health`; the CLI probes for that and only then spawns in parallel. Against an older plugin it falls back to one-at-a-time with a settle gap — slower, still correct.
-
-**If you do need to verify what's running, never use `ps aux | grep`.** It truncates long command lines, so any entry whose `--name` falls past the cutoff silently disappears and a healthy tab reads as dead. Use the tab list itself, or a full-width `ps`:
-
-```bash
-cctabs sessions                       # status per tab, straight from the terminal
-ps -Aww -o command | grep -c -- "--resume"   # full command lines, not truncated
-```
-
-And don't read "every Claude without `--resume`" as "every empty tab": a tab opened fresh with `cctabs new` has no `--resume` and is perfectly healthy — including the one you're running in. The question that matters is narrower, and `cctabs restart` answers it: does every session *you restored* have a Claude launched on its id?
-
-### Restarting the fleet — `cctabs manifest` and `cctabs restart`
-
-To put every tab on a new Claude Code version without losing a conversation:
-
-```bash
-cctabs restart                  # the plan: which pid is stopped for which tab. Touches nothing
-cctabs restart --all            # do it — every tab except the one you're in
-cctabs restart --only a,b       # just these
-```
-
-It snapshots the fleet (below), saves the manifest under `~/.config/cctabs/restarts/` **before** stopping anything and prints the one-line recovery command, sends SIGTERM to each tab's Claude and waits for it to exit, runs `restore --manifest … -c`, and then **audits**: every restored session must have a live Claude launched with `--resume <its id>`. One that doesn't is a tab that looks running but came back **empty**, and it is named with the command to re-run. Exit is non-zero on any of that.
-
-What it refuses, on purpose:
-
-- ⛔ **Running without knowing which process is you.** It needs `CLAUDE_CODE_SESSION_ID` and a `claude` among its own ancestors, and never signals any pid in its own process tree. Run it from inside a Claude Code tab.
-- ⛔ **Stopping a Claude it can't tie to a session exactly.** A pid is taken only from a process launched with `--resume <that entry's id>`, or — with `tabby-cctabs` ≥ 0.1.5 — the Claude under the tab's own shell. That second route ties the process to the *tab*, not to the session: the session still comes from the tab's title, so a Claude whose own argv resumes a *different* session is left for a human, but a plain `claude` started by hand in a tab whose title matches an older transcript would still be restarted onto that older one. A tab whose Claude was started fresh and is matched only by name is listed "restart it by hand"; a tab with no session id is left alone, since restarting it would lose its context.
-- ⛔ **Starting on a bad manifest.** Any error below stops it before anything is stopped. `--drop-invalid` leaves those tabs alone and restarts the rest; with `--only`, only the named tabs' problems count.
-
-`cctabs manifest` is the snapshot on its own — `restore --manifest` reads its output directly. Compared with `sessions --json > file` it:
-
-- **leaves the calling session out** (by session id and pid, never by tab — `--include-self` to keep it);
-- rejects **two tabs sharing a name** — restore resolves entries by name, so it would bring back neither after restart stopped both. Rename one;
-- rejects a session recovered from argv (below) whose transcript is not under the tab's own directory — `--resume` run from there would not find it;
-- is **keyed on session id**: two tabs resolving to one session is an error, unless a live process proves which one owns it — then the other (typically a leftover tab still titled with the session's old name) is dropped with a warning;
-- **checks every directory exists** — a Claude restored into a deleted directory gets `Unknown skill` from `Skill()` and `Unable to read current working directory` from git. A deleted **worktree** is not a lost session, though: Claude Code removes worktrees on exit, and `claude --resume <id>` finds a session by id from *any* directory (measured on 2.1.280 — from the repo root, a parent dir, an unrelated dir and `~`, every turn landing in the original transcript). So an entry whose `.claude/worktrees/<name>` is gone is pointed at that worktree's own repo root automatically, with a warning — it will then work in the main checkout, not an isolated worktree, so give it a fresh worktree before it touches git. Any other missing dir is an error unless `--repoint-missing-dirs <dir>`;
-- **warns, but keeps,** a session filed under a different directory than its tab's — started in a subdirectory, say, then `cd`-ed out of. Resume-by-id finds it anyway on current Claude Code;
-- **checks every session id has a transcript** in some Claude config dir, since resuming one that doesn't opens a fresh conversation;
-- exits non-zero and writes nothing on an error, unless `--drop-invalid`.
-
-**Where the session ids come from.** `sessions --json` (and so `manifest`) resolves each tab's session by its title on disk. When that finds nothing it now asks the process: a live Claude launched with `--resume <id>` names its session exactly, and that recovers two measured misses — a worktree renamed after the session started (the transcript sits under the old directory's slug), and a transcript whose last title no longer matches the tab. Such rows say `session_source: "argv"`. Only the **id** is taken from argv, never the name: `--name` is whatever the tab was called when it was spawned.
-
-⚠️ **Tabby plugin ≥ 0.1.5 gives exact process matching** (update once it is released). Tabby records each tab's pid once, two seconds after it spawns, by following single-child chains — which for a Claude tab lands on Claude's own short-lived `caffeinate` helper. On a measured 57-tab fleet 52 tabs reported a pid that no longer existed, so `whoami`'s process match and restore's "is anything running here" check were reading a dead number. 0.1.5 reports each tab's real shell pid (the `stable-pid` capability). Older plugins still work, through the argv and name fallbacks above, and say less.
-
-To relaunch a straggler individually, `cctabs resume <name> "<dir>"` detects a genuinely empty tab itself ("has no live shell (no process, no output) — recreating") and rebuilds it; if the tab can't be read but its process is alive it refuses and tells you to look, so it's safe against a tab `restore` already registered.
-
-### The "Resume from summary / full session" picker
-
-When `claude --resume` reattaches a large or old session, Claude first shows a blocking picker:
-
-```
-❯ 1. Resume from summary (recommended)
-  2. Resume full session as-is
-  3. Don't ask me again
-```
-
-**Always pick option 2, "Resume full session as-is."** The point of `restore` is to bring the conversation back intact — resuming from a summary discards the live context you're restoring for. `restore` auto-advances this picker for you (it moves down once to option 2 and confirms), so you normally never see it. If you ever do drive it manually (e.g. sending keys to a tab), send **↓ then Enter** — never the bare Enter that would accept the summary, and never option 3, which permanently silences the prompt in that session's config.
-
-## Workflow: Moving sessions across machines
-
-Use `export` + `import` to migrate a tab (or a whole workspace) — and its underlying Claude conversation — from one machine to another, e.g. when switching laptops or sharing a debug session with a teammate.
-
-```bash
-# On source machine
-cctabs export auth                                  # → ./cctabs-export-auth-<ts>.tar.gz
-cctabs export auth --out ~/Downloads/auth.tar.gz
-cctabs export --all                                 # every tab in the current workspace
-cctabs export --all --workspace tabby
-
-# On destination machine
-cctabs import ~/Downloads/auth.tar.gz --dry-run     # preview without copying or opening tabs
-cctabs import ~/Downloads/auth.tar.gz               # copy session jsonl(s) + open tab(s)
-cctabs import ~/Downloads/auth.tar.gz --cwd ~/Dev/myapp   # single-tab archives only — remap the cwd
-cctabs import ~/Downloads/auth.tar.gz --force       # overwrite a session id that already exists locally
-```
-
-Gotchas:
-
-- **Target cwd must exist on the destination machine.** Each manifested tab carries the original `cwd` (e.g. `/Users/alice/Dev/myapp`). If that path doesn't exist locally, that entry is skipped with a "clone the repo, then re-run" hint. Either clone/recreate the directory first, or use `--cwd` to remap (single-tab archives only).
-- **No multi-tab cwd remap.** If the source laptop had repos under a different layout (e.g. `~/Dev/Projects/foo` vs `~/Dev/foo`), `--cwd` is ignored. The workaround is to extract the tarball, edit `meta.json`, and re-tar — or split into per-tab archives and import each with `--cwd`.
-- **Session IDs are preserved.** The exported session jsonl lands at `~/.claude/projects/<slug>/<sessionId>.jsonl` on the destination. Pass `--force` to overwrite a colliding session id (e.g. when re-importing an updated export).
-- **Always preview multi-tab imports with `--dry-run` first.** It reports which entries would import, which would be skipped (missing cwd), and where each session jsonl would land — useful before spawning many tabs.
+Restoring after a reboot, from a manifest, or restarting the whole fleet onto a new Claude Code version: [references/restore-and-restart.md](references/restore-and-restart.md). Moving tabs to another machine: [references/export-import.md](references/export-import.md).
 
 ## Workflow: Forking a Session
 
@@ -784,17 +395,7 @@ brief: `cctabs new <name> <dir> --path <file>`. Mind the short flags — `-p` is
 the success line printed, and the brief was never delivered. An unknown option
 is now a non-zero exit on every command.)
 
-⚠️ **The screen cannot tell you whether a big paste arrived whole.** Claude
-collapses it into a `[Pasted text #N +M lines]` chip, and `M` does **not** track
-the payload: a 6,892-byte, 76-line payload was measured arriving *complete* into
-an idle tab while its chip read `+10 lines`. So `send` reports "arrived,
-completeness unverified" rather than a ✔, and if you need certainty add
-`--verify` — it reads the target session's own transcript, which records what it
-actually received, and fails loudly naming which end went missing.
-
-```bash
-cctabs send payments --path /tmp/brief.txt --verify   # belt and braces for a brief that matters
-```
+⚠️ **The screen cannot tell you whether a big paste arrived whole** — add `--verify` for a brief that matters. Why, and everything else `send` does: [references/sending.md](references/sending.md).
 
 **Do NOT call `cctabs send` immediately after `cctabs new`** — Claude is still starting up and the text will land as raw shell commands.
 
@@ -821,282 +422,20 @@ cctabs scrollback auth          # last 50 lines
 cctabs scrollback auth 200      # last 200 lines
 ```
 
-## Routing: deciding WHICH tab gets a message
+## Routing and sending: before you message another tab
 
-The send mechanics will tell you whether text arrived. They cannot tell you
-whether it should have been sent, to that tab, at all. Three gates, in order —
-they are cheap, and each one has caught a real mis-send on a live fleet.
+- ⛔ **Resolve the owner from the BRANCH, not the tab's name.** If no tab maps to the owning branch, say so and send nothing. Read what the tab has already said (`cctabs transcript`) and relay what was SAID, not your conclusions. The three gates in full: [references/routing.md](references/routing.md).
+- ⛔ **Text containing `--` needs the `--` terminator**: `cctabs send auth -- --verify is broken`.
+- ⛔ **`nothing from the text appeared in the tab` means the tab is on a rendered menu** — don't retry with `--path` and don't drive the menu blind; `cctabs scrollback` it and escalate (the trust dialog is the one exception, above). The 1 KB busy-tab refusal means shorten the message, not `--force` it.
+- All `send` forms and refusals: [references/sending.md](references/sending.md). Remote Control status across the fleet: [references/remote-control.md](references/remote-control.md).
 
-### 1. Resolve the owner from the BRANCH, not the tab's name
+## Worktrees: point tabs at the repo root
 
-Tab names drift from scope as work moves; branches do not. Measured on a
-92-tab fleet, all three layers disagreed:
+**Always point tabs at the repo root — never at a manually-created worktree directory.** Use `cctabs new feature ~/Dev/myapp --worktree` and let it create `~/Dev/myapp/.claude/worktrees/feature/`. Existing branches, the reasons, and recovering a session whose worktree is gone: [references/worktrees.md](references/worktrees.md).
 
-| tab name | worktree dir | branch (the authority) |
-| --- | --- | --- |
-| `report-q3` | `parser-limits` | `docs/report-q3-capacity-findings` |
-| `cache-latency` | `cache-latency` | `fix/audit-table-per-row-scan` |
-| `probe-8842` | `probe-8842` | `fix/invalid-address-and-coupon-reset` |
+## `cctabs new` timed out
 
-(Shapes from a real fleet, names replaced.) Read the last row: **the owner of
-"coupon" work is a tab called `probe-8842`**, and no tab on that fleet was named
-anything like "coupon". A name-based router finds nothing and picks whatever
-sounds adjacent — which is how a tab that owned a quarterly report was once sent
-pricing material belonging to a different worktree.
-
-```bash
-cctabs sessions --json | jq -r '.workspaces[].sessions[] | "\(.name)\t\(.cwd)"'
-git -C <repo> worktree list --porcelain     # cwd -> branch
-gh pr list --search <topic>                 # branch -> the PRs that own it
-```
-
-- ⛔ **If no tab maps to the owning branch, the finding has no home in the
-  fleet. Say so — send nothing.** "Closest available tab" is not a routing
-  decision.
-- ⚠️ `cctabs sessions` has **no `--all` flag**. Unknown flags are silently
-  ignored, so `--all` looks like it worked while doing nothing. `--json` is the
-  whole interface.
-- ⚠️ **This gate answers for a minority of tabs, and that's fine.** On the same
-  fleet: 22 of 92 tabs sat on a topic branch (resolvable this way), 43 sat on
-  `main` in the repo root (the branch says nothing about ownership), and 27 were
-  in other repos. When the branch is `main`, skip to gate 2 rather than
-  inventing a mapping.
-
-### 2. Count what the tab ALREADY KNOWS before drafting
-
-`cctabs transcript` shows what a tab *concluded*. That is not the same as what
-it has *seen* — and a message telling a tab what it already knows costs it a
-cycle to read and teaches it nothing. So count the specific phrases you are
-about to relay, in the tab's own transcript:
-
-```bash
-F=$(cctabs transcript <tab> --json | jq -r .transcript)   # exact path, right account
-for phrase in "42,000" "Northwind" "onboarding reminder"; do
-  printf '%-24s %s\n' "$phrase" "$(grep -o -i -- "$phrase" "$F" | wc -l)"
-done
-```
-
-Resolve the path through `transcript --json` rather than globbing
-`~/.claude*/projects/*`: it picks the right session id *and* the right Claude
-config dir, which a glob gets wrong as soon as the tab runs under a backend
-preset.
-
-Measured — one message, six candidate tabs:
-
-| tab | already knew | genuinely new |
-| --- | --- | --- |
-| tab A | `<subsystem>` ×453, `<owner>` ×1265, `<artefact>` ×114 | nothing → **dropped** |
-| tab B | `<environment>` ×70, `42,000` ×2 | `first 500` ×0, `onboarding reminder` ×0 |
-| tab C | `Northwind` ×75, `0.07` ×29 | `<the meeting's conclusion>` ×0 |
-
-One of six had nothing new and was dropped. (Counts are real; the terms they
-were counted on are replaced — see the note at the end of this section.)
-
-- **The signal is zero vs non-zero, not the magnitude.** A count of 453 and a
-  count of 70 mean the same thing: it knows. Only ×0 earns a place in the draft.
-- **Count short distinctive tokens** — names, figures, product names — not
-  sentences. The transcript is JSON-escaped, so a phrase spanning a newline
-  won't match and you'll read a false ×0.
-
-### 3. Relay what was SAID — not your conclusions
-
-Turning transcript statements into directives ("re-aim to…", "do X before Y")
-is the most common bad draft. Quote the speaker, attribute it, and leave the
-inference to the receiver. Two reasons: the tab has context the driver does not,
-and **a quoted statement is checkable while a paraphrased instruction is not.**
-
-⭐ **When a statement CONTRADICTS what the tab concluded, that is the
-highest-value relay there is — send it, flagged as a contradiction.** One tab had
-concluded, from four signatures, that a suspected cause was ruled out, while the
-meeting concluded the opposite. It needs both, and it needs to know they
-disagree; it does not need to be told which to believe.
-
-> **A note on the examples above.** They come from real fleets driven against
-> private repositories, so every branch name, tab name, company, person and
-> figure has been replaced with a synthetic stand-in; only the shapes, ratios and
-> counts are real. Do the same in anything you write out of a fleet — a routing
-> note, a PR body, a commit message, an issue. Tab names and branch names are
-> the two that leak most easily, because they read like infrastructure rather
-> than like the customer work they describe.
-
-## Workflow: Sending Input to a Session
-
-```bash
-cctabs send auth "yes\n"        # approve a tool call
-cctabs send auth "\n"           # press enter (confirm a prompt)
-cctabs send auth --submit       # press Enter only — submits a prompt already parked in the box
-cctabs send auth "/clear\n"     # send a slash command
-cctabs send auth --path ~/prompts/task.txt   # hand over a path — the safe way for anything large
-cctabs send auth --file ~/prompts/task.txt   # paste the contents (short payloads only, see above)
-echo "do the thing" | cctabs send auth       # pipe via stdin
-```
-
-**What `send` now refuses to do, and why it matters when driving a fleet:**
-
-- It **distinguishes three claims that used to be one ✔ line**: nothing arrived
-  (a hard failure), something arrived but completeness is unverified (a
-  warning), and verified. "Sent" and "arrived whole" are not the same fact.
-- It **will not submit a body that did not land at all.** Pressing Enter on a
-  fragment sends something that reads as a complete message. The text is left in
-  the input box instead, and the command exits non-zero.
-- `--verify` **compares what the session received** against what was sent, via
-  the target's transcript — the only reliable completeness check there is.
-- It **refuses payloads over 1 KB into a tab with a turn in flight** (`--force`
-  overrides). Short replies into a busy tab still work — that's what they're
-  for.
-- `--wait-for-prompt` reads the whole tail of the buffer, not just its last
-  line, so a `Restart to update` banner rendered *below* a ready prompt no
-  longer makes it time out.
-
-⛔ **Text containing `--` needs the `--` terminator.** The option parser drops
-any argv element containing a double dash, so a message that *quotes a flag
-name* — the normal case when one session reports a tool bug to another — used to
-vanish silently while `send` printed a ✔. `send` now recovers its positionals
-from the raw command line, so this works either way, but the terminator is the
-unambiguous form and the only one for text that is *entirely* flag-shaped:
-
-```bash
-cctabs send auth -- --verify is broken and --path too
-```
-
-An empty body is now a **hard error**, not a ✔ — so a swallowed payload fails
-loudly instead of pressing Enter and claiming success. A deliberate bare Enter
-(`--submit`, or a literal `""`) reports itself as `Submitted Enter only (no
-body)`.
-
-⚠️ **`--path` makes the receiving session READ the file, so the file's contents
-appear in its transcript as a tool result.** That is the handoff working — not a
-paste. (`--verify` knows the difference: it skips tool results and searches all
-of the session's real messages, not just the newest.)
-
-### When a refusal fires, the refusal is usually right
-
-Both of these have fired on a live fleet and been correct every time. Neither is
-a case for `--force`.
-
-- ⛔ **`nothing from the text appeared in the tab` means the tab is on a
-  RENDERED MENU, and it is unreachable — escalate to a human.** A tab sitting on
-  the trust dialog, the resume picker or a permission prompt swallows pasted text
-  into the menu, so the send genuinely delivered nothing and correctly refused to
-  submit. **Do not retry with `--path`**: the handoff is text through the same
-  prompt line and is eaten the same way. Do not drive the menu blind either —
-  `cctabs scrollback <tab>` shows which menu it is, and the wrong keypress in the
-  resume picker silently accepts a summary instead of the session (see the
-  restore section). For the resume picker and permission prompts, a human
-  unblocks it; a driver reports it. **The trust dialog is the one exception** —
-  two options with the marker parked on `No, exit`, so
-  `printf '\033[B' | cctabs send <tab>` is deterministic rather than a guess. Best
-  of all, don't arrive here: the gate is preventable at spawn time, see **"The
-  trust gate"**.
-- ⚠️ **The 1 KB busy-tab refusal means shorten the message, not force it
-  through.** It fired twice in one day of driving and shortening was the right
-  response both times — a multi-kilobyte brief aimed at a tab mid-turn is nearly
-  always a routing or timing mistake, which is what the gates above are for.
-
-## Workflow: Remote Control status across the fleet
-
-Claude Code's Remote Control (`/rc`, controls a session from claude.ai/code or the mobile app) is a per-process feature — cctabs doesn't manage it directly, but since it manages the tabs *running* those processes, it's the fastest way to audit or repair RC across many sessions at once.
-
-**Check status via scrollback**, not `cctabs sessions` (which only reports terminal/claude liveness, not RC):
-
-```bash
-cctabs scrollback auth --lines 8 | grep -iE "rc active|reconnect|disconnect|jwt|401|oauth"
-```
-
-Footer/output signatures to look for:
-- `/rc active` — connected, healthy.
-- `/rc reconnecting` — transient, usually self-heals within seconds.
-- `Remote Control disconnected · JWT refresh failed after 401`, `OAuth token refresh failed — re-authenticate`, `Transport closed: auth token expired (code 401)` — the shared Claude Code login credential (one Keychain entry, machine-wide) has expired. This affects **every** session at once, not just the one you're looking at. Fix once with `/login` in any single session — the rest reconnect automatically once the credential refreshes, no per-tab action needed.
-- `Transport closed: this connection is no longer the active worker for the session (code 4090)` — two processes are both claiming the same underlying session (see the duplicate-`session_id` gotcha under manifest restore, above). Close one of the duplicates.
-
-**Enable RC automatically for every future session** (skips the manual `/remote-control` toggle per tab): set `"remoteControlAtStartup": true` in `~/.claude/settings.json` (or scope it to a project's `.claude/settings.json`). Re-running `/remote-control` inside a session that's *already* connected is non-destructive in the CLI — it opens a status panel, it does not disconnect (that toggle-to-disconnect behavior is VS-Code-specific).
-
-**Sweep the whole fleet in one loop:**
-
-```bash
-for t in $(cctabs sessions --json | python3 -c "import json,sys; [print(s['name']) for w in json.load(sys.stdin)['workspaces'] for s in w['sessions'] if s.get('session_id')]"); do
-  err=$(cctabs scrollback "$t" --lines 6 | grep -iE "reconnect|disconnect|jwt refresh|401|oauth token")
-  [ -n "$err" ] && echo "ISSUE: $t -> $err"
-done
-```
-
-## Workflow: Worktrees
-
-**Always point tabs at the repo root — never at a manually-created worktree directory.** Claude Code manages worktrees itself via `claude --worktree <name>`, which creates `.claude/worktrees/<name>/` inside the repo and handles branch creation and cleanup automatically.
-
-### New isolated session (new branch, Claude manages everything)
-
-```bash
-cctabs new feature-name ~/Dev/myapp --worktree
-# cctabs creates the worktree itself, pinned to ~/Dev/myapp's current HEAD:
-#   git -C ~/Dev/myapp worktree add -b worktree-feature-name \
-#     ~/Dev/myapp/.claude/worktrees/feature-name <current HEAD>
-# Then opens a tab at the worktree path and runs plain `claude --name feature-name`.
-```
-
-### Existing branch — ask Claude to enter the worktree mid-session
-
-```bash
-cctabs new hiring ~/Dev/myapp          # open tab at repo root
-cctabs send hiring "Enter a worktree for branch z.old/new-hire-ad and ..."
-# Claude will use EnterWorktree tool to set up isolation
-```
-
-### Do NOT manage git worktrees manually
-
-```bash
-# ❌ WRONG — do not create worktree dirs yourself and pass them to cctabs new
-git worktree add ~/Dev/myapp-feature branch
-cctabs new feature ~/Dev/myapp-feature
-
-# ✅ RIGHT — always use repo root; let Claude Code manage the worktree
-cctabs new feature ~/Dev/myapp --worktree
-```
-
-**Why:** Manually created worktree dirs placed outside the repo confuse Claude Code's session tracking, project memory lookup (`.claude/` is in the main repo), and CLAUDE.md resolution. Claude Code's built-in worktree support keeps everything co-located under `.claude/worktrees/` and handles cleanup on session exit.
-
-**Worktree base commit:** cctabs anchors the new worktree at the target dir's current HEAD (it runs `git worktree add` explicitly rather than delegating to `claude --worktree`), so un-pushed local commits *are* visible to the child session. The success line prints the base SHA — confirm it matches what you expect, especially if you reuse a worktree name and see a "branch already existed" warning.
-
-### Recovering a session after its worktree directory is gone
-
-Claude Code keys each session transcript to the exact `cwd` it was started in — `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl` — not to the repo. If a worktree directory is deleted (branch merged and cleaned up, disk cleanup, `git worktree remove`) but you still want that conversation, `cctabs resume <name> <repo-root> -s <session-id>` fails with `No conversation found with session ID: …` even though the transcript still exists — it's just filed under the now-gone worktree path, not the repo root.
-
-Fix: copy the transcript (and its `subagents/` sidecar dir, if present) into the repo root's project folder before resuming:
-
-```bash
-SRC=~/.claude/projects/-Users-you-Dev-myapp--claude-worktrees-feature-name   # old worktree-cwd slug
-DST=~/.claude/projects/-Users-you-Dev-myapp                                   # repo-root slug
-SID=<session-id>
-cp -n "$SRC/$SID.jsonl" "$DST/$SID.jsonl"
-cp -Rn "$SRC/$SID/subagents" "$DST/$SID/" 2>/dev/null
-
-cctabs resume feature-name ~/Dev/myapp -s "$SID"   # now resolves with full history intact
-```
-
-Both slugs are just the absolute path with `/` → `-`; list `~/.claude/projects/` to find the exact old one if unsure.
-
-**This manual copy is still needed as the one-time first recovery** — before it, the session has no cwd data pointing anywhere but the dead worktree path, so nothing can infer the right target. But it only needs doing once: `restore`'s cwd resolution now tracks the *last* recorded location in a session's transcript (fixed upstream — see CHANGELOG), not the first, so once you've manually relocated a session by resuming it from the repo root, subsequent `cctabs restore` runs correctly keep resuming it there instead of regressing back to the deleted worktree path. Do NOT leave a stale worktree-slug project directory lying around after this fix — `resolveTabSession` treats *any* worktree-named project directory under `~/.claude/projects/` as a strong signal that the real worktree still exists, so a leftover stale one will shadow the correctly-relocated session again. Archive it outside `~/.claude/projects/` (e.g. `~/.claude/projects-archive/`) once you've copied what you need, not merely rename it in place — a rename that still contains the session's `customTitle` inside the file is found regardless of the directory's name.
-
-## Handling `cctabs new` Timeout Errors
-
-`cctabs new` may occasionally fail with "Timed out waiting for new terminal block" (or, on Tabby, "Shell prompt never appeared in new tab"). This does **NOT** mean you have too many tabs or that the terminal has hit a limit.
-
-**Possible causes:**
-- The terminal app may need to be in focus / foreground for tab creation to register.
-- The internal timeout may be slightly too short for the current system load.
-- Transient IPC timing issue between cctabs and the terminal.
-- **Tabby only:** the cctabs plugin must be installed and running (`curl http://127.0.0.1:3300/api/health` to verify).
-
-**What to do:**
-1. **Retry the same command** — it often works on the second attempt
-2. If it fails again, wait a few seconds and retry once more
-3. If it keeps failing, ask the user to bring the terminal app to the foreground and try again
-4. On Tabby, also confirm the plugin is reachable (see health check above)
-
-**What NOT to do:**
-- ❌ Do NOT assume there is a "tab limit" — there isn't one
-- ❌ Do NOT close other tabs to "make room" — this destroys the user's sessions
-- ❌ Do NOT suggest the user has too many tabs open
+"Timed out waiting for new terminal block" / "Shell prompt never appeared in new tab" does **NOT** mean there is a tab limit — there isn't one. Retry the same command; if it keeps failing, ask the user to bring the terminal to the foreground. ❌ Never close other tabs to "make room". Causes and steps: [references/troubleshooting.md](references/troubleshooting.md).
 
 ## Workflow: Cleanup
 
@@ -1111,78 +450,11 @@ cctabs close old-feature               # close by name (prefix match)
 cctabs close e5f6a7b8                  # close by block ID prefix
 ```
 
-## Two names: the tab title vs. the claude session (RC) name
-
-Every session actually carries **two independent names**, and it's easy to change one while assuming you changed both:
-
-1. **Tabby tab title** — the text on the terminal tab. Set by `cctabs new`/`resume`/`fork`, and changeable with `cctabs rename`.
-2. **The claude session name** — the **remote-control (RC) session name shown on claude.ai** when you control the session from the web/mobile app. It mirrors the session's **current local name**, which is *initialized* from the launch `--name` (what cctabs passes) and thereafter changed by `/rename`.
-
-There's also a third, on-disk name that matters for lookup: the **`customTitle` recorded in the session's `.jsonl`**, which is what `cctabs resume <name>` / `restore` search by. cctabs writes it at launch via `--name`; **Claude's in-session `/rename` does NOT rewrite it** (it only relabels the live/RC session), so a session renamed *only* with `/rename` stays findable by resume under its **original** name — a known limitation.
-
-`cctabs rename <tab> <newName>` changes the **tab title** and now **also persists `customTitle` to the session's `.jsonl`**, so `cctabs resume <newName>` finds it afterwards. It still does **not** touch the running claude session, so the claude.ai RC name is unchanged. To rename the **live** claude session (and therefore its RC name), send Claude Code's `/rename` slash command into the tab:
-
-```bash
-cctabs rename mytab new-title                 # tab title + on-disk customTitle (so `resume new-title` finds it)
-cctabs send mytab "/rename new-title"          # live claude session + RC name (Claude replies "Session renamed to: …")
-```
-
-Use both together when you want the tab title, the resume-by-name lookup, and the RC name all in sync on an already-running session.
-
-> **How the RC name behaves (validated by controlled test).** The RC name tracks the session's **current local name** — *not* the launch `--name`. Launch `--name` only sets the *initial* name; a `/rename` changes it, and the change **persists across reconnects** — both a manual `/remote-control` toggle and an automatic (network-drop) reconnect re-register under the *current local name*, so **reconnect does NOT revert to the launch name**. The one catch: `/rename` only reaches the RC list **while the session is connected**. If you `/rename` a session whose remote-control bridge is **disconnected**, the local name changes but the RC list keeps showing the last-registered name until the session **reconnects**, at which point it syncs. So a session showing a stale name in the RC list is almost always one that was renamed **while disconnected** (or never renamed) — reconnect it, or `/rename` it once it's connected (`cctabs sessions` shows which are live). The zero-fuss option is to launch prefixed in the first place via the `prefix` config below, so the name is right from the first registration and there's nothing to re-apply.
-
-### The `prefix` config setting
-
-When several machines share **one claude.ai remote-control session list**, sessions from different machines can collide to the same RC name and become ambiguous. Set a per-install `prefix` so this machine stamps every name it mints:
-
-```toml
-# ~/.config/cctabs/config.toml
-[defaults]
-prefix = "mbp18-"
-```
-
-`cctabs config` shows the current value. When set, the prefix is prepended to **both** the tab title **and** the `claude --name` (RC name) for every name **minted** by:
-
-- `cctabs new <name>` → tab + RC name become `mbp18-<name>`
-- `cctabs resume <name>` → resolves the tab/session and re-launches `--name` in prefixed space
-- `cctabs fork <src> [-n <name>]` → the new fork tab + its (now explicitly named) RC session
-
-It is **idempotent** — a name you already typed with the prefix (`mbp18-auth`) is not prefixed twice. It does **not** retro-rename existing tabs, and `restore`/`import` keep each session's already-recorded name untouched (they reattach, they don't mint).
-
-### Recipe: prefix all *existing* tabs on this machine
-
-Setting `prefix` only affects newly-minted names. To retro-apply a prefix (e.g. `mbp18-`) to tabs/sessions that are already live, do both renames for each tab:
-
-```bash
-# For each existing tab NAME (from `cctabs sessions`):
-cctabs rename auth mbp18-auth                  # 1. tab title
-cctabs send   auth "/rename mbp18-auth"        # 2. live claude session + RC name
-# (send resolves by the CURRENT name, so rename the title AFTER, or send first then rename —
-#  just don't rename the title and then try to `send` by the old name.)
-```
-
-Order that's safe: **`send` the `/rename` first (matches the current title), then `cctabs rename` the tab title.** Claude acknowledges each `/rename` with "Session renamed to: …". After this one-time sweep, set `prefix` in config so all *future* tabs carry it automatically.
-
-**The `/rename` only reaches the RC list for sessions that are currently connected** (see the note above — RC tracks the current local name, and `/rename` pushes it only over a live bridge). So:
-- **Connected sessions:** `/rename` updates RC and the change survives reconnects. Done.
-- **Disconnected sessions** (`cctabs sessions` shows them as `terminal`/not live): `/rename` changes the local name but RC won't reflect it until the session reconnects. Either reconnect it (it then registers under the now-prefixed local name) or `cctabs resume mbp18-<name>` it to relaunch with the prefixed `--name`.
-
-New sessions started after `prefix` is set are correct from their first RC registration and need none of this.
-
-## Tab Naming Conventions
-
-Name tabs after the **project or task**:
-- `auth` — authentication work
-- `api` — API service
-- `infra` — infrastructure
-- `pr-1234` — specific PR work
-- `auth-v2` — forked attempt
-
 ## Notes
 
 - Tab names are matched by exact name or prefix (case-insensitive)
 - Block IDs can be abbreviated to the first 8 characters
-- `cctabs new` and `cctabs resume` automatically pass `--name <tab-name>` to claude, syncing the session display name with the tab title. `cctabs rename` changes the tab title and the on-disk `customTitle` (so `resume`/`restore` find the new name) but not the live session/RC name — to also rename that use `cctabs send <tab> "/rename <newName>"` (see "Two names" above)
+- `cctabs new` and `cctabs resume` automatically pass `--name <tab-name>` to claude, syncing the session display name with the tab title. `cctabs rename` changes the tab title and the on-disk `customTitle` (so `resume`/`restore` find the new name) but not the live session/RC name — to also rename that use `cctabs send <tab> "/rename <newName>"` (see "Two names" in [references/tabs.md](references/tabs.md))
 - Configured `claude.flags` in `~/.config/cctabs/config.toml` are applied to every session
 - `defaults.prefix` in `~/.config/cctabs/config.toml` (empty by default) is prepended to both the tab title and the `claude --name` for every name minted by `new`/`resume`/`fork` — set it to disambiguate this machine when multiple machines share one claude.ai remote-control list
 - `cctabs send` resolves tab names to their terminal block automatically
