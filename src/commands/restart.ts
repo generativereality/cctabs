@@ -202,9 +202,11 @@ export const restartCommand = define({
     }
     const report = await runRestore({ manifest: restoreSet, scopedDir: null, createMissing: true, dryRun: false })
     // A tab restore found suspended was left asleep on purpose; auditing it for
-    // a running Claude would report it as lost.
-    const leftAsleep = new Set(report?.plan.filter((p) => p.action === 'suspended').map((p) => p.entry) ?? [])
-    const audited = restoreSet.filter((e) => !leftAsleep.has(e))
+    // a running Claude would report it as lost. Matched by name, not object
+    // identity: restore may re-home an entry into a new object, and names are
+    // unique here (checked above).
+    const leftAsleep = new Set(report?.plan.filter((p) => p.action === 'suspended').map((p) => p.entry.name) ?? [])
+    const audited = restoreSet.filter((e) => !leftAsleep.has(e.name))
 
     // -- audit: every restored session has a Claude launched on its id --
     consola.info('Checking every restored tab is running its own session…')

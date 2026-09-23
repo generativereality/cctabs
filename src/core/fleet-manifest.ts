@@ -1,4 +1,6 @@
+import { sep } from 'path'
 import type { SessionRow } from './session-rows.js'
+import { WORKTREE_SEGMENT } from './worktree.js'
 
 /**
  * `cctabs manifest`: turn the live session list into a restore manifest that is
@@ -18,7 +20,12 @@ import type { SessionRow } from './session-rows.js'
  *     owns the session, an error otherwise.
  *   - **Every dir must exist.** Restoring into a deleted worktree gives a Claude
  *     whose `Skill()` answers `Unknown skill` and whose `git` fails with
- *     `Unable to read current working directory`.
+ *     `Unable to read current working directory`. A deleted *worktree* is not a
+ *     lost session, though: `claude --resume <id>` finds a session by id from
+ *     any directory (measured on Claude Code 2.1.280 — from the repo root, a
+ *     parent, an unrelated dir and `~`, every turn appended to the original
+ *     transcript). So such an entry is pointed at the worktree's own repo root
+ *     rather than refused.
  *   - **Every session id must have a transcript** in some config dir, or
  *     `--resume` quietly opens a fresh conversation.
  *
@@ -46,6 +53,8 @@ export type ProblemCode =
   | 'missing-dir'
   /** The directory was gone and has been pointed at the fallback. */
   | 'repointed'
+  /** A deleted `.claude/worktrees/<name>`, pointed at the repo it belonged to. */
+  | 'worktree-repointed'
   /** The id has no transcript in any config dir. */
   | 'no-transcript'
   /** Two or more entries resolve to one session, and nothing says which owns it. */
@@ -62,8 +71,10 @@ export type ProblemCode =
   | 'duplicate-name'
   /**
    * The session was recovered from the running Claude's `--resume`, and its
-   * transcript is not under the entry dir's project slug — `claude --resume`
-   * run from that dir would not find it (a renamed worktree, a `--worktree` tab).
+   * transcript is not under the entry dir's project slug — typically a session
+   * started in a subdirectory, or in a worktree since renamed. A warning, not an
+   * error: Claude Code 2.1.280 resolves `--resume <id>` across every project
+   * dir (measured), so this only bites an older Claude that looked up by slug.
    */
   | 'transcript-elsewhere'
 
@@ -175,8 +186,20 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
     }
 
     let dir = r.cwd
+    const worktreeRepo = dir ? repoRootOfWorktree(dir) : null
     if (!dir || !opts.dirExists(dir)) {
-      if (opts.repointMissingDirs) {
+      if (worktreeRepo && opts.dirExists(worktreeRepo)) {
+        // Claude Code removes a worktree on exit while the session stays
+        // resumable by id; the repo it came from is the one place that still
+        // means the same project.
+        problems.push({
+          name: r.name,
+          severity: 'warning',
+          code: 'worktree-repointed',
+          message: `worktree ${dir} is gone — resuming from its repo ${worktreeRepo}, so this session will work in the main checkout rather than an isolated worktree`,
+        })
+        dir = worktreeRepo
+      } else if (opts.repointMissingDirs) {
         problems.push({
           name: r.name,
           severity: 'warning',
@@ -212,9 +235,9 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
     ) {
       problems.push({
         name: r.name,
-        severity: 'error',
+        severity: 'warning',
         code: 'transcript-elsewhere',
-        message: `session ${r.session_id.slice(0, 8)}… came from the running Claude's --resume, but its transcript is not under ${dir || '(no directory)'} — resuming it there would not find it`,
+        message: `session ${r.session_id.slice(0, 8)}… (from the running Claude's --resume) is filed under another directory than ${dir || '(no directory)'} — fine on Claude Code 2.1.280+, which resumes by id from anywhere; an older Claude may not find it`,
       })
     }
 
@@ -246,4 +269,15 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
 export function withoutInvalid(result: ManifestResult): ManifestEntry[] {
   const bad = new Set(result.problems.filter((p) => p.severity === 'error').map((p) => p.name))
   return result.entries.filter((e) => !bad.has(e.name))
+}
+
+/**
+ * The repository a `.claude/worktrees/<name>` path belongs to, by text — so it
+ * still answers once the worktree has been deleted, which is the only time it
+ * is asked. Null for any other path.
+ */
+export function repoRootOfWorktree(dir: string): string | null {
+  const marker = `${sep}${WORKTREE_SEGMENT}${sep}`
+  const idx = dir.indexOf(marker)
+  return idx > 0 ? dir.slice(0, idx) : null
 }

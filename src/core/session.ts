@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync, existsSync, appendFileSync, openSy
 import { homedir } from 'os'
 import { join, basename, extname } from 'path'
 import { resolve } from 'path'
+import { hasConversationText, isTrailerFile } from './transcript-kind.js'
 import {
   scopeToDirs,
   originOf,
@@ -118,7 +119,10 @@ function scanProjectDirForName(
     if (extname(f) !== '.jsonl') continue
     const fullPath = join(projectDir, f)
     try {
-      const lines = readFileSync(fullPath, 'utf-8').split('\n')
+      const raw = readFileSync(fullPath, 'utf-8')
+      // A metadata-only trailer carries a title but can't be resumed.
+      if (!hasConversationText(raw)) continue
+      const lines = raw.split('\n')
 
       // Find the LAST customTitle entry — sessions can be renamed, and only
       // the most recent title is the current one
@@ -250,6 +254,11 @@ function buildTitleIndex(projectDir: string): Map<string, TitleEntry> {
     let cwd = ''
     try {
       const content = readFileSync(full, 'utf-8')
+      // A metadata-only trailer — what a closing Claude writes back to a path
+      // its transcript was just moved away from — carries a customTitle, so
+      // left in it would answer for the title while holding no conversation.
+      // Resuming it gives "No conversation found". See transcript-kind.ts.
+      if (!hasConversationText(content)) continue
       const lines = content.split('\n')
 
       // Cheap pre-filter: only the rare line carrying a customTitle is worth
@@ -607,6 +616,9 @@ export function locateSessionById(
         const id = basename(f, '.jsonl')
         if (!id.startsWith(input)) continue
         if (matches.some((m) => m.id === id && m.configDir === origin.configDir)) continue
+        // A trailer left behind when the session moved to another config dir
+        // is not the session — preferring it resumes an empty conversation.
+        if (isTrailerFile(join(pd, f), id)) continue
         matches.push({ id, ...origin })
       }
     }

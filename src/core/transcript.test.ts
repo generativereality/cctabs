@@ -252,3 +252,33 @@ describe('readUserMessages', () => {
     expect(readUserMessages(write([assistantLine('only me')]))).toEqual([])
   })
 })
+
+describe('locateTranscriptFile and metadata-only trailers', () => {
+  it('skips a trailer even though it is newer than the conversation', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { join } = await import('path')
+    const { locateTranscriptFile } = await import('./transcript.js')
+    const id = 'bbbb1111-2222-4333-8444-555566667777'
+    const a = mkdtempSync(join(tmpdir(), 'cctabs-loc-a-'))
+    const b = mkdtempSync(join(tmpdir(), 'cctabs-loc-b-'))
+    try {
+      mkdirSync(join(a, 'projects', 'p1'), { recursive: true })
+      mkdirSync(join(b, 'projects', 'p2'), { recursive: true })
+      const real = join(a, 'projects', 'p1', `${id}.jsonl`)
+      const stub = join(b, 'projects', 'p2', `${id}.jsonl`)
+      writeFileSync(real, JSON.stringify({ type: 'user', sessionId: id, message: { content: 'hi' } }) + '\n')
+      writeFileSync(stub, JSON.stringify({ type: 'custom-title', customTitle: 'x', sessionId: id }) + '\n')
+      utimesSync(real, 1_000, 1_000)
+      utimesSync(stub, 2_000, 2_000)
+      const got = locateTranscriptFile(id, [
+        { root: a, projectsRoot: join(a, 'projects') },
+        { root: b, projectsRoot: join(b, 'projects'), backend: 'other' },
+      ])
+      expect(got?.file).toBe(real)
+    } finally {
+      rmSync(a, { recursive: true, force: true })
+      rmSync(b, { recursive: true, force: true })
+    }
+  })
+})

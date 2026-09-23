@@ -606,9 +606,12 @@ Suspended tabs are left asleep by every restore — waking one is `send`'s job.
 ⚠️ **Read the count at the end, and trust it — it can now fail.** After
 spawning, restore re-reads the tab list, checks each new tab has a process, and
 resolves its session from disk, then reports `N verified, N unconfirmed, N
-failed` and **exits non-zero if anything failed**. A tab counts as verified as
-soon as a running Claude's own command line says `--resume <the id asked for>`,
-without waiting for its title to reach disk. Anything short of that is
+failed` and **exits non-zero if anything failed**. A tab counts as verified once
+a Claude whose own command line says `--resume <the id asked for>` has **stayed
+running** for a few seconds — without waiting for its title to reach disk. A
+Claude that appears and exits (typically printing `No conversation found`, which
+means the session isn't in the account it was launched under) is a failure, not
+a pass. Anything short of that is
 re-checked every few seconds for up to 45s before it is called failed: under
 load a healthy tab can take longer than one look to attach its process, and a
 false "did not come back" invites a second restore over a tab that is fine. A tab that came back as a
@@ -694,7 +697,8 @@ What it refuses, on purpose:
 - rejects **two tabs sharing a name** — restore resolves entries by name, so it would bring back neither after restart stopped both. Rename one;
 - rejects a session recovered from argv (below) whose transcript is not under the tab's own directory — `--resume` run from there would not find it;
 - is **keyed on session id**: two tabs resolving to one session is an error, unless a live process proves which one owns it — then the other (typically a leftover tab still titled with the session's old name) is dropped with a warning;
-- **checks every directory exists** — a Claude restored into a deleted worktree gets `Unknown skill` from `Skill()` and `Unable to read current working directory` from git. `--repoint-missing-dirs <dir>` points those entries somewhere that exists instead of failing;
+- **checks every directory exists** — a Claude restored into a deleted directory gets `Unknown skill` from `Skill()` and `Unable to read current working directory` from git. A deleted **worktree** is not a lost session, though: Claude Code removes worktrees on exit, and `claude --resume <id>` finds a session by id from *any* directory (measured on 2.1.280 — from the repo root, a parent dir, an unrelated dir and `~`, every turn landing in the original transcript). So an entry whose `.claude/worktrees/<name>` is gone is pointed at that worktree's own repo root automatically, with a warning — it will then work in the main checkout, not an isolated worktree, so give it a fresh worktree before it touches git. Any other missing dir is an error unless `--repoint-missing-dirs <dir>`;
+- **warns, but keeps,** a session filed under a different directory than its tab's — started in a subdirectory, say, then `cd`-ed out of. Resume-by-id finds it anyway on current Claude Code;
 - **checks every session id has a transcript** in some Claude config dir, since resuming one that doesn't opens a fresh conversation;
 - exits non-zero and writes nothing on an error, unless `--drop-invalid`.
 
