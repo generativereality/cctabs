@@ -8,7 +8,8 @@ import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByNameGlobally, locateSessionById, resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { launchEnvFor, resolveBackend } from '../core/backends.js'
-import type { ConfigDirScope } from '../core/config-dirs.js'
+import { listClaudeConfigDirs, type ClaudeConfigDir, type ConfigDirScope } from '../core/config-dirs.js'
+import { locateTranscriptFile, type LocatedTranscript } from '../core/transcript.js'
 import { parseManifest } from '../core/manifest.js'
 import {
   planRestore,
@@ -165,7 +166,7 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
     scopeTabIds = currentWsData
       ? new Set(currentWsData.workspacedata.tabids)
       : new Set<string>(tabsById.keys())
-    entries = req.manifest
+    entries = rehomeEntries(req.manifest, listClaudeConfigDirs(), locateTranscriptFile, (m) => consola.warn(m))
   } else {
     // Scan: one entry per terminal tab, in bar order, each bound to its tab.
     // Live tabs are included so they're reported and so they claim their name
@@ -281,6 +282,40 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
     )
   }
   return { plan, outcomes }
+}
+
+/**
+ * Correct a manifest entry whose recorded Claude account doesn't hold its
+ * session, when another account on this machine does.
+ *
+ * A manifest's `backend` normally wins over what discovery infers — it is a
+ * deliberate statement, and it may name an account whose transcript hasn't
+ * reached this machine yet. But measured: a manifest recorded three sessions
+ * under an account that held only metadata-only trailers for them, after the
+ * conversations had moved to the default account, and restore launched all
+ * three into "No conversation found". So the claim is kept only when it can't
+ * be checked (no local copy anywhere) or checks out. Pure: lookups injected.
+ */
+export function rehomeEntries(
+  entries: RestoreEntry[],
+  dirs: ClaudeConfigDir[],
+  locate: (id: string, scope?: ClaudeConfigDir[]) => LocatedTranscript | null,
+  warn: (message: string) => void,
+): RestoreEntry[] {
+  return entries.map((e) => {
+    if (!e.sessionId || (!e.backend && !e.configDir)) return e
+    const claimed = dirs.find((d) => (e.configDir && d.root === e.configDir) || (e.backend && d.backend === e.backend))
+    if (!claimed) return e
+    if (locate(e.sessionId, [claimed])) return e
+    const actual = locate(e.sessionId)
+    if (!actual) return e
+    warn(
+      `${e.name}: the manifest says ${e.backend ? `backend ${e.backend}` : e.configDir}, but session ` +
+      `${e.sessionId.slice(0, 8)}… is only there as a trailer — resuming it from ` +
+      `${actual.backend ? `backend ${actual.backend}` : actual.configDir ?? 'the default account'}, where the conversation is`,
+    )
+    return { ...e, backend: actual.backend, configDir: actual.configDir }
+  })
 }
 
 /**
@@ -589,6 +624,58 @@ export function judgeSpawn(e: SpawnEvidence): SpawnVerdict {
 }
 
 /**
+ * How long a Claude launched on the requested id must stay alive before that
+ * counts as proof. Measured: three tabs were reported "✔ verified running …
+ * (from its process)" by a check that saw `claude --resume <id>` in the process
+ * table — and every one of them printed "No conversation found with session
+ * ID" and exited a second later, because its session was in a different Claude
+ * account. A process that has appeared proves the launch, not the resume.
+ */
+export const LAUNCH_SUSTAIN_MS = 6000
+
+/** What the process table has shown for one entry across verification rounds. */
+export interface LaunchObservation {
+  /** Is a Claude launched on the id running now? `undefined`: no process table. */
+  live: boolean | undefined
+  /** When it was first seen running in the current unbroken stretch. */
+  firstSeenAt?: number
+  /** Was it ever seen running during this verification? */
+  everSeen: boolean
+  now: number
+  /** Last round before the deadline: a verdict is required. */
+  final: boolean
+  /** Recent screen text, only to explain a failure — never to decide one. */
+  screen?: string
+}
+
+export type LaunchJudgement =
+  | { state: 'ok' }
+  | { state: 'wait' }
+  | { state: 'unknown' }
+  | { state: 'failed'; note: string }
+
+/**
+ * Has the Claude this entry launched actually stayed up? Pure.
+ *
+ * The screen never decides it: a tab resumed in place still carries the old
+ * "No conversation found" in its scrollback above a healthy Claude. It is only
+ * quoted when the process is gone, to say why.
+ */
+export function judgeLaunch(o: LaunchObservation, sessionId: string): LaunchJudgement {
+  if (o.live === undefined) return { state: 'unknown' }
+  if (o.live) {
+    const sustained = o.firstSeenAt !== undefined && o.now - o.firstSeenAt >= LAUNCH_SUSTAIN_MS
+    return sustained || o.final ? { state: 'ok' } : { state: 'wait' }
+  }
+  const why = o.screen && /No conversation found/.test(o.screen)
+    ? ` — Claude said "No conversation found": session ${sessionId.slice(0, 8)}… is not in the Claude account it was launched under`
+    : ''
+  if (o.everSeen) return { state: 'failed', note: `✘ Claude started on ${sessionId.slice(0, 8)}… and then exited${why}` }
+  if (o.final) return { state: 'failed', note: `✘ no Claude running ${sessionId.slice(0, 8)}… after ${VERIFY_DEADLINE_MS / 1000}s${why}` }
+  return { state: 'wait' }
+}
+
+/**
  * How long to let a freshly spawned tab settle before verifying it.
  *
  * Two things have to have happened: the process has to exist (immediate when
@@ -668,11 +755,17 @@ async function executePlan(
   if (attached.length) {
     consola.info('Waiting for sessions to start…')
     await sleep(ATTACH_SETTLE_MS)
+    const launches = new LaunchTracker(adapter)
     await pollUntilSettled(attached, (p, final) => {
-      // The process's own argv is the strongest answer: a Claude launched on
-      // exactly the id we sent. It needs no readable screen and no title on disk.
-      if (p.sessionId && sessionLaunched(p.sessionId)) {
-        return { outcome: 'restored', note: `✔ running ${shortId(p.sessionId)} (confirmed from its process)` }
+      // The process's own argv is the strongest answer — once it has stayed up
+      // (see LAUNCH_SUSTAIN_MS). It needs no readable screen and no title on disk.
+      if (p.sessionId) {
+        const g = launches.judge(p, p.blockId, final)
+        if (g.state === 'failed') return { outcome: 'failed', note: g.note }
+        if (g.state === 'ok') return { outcome: 'restored', note: `✔ running ${shortId(p.sessionId)} (its process stayed up)` }
+        // A screen reading "idle" is not enough while the process is unproven:
+        // it can be the frame the exiting Claude left behind.
+        if (g.state === 'wait') return null
       }
       const status = adapter.detectSessionStatus(p.blockId!)
       if (status === 'active' || status === 'idle') return { outcome: 'restored', note: '✔ running' }
@@ -798,6 +891,7 @@ async function verifySpawns(
   await sleep(VERIFY_SETTLE_MS)
 
   const tabOf = new Map(spawned.map(({ p, tabId }) => [p, tabId]))
+  const launches = new LaunchTracker(adapter)
   // Re-read the terminal once per round, not once per tab.
   let snapshot: { round: number; tabsById: Map<string, Block[]> | null } = { round: -1, tabsById: null }
   let round = 0
@@ -834,14 +928,20 @@ async function verifySpawns(
       }
     }
 
+    const launch = p.sessionId ? launches.judge(p, term?.blockid, final) : ({ state: 'unknown' } as LaunchJudgement)
+    if (launch.state === 'failed') return { outcome: 'failed', note: `${launch.note} [${tabOf.get(p)!.slice(0, 8)}]` }
+
     const verdict = judgeSpawn({
       tabPresent: blocks.length > 0,
       hasTermBlock: !!term,
       hasProcess: processOf(term, tabsById),
       requestedSessionId: p.sessionId,
       resolvedSessionId,
-      launchedLive: p.sessionId ? sessionLaunched(p.sessionId) : undefined,
+      launchedLive: launch.state === 'ok' ? true : undefined,
     })
+    // A transcript on disk says the session exists, not that this tab is
+    // running it. While the process is unproven, "restored" has to wait.
+    if (verdict.outcome === 'restored' && launch.state === 'wait') return null
     // Anything short of confirmed is re-checked until the deadline. A tab that
     // has not attached its PTY yet — which under load can take longer than the
     // plugin's own 20s wait — reads exactly like one that never will, and a
@@ -876,6 +976,27 @@ function sessionLaunched(sessionId: string): boolean | undefined {
     launchedCache = { at: Date.now(), ids: rows ? liveSessionPids(rows) : null }
   }
   return launchedCache.ids ? launchedCache.ids.has(sessionId) : undefined
+}
+
+/** Carries {@link LaunchObservation} state across rounds, one entry at a time. */
+class LaunchTracker {
+  private seen = new Map<PlannedEntry, { firstSeenAt?: number; everSeen: boolean }>()
+  constructor(private adapter: TerminalAdapter) {}
+
+  judge(p: PlannedEntry, blockId: string | undefined, final: boolean): LaunchJudgement {
+    const now = Date.now()
+    const live = sessionLaunched(p.sessionId!)
+    const prev = this.seen.get(p) ?? { everSeen: false }
+    const next = live
+      ? { firstSeenAt: prev.firstSeenAt ?? now, everSeen: true }
+      : { firstSeenAt: undefined, everSeen: prev.everSeen }
+    this.seen.set(p, next)
+    let screen: string | undefined
+    if (live === false && blockId) {
+      try { screen = this.adapter.scrollback(blockId, 15) } catch { /* explanation only */ }
+    }
+    return judgeLaunch({ live, ...next, now, final, screen }, p.sessionId!)
+  }
 }
 
 /**

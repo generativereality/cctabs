@@ -591,9 +591,12 @@ cctabs restore ~/Dev/myapp        # restrict the search to one project dir
 ⚠️ **Read the count at the end, and trust it — it can now fail.** After
 spawning, restore re-reads the tab list, checks each new tab has a process, and
 resolves its session from disk, then reports `N verified, N unconfirmed, N
-failed` and **exits non-zero if anything failed**. A tab counts as verified as
-soon as a running Claude's own command line says `--resume <the id asked for>`,
-without waiting for its title to reach disk. Anything short of that is
+failed` and **exits non-zero if anything failed**. A tab counts as verified once
+a Claude whose own command line says `--resume <the id asked for>` has **stayed
+running** for a few seconds — without waiting for its title to reach disk. A
+Claude that appears and exits (typically printing `No conversation found`, which
+means the session isn't in the account it was launched under) is a failure, not
+a pass. Anything short of that is
 re-checked every few seconds for up to 45s before it is called failed: under
 load a healthy tab can take longer than one look to attach its process, and a
 false "did not come back" invites a second restore over a tab that is fine. A tab that came back as a
