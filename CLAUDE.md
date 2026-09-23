@@ -148,8 +148,9 @@ Three things that each cost a failed build to discover, so they are worth statin
   empty bundle, since `files` ships `dist/` alone and npm would happily accept nothing.
 - Keep `PLUGIN_VERSION` in `tabby-plugin/src/server.ts` in step with `tabby-plugin/package.json` — it's what `/api/health` reports. It has now drifted twice: once a release behind, once a release *ahead* (a renumbered release caught `package.json` and missed the constant). Neither broke anything, because capabilities are feature-detected rather than version-compared — which is exactly why both survived review. Guarded now by `src/core/plugin-version.test.ts` and, because the plugin's release workflow never runs the test suite, by that workflow's own pre-publish check.
   The 0.1.4 tarball on npm announces itself as `0.1.5` (its bundle was built a release ahead).
-  0.1.5 — the `stable-pid` release — makes that string true, and source and `package.json` both
-  say 0.1.5 now.
+  Resolved 2026-09-23: 0.1.5 — the `stable-pid` release — is published, and its bundle's
+  `PLUGIN_VERSION` is `0.1.5` (checked by unpacking the tarball). Only an installed 0.1.4 still
+  misreports itself, and updating the plugin fixes that.
 - **Six commits on `main` carry a work-identity author address** instead of the canonical
   `Motin <motin@motin.eu>` (110 commits). The address is not repeated here: this file is public
   too, and there is no reason to add another plaintext copy of it. Nothing new is being added:
