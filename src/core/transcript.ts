@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { extname, join } from 'path'
 import { originOf, scopeToDirs, type ConfigDirScope, type SessionOrigin } from './config-dirs.js'
 import { pathToProjectSlug } from './session.js'
+import { isTrailerFile } from './transcript-kind.js'
 
 /** A session's transcript file, and which Claude account it was found under. */
 export interface LocatedTranscript extends SessionOrigin {
@@ -46,6 +47,9 @@ export function locateTranscriptFile(
       } catch {
         continue
       }
+      // A trailer is newer than the conversation it shadows (it is written on
+      // the way out), so newest-wins would pick it every time.
+      if (isTrailerFile(file, sessionId)) continue
       if (!best || mtime > best.mtime) best = { file, mtime, ...origin }
     }
   }

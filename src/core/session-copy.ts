@@ -72,47 +72,10 @@ export function copyDirRecursive(src: string, dst: string): number {
   return copied
 }
 
-/** Entry types that constitute an actual conversation, as opposed to metadata. */
-const CONVERSATION_TYPES = new Set(['user', 'assistant'])
-
-/**
- * True when a transcript holds only metadata and no conversation.
- *
- * A closing Claude Code process writes a short trailer — `custom-title`,
- * `agent-name`, `mode`, `permission-mode`, `pr-link` — to its transcript path.
- * If the real transcript has already been moved away, that trailer *recreates*
- * the file: a handful of lines, no messages, and a `customTitle`. Since name
- * resolution keys off customTitle and prefers the newest mtime, the freshly
- * written stub outranks the relocated original and quietly shadows it on the
- * next `restore`.
- */
-export function isMetadataOnlyTranscript(file: string, sessionId?: string): boolean {
-  let text: string
-  try {
-    text = readFileSync(file, 'utf-8')
-  } catch {
-    return false
-  }
-  let sawAny = false
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue
-    let entry: { type?: unknown; sessionId?: unknown }
-    try {
-      entry = JSON.parse(line)
-    } catch {
-      // An unparseable line means this isn't a tidy little trailer. Refuse to
-      // call it a stub rather than risk deleting a damaged real transcript.
-      return false
-    }
-    sawAny = true
-    if (typeof entry.type === 'string' && CONVERSATION_TYPES.has(entry.type)) return false
-    // Every trailer line names the session it belongs to. Requiring the match
-    // keeps this from ever firing on some unrelated file that happens to be
-    // short.
-    if (sessionId && entry.sessionId !== undefined && entry.sessionId !== sessionId) return false
-  }
-  return sawAny
-}
+// Moved to transcript-kind.ts so the lookups in session.ts / transcript.ts can
+// use it without an import cycle; re-exported for existing callers.
+export { isMetadataOnlyTranscript } from './transcript-kind.js'
+import { isMetadataOnlyTranscript } from './transcript-kind.js'
 
 export interface CopyTargetCwd {
   /** Directory whose project slug the copy should be filed under. */

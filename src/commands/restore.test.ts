@@ -8,7 +8,7 @@ import { planRestore, type PlannedEntry, type RestoreAction, type RestoreEntry }
 import { DEFAULT_CONFIG_ROOT, type ClaudeConfigDir } from '../core/config-dirs.js'
 import { launchEnvFor } from '../core/backends.js'
 import { pathToProjectSlug } from '../core/session.js'
-import { buildPlanDeps, buildResumeCommand, colorForEntry, describeDecision, judgeSpawn, plannedOutcome, summarizeDecision, summarizeOutcomes } from './restore.js'
+import { buildPlanDeps, buildResumeCommand, colorForEntry, describeDecision, judgeLaunch, judgeSpawn, LAUNCH_SUSTAIN_MS, plannedOutcome, rehomeEntries, summarizeDecision, summarizeOutcomes } from './restore.js'
 
 /**
  * An adapter that answers reads and throws on every mutation.
@@ -462,5 +462,70 @@ describe('judgeSpawn', () => {
 
   it('is unconfirmed, not failed, when neither process nor session can be read', () => {
     expect(judgeSpawn({ tabPresent: true, hasTermBlock: true, hasProcess: undefined }).outcome).toBe('unverified')
+  })
+})
+
+describe('judgeLaunch — a launch is not a resume until it stays up', () => {
+  const id = 'abcdef01-2345-4678-89ab-cdef01234567'
+  const at = (o: Partial<Parameters<typeof judgeLaunch>[0]>) =>
+    judgeLaunch({ live: true, everSeen: true, now: 10_000, final: false, ...o }, id)
+
+  it('waits on a Claude that has only just appeared', () => {
+    // The measured false pass: seen in the process table once, exited a
+    // second later with "No conversation found".
+    expect(at({ firstSeenAt: 10_000 - 1_000 }).state).toBe('wait')
+  })
+
+  it('accepts one that has stayed up for the sustain window', () => {
+    expect(at({ firstSeenAt: 10_000 - LAUNCH_SUSTAIN_MS }).state).toBe('ok')
+  })
+
+  it('fails one that was running and is gone, quoting the reason when the screen gives it', () => {
+    const g = at({ live: false, firstSeenAt: undefined, screen: `No conversation found with session ID: ${id}` })
+    expect(g.state).toBe('failed')
+    expect(g.state === 'failed' && g.note).toContain('not in the Claude account')
+  })
+
+  it('never fails on screen text alone — old scrollback sits above a healthy Claude', () => {
+    const g = at({ firstSeenAt: 10_000 - LAUNCH_SUSTAIN_MS, screen: 'No conversation found with session ID: x' })
+    expect(g.state).toBe('ok')
+  })
+
+  it('waits for a Claude not yet seen, and fails it at the deadline', () => {
+    expect(at({ live: false, everSeen: false }).state).toBe('wait')
+    expect(at({ live: false, everSeen: false, final: true }).state).toBe('failed')
+  })
+
+  it('stands aside where there is no process table', () => {
+    expect(at({ live: undefined }).state).toBe('unknown')
+  })
+})
+
+describe('rehomeEntries', () => {
+  const id = 'abcdef01-2345-4678-89ab-cdef01234567'
+  const dflt = { root: '/h/.claude', projectsRoot: '/h/.claude/projects' }
+  const other = { root: '/h/.claude-other', projectsRoot: '/h/.claude-other/projects', backend: 'other' }
+  const entry = { name: 'x', dir: '/w', sessionId: id, backend: 'other', configDir: '/h/.claude-other' }
+  const noop = () => {}
+
+  it('moves an entry to the account that actually holds the conversation', () => {
+    const locate = (_: string, scope?: typeof dflt[]) =>
+      !scope ? { file: '/h/.claude/projects/p/x.jsonl', mtime: 1 } : null
+    const warnings: string[] = []
+    const [e] = rehomeEntries([entry], [dflt, other], locate, (m) => warnings.push(m))
+    expect(e.backend).toBeUndefined()
+    expect(e.configDir).toBeUndefined()
+    expect(warnings).toHaveLength(1)
+  })
+
+  it('keeps the recorded account when it holds the session', () => {
+    const locate = () => ({ file: '/h/.claude-other/projects/p/x.jsonl', mtime: 1, backend: 'other', configDir: '/h/.claude-other' })
+    expect(rehomeEntries([entry], [dflt, other], locate, noop)[0]).toBe(entry)
+  })
+
+  it('keeps the recorded account when the session is not on this machine at all', () => {
+    // An imported manifest whose transcript has not been copied yet: the claim
+    // is the only information there is.
+    expect(rehomeEntries([entry], [dflt, other], () => null, noop)[0]).toBe(entry)
   })
 })

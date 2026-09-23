@@ -464,3 +464,55 @@ describe('hasPriorSessions', () => {
     expect(hasPriorSessions(repo, scope())).toBe(false)
   })
 })
+
+/**
+ * The layout a cross-account move leaves behind, measured on a live fleet: the
+ * conversation now lives in config dir B under the repo root's slug, and config
+ * dir A still holds a ~1 KB metadata-only trailer under the (deleted)
+ * worktree's slug — a title, no messages. Every lookup has to see through it.
+ */
+describe('a metadata-only trailer never stands in for its session', () => {
+  let rootA: string
+  let rootB: string
+  let dirs: ClaudeConfigDir[]
+  const id = 'aaaa1111-2222-4333-8444-555566667777'
+  const repo = '/work/repo'
+  const wt = '/work/repo/.claude/worktrees/feature'
+
+  beforeEach(() => {
+    rootA = mkdtempSync(join(tmpdir(), 'cctabs-trailer-a-'))
+    rootB = mkdtempSync(join(tmpdir(), 'cctabs-trailer-b-'))
+    dirs = [
+      { root: rootB, projectsRoot: join(rootB, 'projects') },
+      { root: rootA, projectsRoot: join(rootA, 'projects'), backend: 'other-account' },
+    ]
+    // The real conversation, in B, under the repo root's slug.
+    writeSession(dirs[0].projectsRoot, repo, { id, title: 'feature', cwd: repo, mtimeSec: 1_000 })
+    // The trailer, in A, under the worktree's slug — and NEWER, as trailers are.
+    const trailerDir = join(dirs[1].projectsRoot, pathToProjectSlug(wt))
+    mkdirSync(trailerDir, { recursive: true })
+    const trailer = join(trailerDir, `${id}.jsonl`)
+    writeFileSync(trailer, [
+      { type: 'custom-title', customTitle: 'feature', sessionId: id },
+      { type: 'agent-name', agentName: 'feature', sessionId: id },
+      { type: 'permission-mode', permissionMode: 'auto', sessionId: id },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n')
+    utimesSync(trailer, 2_000, 2_000)
+  })
+  afterEach(() => {
+    rmSync(rootA, { recursive: true, force: true })
+    rmSync(rootB, { recursive: true, force: true })
+  })
+
+  it('is not what the by-title lookup resolves a worktree tab to', () => {
+    // Worktree-name match is the strongest route, and it is exactly where the
+    // trailer sits. It must fall through to the real conversation.
+    const r = resolveTabSession(repo, 'feature', dirs)
+    expect(r?.id).toBe(id)
+    expect(r?.backend).toBeUndefined()
+  })
+
+  it('is not what an id lookup returns', () => {
+    expect(locateSessionById(id, undefined, dirs)?.backend).toBeUndefined()
+  })
+})
