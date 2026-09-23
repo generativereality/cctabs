@@ -32,7 +32,7 @@ pushing a tag *queues* a publish, it does not perform one. (It exists because on
    second is what `sync-plugin.sh` copies to the marketplace, and `prepack`'s sync
    check fails the publish if it lags
 3. Fold `CHANGELOG.md`'s `## Unreleased` into a dated `## <version> — <date>` section
-4. Run `npm run sync-plugin` — pushes plugin.json + SKILL.md to `../plugins`
+4. Run `npm run sync-plugin` — pushes plugin.json + the whole `skills/cctabs/` directory (SKILL.md and `references/`) to `../plugins`
 5. Commit and push **this repo first**, then `git tag -a v<version>` and push the tag —
    push main before the tag, or the run publishes a commit that isn't on main yet.
    The workflow verifies the tag matches `package.json`
@@ -82,7 +82,7 @@ cd - && npm run sync-plugin        # regenerates from source and pushes
 ```
 
 Then verify rather than assume — `bash scripts/sync-plugin.sh --check`, and
-`diff -q skills/cctabs/SKILL.md ../plugins/plugins/cctabs/skills/cctabs/SKILL.md`.
+`diff -rq skills/cctabs ../plugins/plugins/cctabs/skills/cctabs`.
 
 Check that `origin/main..HEAD` line before resetting: it is what makes this safe.
 A local commit that is *not* a sync — an edit made directly in the marketplace
@@ -218,7 +218,7 @@ on a plugin fix as a **new capability token**, never as a version comparison.
 - `src/core/session-copy.ts` — moving a session between Claude config dirs. Every function there encodes a failure that has actually happened, so read the comments before changing one: the **sidecar** (`<session-id>/` beside the .jsonl, holding `subagents/`+`tool-results/` — one session had 357 files) is lost by any copy that only takes the transcript; the copy's **target slug** is the last recorded cwd that still *exists*, not the transcript's own slug, because `--resume` 404s on a slug whose directory is gone (observed on an older Claude Code — 2.1.280 was measured resolving `--resume <id>` across every project dir of its config dir, so the risk that remains is the *config dir*, not the slug); and a **metadata-only trailer** (`custom-title`, `agent-name`, `permission-mode`, no messages) is what a closing Claude writes back to the old path *after* the tab is reported closed — it carries a customTitle with a fresh mtime and therefore shadows the session that was just moved. It is deliberately fs-pure and unit-tested; terminal-side waiting lives in `src/core/tab-exit.ts`.
 - `src/core/tab-exit.ts` — waits for a tab to close **and** its pid to disappear. `adapter.deleteBlock()` returning is not the process exiting, and the gap is long enough for the trailer above to be written into it.
 - `src/core/tab-match.ts` — shared tab-name matching. Deciding "does this session's tab already exist?" must use `{exact: true}`; the prefix fallback is only for hand-typed targets.
-- `skills/cctabs/SKILL.md` — Claude Code skill (must be synced to `generativereality/plugins`)
+- `skills/cctabs/SKILL.md` — Claude Code skill (must be synced to `generativereality/plugins`). Kept **under 500 lines** — F-Secure's marketplace lint fails above that. Reference material lives in `skills/cctabs/references/*.md`, linked from SKILL.md with a line saying when to read each; `sync-plugin.sh` syncs the whole `skills/cctabs/` directory. Add new detail there, not to SKILL.md
 - `.claude-plugin/plugin.json` — plugin manifest (version must match `package.json`)
 
 ## Conventions

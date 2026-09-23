@@ -32,9 +32,12 @@ if [ "$VERSION" != "$PLUGIN_VERSION" ]; then
   ERRORS=1
 fi
 
-# Check skill file match
-if ! diff -q "$REPO_ROOT/skills/cctabs/SKILL.md" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs/SKILL.md" >/dev/null 2>&1; then
-  echo "MISMATCH: skills/cctabs/SKILL.md differs from plugins repo"
+# Check the whole skill directory matches: SKILL.md AND the references/ files it
+# links to. Checking SKILL.md alone would publish a skill whose pointers lead
+# nowhere.
+if ! diff -rq "$REPO_ROOT/skills/cctabs" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs" >/dev/null 2>&1; then
+  echo "MISMATCH: skills/cctabs/ differs from plugins repo"
+  diff -rq "$REPO_ROOT/skills/cctabs" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs" 2>&1 | sed 's/^/  /' || true
   ERRORS=1
 fi
 
@@ -49,9 +52,12 @@ if [ "$CHECK_ONLY" = true ]; then
 fi
 
 # Sync files
-mkdir -p "$PLUGINS_DIR/plugins/cctabs/.claude-plugin" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs"
+mkdir -p "$PLUGINS_DIR/plugins/cctabs/.claude-plugin" "$PLUGINS_DIR/plugins/cctabs/skills"
 cp "$REPO_ROOT/.claude-plugin/plugin.json" "$PLUGINS_DIR/plugins/cctabs/.claude-plugin/plugin.json"
-cp "$REPO_ROOT/skills/cctabs/SKILL.md" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs/SKILL.md"
+# Replace the skill directory wholesale, so a reference file removed here is
+# removed there too.
+rm -rf "$PLUGINS_DIR/plugins/cctabs/skills/cctabs"
+cp -R "$REPO_ROOT/skills/cctabs" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs"
 
 cd "$PLUGINS_DIR"
 if git diff --quiet; then
