@@ -55,10 +55,12 @@ npm install -g @generativereality/cctabs
 **Skill only** (if you already have the CLI installed via npm):
 
 ```bash
-mkdir -p .claude/skills/cctabs
-curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skills/cctabs/SKILL.md \
-  -o .claude/skills/cctabs/SKILL.md
+mkdir -p .claude/skills
+curl -fsSL https://codeload.github.com/generativereality/cctabs/tar.gz/main \
+  | tar -xz --strip-components=2 -C .claude/skills cctabs-main/skills/cctabs
 ```
+
+That fetches the whole skill directory: `SKILL.md` plus the `references/` files it points to.
 
 **Requirements:** [Tabby](https://tabby.sh) · macOS · Node.js 20+
 

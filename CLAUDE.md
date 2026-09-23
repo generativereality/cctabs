@@ -32,7 +32,7 @@ pushing a tag *queues* a publish, it does not perform one. (It exists because on
    second is what `sync-plugin.sh` copies to the marketplace, and `prepack`'s sync
    check fails the publish if it lags
 3. Fold `CHANGELOG.md`'s `## Unreleased` into a dated `## <version> — <date>` section
-4. Run `npm run sync-plugin` — pushes plugin.json + SKILL.md to `../plugins`
+4. Run `npm run sync-plugin` — pushes plugin.json + the whole `skills/cctabs/` directory (SKILL.md and `references/`) to `../plugins`
 5. Commit and push **this repo first**, then `git tag -a v<version>` and push the tag —
    push main before the tag, or the run publishes a commit that isn't on main yet.
    The workflow verifies the tag matches `package.json`
@@ -82,7 +82,7 @@ cd - && npm run sync-plugin        # regenerates from source and pushes
 ```
 
 Then verify rather than assume — `bash scripts/sync-plugin.sh --check`, and
-`diff -q skills/cctabs/SKILL.md ../plugins/plugins/cctabs/skills/cctabs/SKILL.md`.
+`diff -rq skills/cctabs ../plugins/plugins/cctabs/skills/cctabs`.
 
 Check that `origin/main..HEAD` line before resetting: it is what makes this safe.
 A local commit that is *not* a sync — an edit made directly in the marketplace
@@ -219,7 +219,7 @@ on a plugin fix as a **new capability token**, never as a version comparison.
 - `src/core/tab-exit.ts` — waits for a tab to close **and** its pid to disappear. `adapter.deleteBlock()` returning is not the process exiting, and the gap is long enough for the trailer above to be written into it.
 - `src/core/tab-match.ts` — shared tab-name matching. Deciding "does this session's tab already exist?" must use `{exact: true}`; the prefix fallback is only for hand-typed targets.
 - `src/core/suspend.ts` / `src/core/suspend-ops.ts` — suspended tabs. `suspend.ts` is pure (registry files, the placeholder script, process detection, tab matching) and unit-tested; `suspend-ops.ts` drives the terminal (suspend, wake, dormant revive). The screen is **never** the source of truth for "suspended" — a background Tabby tab captures nothing — so the placeholder carries `true cctabs-suspended <id>` at the head of its argv and the registry keeps one file per session. The wake reads only output newer than its own nonce'd echo (`scopedAfter`), because the old Claude's footer is still in the buffer and would read as "ready" before anything has started.
-- `skills/cctabs/SKILL.md` — Claude Code skill (must be synced to `generativereality/plugins`)
+- `skills/cctabs/SKILL.md` — Claude Code skill (must be synced to `generativereality/plugins`). Kept **under 500 lines** — marketplace skill lints fail above that. Reference material lives in `skills/cctabs/references/*.md`, linked from SKILL.md with a line saying when to read each; `sync-plugin.sh` syncs the whole `skills/cctabs/` directory. Add new detail there, not to SKILL.md
 - `.claude-plugin/plugin.json` — plugin manifest (version must match `package.json`)
 
 ## Conventions

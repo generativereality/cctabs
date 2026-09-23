@@ -95,9 +95,11 @@ If you installed via the plugin method above, the skill is already included — 
 If you installed via npm and want to add the skill separately:
 
 ```bash
-mkdir -p .claude/skills/cctabs
-curl -fsSL https://raw.githubusercontent.com/generativereality/cctabs/main/skills/cctabs/SKILL.md \
-  -o .claude/skills/cctabs/SKILL.md
+mkdir -p .claude/skills
+curl -fsSL https://codeload.github.com/generativereality/cctabs/tar.gz/main \
+  | tar -xz --strip-components=2 -C .claude/skills cctabs-main/skills/cctabs
 ```
+
+That fetches the whole skill directory: `SKILL.md` plus the `references/` files it points to.
 
 With the skill installed, Claude Code can call `cctabs sessions`, `cctabs new`, `cctabs fork`, and more to orchestrate parallel work autonomously.
