@@ -1,5 +1,5 @@
 import { existsSync, writeFileSync } from 'fs'
-import { resolve } from 'path'
+import { basename, dirname, resolve } from 'path'
 import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
@@ -7,6 +7,7 @@ import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { collectSessionRows, type SessionRow } from '../core/session-rows.js'
 import { liveSessionPids, ownClaudeProc, readProcessTable, type ProcRow } from '../core/claude-procs.js'
 import { locateTranscriptFile } from '../core/transcript.js'
+import { pathToProjectSlug } from '../core/session.js'
 import { buildManifest, withoutInvalid, type ManifestEntry, type ManifestResult } from '../core/fleet-manifest.js'
 
 export interface GatheredManifest {
@@ -32,6 +33,10 @@ export async function gatherManifest(
     repointMissingDirs: opts.repointMissingDirs,
     dirExists: (p) => existsSync(p),
     transcriptExists: (id) => locateTranscriptFile(id) !== null,
+    transcriptInDir: (id, dir) => {
+      const located = locateTranscriptFile(id)
+      return !!located && basename(dirname(located.file)) === pathToProjectSlug(dir)
+    },
     liveSessionPids: procRows ? liveSessionPids(procRows) : new Map(),
   })
   return { result, procRows, rows }

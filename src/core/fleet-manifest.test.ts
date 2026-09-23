@@ -124,11 +124,42 @@ describe('buildManifest', () => {
     expect(r.problems).toEqual([expect.objectContaining({ code: 'no-session', severity: 'warning' })])
   })
 
-  it('warns about two tabs sharing a name', () => {
+  // Restore resolves a manifest entry by name alone, so two same-named tabs
+  // come back 'ambiguous' — neither restored. Restart must not stop them first.
+  it('rejects two tabs sharing a name, so restart leaves both running', () => {
     const r = buildManifest(
       [row('twin', { session_id: S1, session_lookup: 'found' }), row('twin', { session_id: S2, session_lookup: 'found' })],
       opts(),
     )
-    expect(r.problems.filter((p) => p.code === 'duplicate-name')).toHaveLength(2)
+    const dup = r.problems.filter((p) => p.code === 'duplicate-name')
+    expect(dup).toHaveLength(2)
+    expect(dup.every((p) => p.severity === 'error')).toBe(true)
+    expect(withoutInvalid(r)).toEqual([])
+  })
+
+  // The argv fallback exists for a renamed worktree, whose transcript sits
+  // under the OLD slug; resuming from the new dir would not find it.
+  it('rejects an argv-recovered session whose transcript is not under its dir', () => {
+    const r = buildManifest(
+      [row('moved', { session_id: S1, session_lookup: 'not-found', session_source: 'argv' })],
+      opts({ transcriptInDir: () => false }),
+    )
+    expect(r.problems).toEqual([expect.objectContaining({ code: 'transcript-elsewhere', severity: 'error' })])
+  })
+
+  it('accepts an argv-recovered session whose transcript is under its dir', () => {
+    const r = buildManifest(
+      [row('here', { session_id: S1, session_lookup: 'not-found', session_source: 'argv' })],
+      opts({ transcriptInDir: () => true }),
+    )
+    expect(r.problems.filter((p) => p.severity === 'error')).toEqual([])
+  })
+
+  it('does not apply the slug check to a session found by its transcript', () => {
+    const r = buildManifest(
+      [row('found', { session_id: S1, session_lookup: 'found', session_source: 'transcript' })],
+      opts({ transcriptInDir: () => false }),
+    )
+    expect(r.problems.filter((p) => p.code === 'transcript-elsewhere')).toEqual([])
   })
 })

@@ -670,12 +670,14 @@ It snapshots the fleet (below), saves the manifest under `~/.config/cctabs/resta
 What it refuses, on purpose:
 
 - ⛔ **Running without knowing which process is you.** It needs `CLAUDE_CODE_SESSION_ID` and a `claude` among its own ancestors, and never signals any pid in its own process tree. Run it from inside a Claude Code tab.
-- ⛔ **Stopping a Claude it can't tie to a session exactly.** A pid is taken only from a process launched with `--resume <that entry's id>`, or — with `tabby-cctabs` ≥ 0.1.5 — the Claude under the tab's own shell. A tab whose Claude was started fresh and is matched only by name is listed "restart it by hand"; a tab with no session id is left alone, since restarting it would lose its context.
+- ⛔ **Stopping a Claude it can't tie to a session exactly.** A pid is taken only from a process launched with `--resume <that entry's id>`, or — with `tabby-cctabs` ≥ 0.1.5 — the Claude under the tab's own shell. That second route ties the process to the *tab*, not to the session: the session still comes from the tab's title, so a hand-started `claude` in a tab whose title matches an older transcript would be restarted onto that older one. A tab whose Claude was started fresh and is matched only by name is listed "restart it by hand"; a tab with no session id is left alone, since restarting it would lose its context.
 - ⛔ **Starting on a bad manifest.** Any error below stops it before anything is stopped. `--drop-invalid` leaves those tabs alone and restarts the rest; with `--only`, only the named tabs' problems count.
 
 `cctabs manifest` is the snapshot on its own — `restore --manifest` reads its output directly. Compared with `sessions --json > file` it:
 
 - **leaves the calling session out** (by session id and pid, never by tab — `--include-self` to keep it);
+- rejects **two tabs sharing a name** — restore resolves entries by name, so it would bring back neither after restart stopped both. Rename one;
+- rejects a session recovered from argv (below) whose transcript is not under the tab's own directory — `--resume` run from there would not find it;
 - is **keyed on session id**: two tabs resolving to one session is an error, unless a live process proves which one owns it — then the other (typically a leftover tab still titled with the session's old name) is dropped with a warning;
 - **checks every directory exists** — a Claude restored into a deleted worktree gets `Unknown skill` from `Skill()` and `Unable to read current working directory` from git. `--repoint-missing-dirs <dir>` points those entries somewhere that exists instead of failing;
 - **checks every session id has a transcript** in some Claude config dir, since resuming one that doesn't opens a fresh conversation;
@@ -683,7 +685,7 @@ What it refuses, on purpose:
 
 **Where the session ids come from.** `sessions --json` (and so `manifest`) resolves each tab's session by its title on disk. When that finds nothing it now asks the process: a live Claude launched with `--resume <id>` names its session exactly, and that recovers two measured misses — a worktree renamed after the session started (the transcript sits under the old directory's slug), and a transcript whose last title no longer matches the tab. Such rows say `session_source: "argv"`. Only the **id** is taken from argv, never the name: `--name` is whatever the tab was called when it was spawned.
 
-⚠️ **Update the Tabby plugin to ≥ 0.1.5 for exact process matching.** Tabby records each tab's pid once, two seconds after it spawns, by following single-child chains — which for a Claude tab lands on Claude's own short-lived `caffeinate` helper. On a measured 57-tab fleet 52 tabs reported a pid that no longer existed, so `whoami`'s process match and restore's "is anything running here" check were reading a dead number. 0.1.5 reports each tab's real shell pid (the `stable-pid` capability). Older plugins still work, through the argv and name fallbacks above, and say less.
+⚠️ **Tabby plugin ≥ 0.1.5 gives exact process matching** (update once it is released). Tabby records each tab's pid once, two seconds after it spawns, by following single-child chains — which for a Claude tab lands on Claude's own short-lived `caffeinate` helper. On a measured 57-tab fleet 52 tabs reported a pid that no longer existed, so `whoami`'s process match and restore's "is anything running here" check were reading a dead number. 0.1.5 reports each tab's real shell pid (the `stable-pid` capability). Older plugins still work, through the argv and name fallbacks above, and say less.
 
 To relaunch a straggler individually, `cctabs resume <name> "<dir>"` detects a genuinely empty tab itself ("has no live shell (no process, no output) — recreating") and rebuilds it; if the tab can't be read but its process is alive it refuses and tells you to look, so it's safe against a tab `restore` already registered.
 

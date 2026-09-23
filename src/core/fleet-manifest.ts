@@ -49,8 +49,18 @@ export type ProblemCode =
   | 'duplicate-session-dropped'
   /** No session could be resolved; restoring it starts a fresh Claude. */
   | 'no-session'
-  /** Two tabs share a name, which restore cannot tell apart. */
+  /**
+   * Two tabs share a name, which restore cannot tell apart. An error, not a
+   * warning: restart would stop both Claudes and restore would then bring back
+   * neither, because a manifest entry carries no tab id.
+   */
   | 'duplicate-name'
+  /**
+   * The session was recovered from the running Claude's `--resume`, and its
+   * transcript is not under the entry dir's project slug — `claude --resume`
+   * run from that dir would not find it (a renamed worktree, a `--worktree` tab).
+   */
+  | 'transcript-elsewhere'
 
 export interface ManifestProblem {
   name: string
@@ -77,6 +87,8 @@ export interface ManifestOptions {
   repointMissingDirs?: string
   dirExists(path: string): boolean
   transcriptExists(sessionId: string): boolean
+  /** Whether the transcript sits under `dir`'s own project slug. Omitted → not checked. */
+  transcriptInDir?(sessionId: string, dir: string): boolean
   /** Session id → pids of live Claude processes launched on it. */
   liveSessionPids: Map<string, number[]>
 }
@@ -151,9 +163,9 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
     if ((nameCount.get(r.name) ?? 0) > 1) {
       problems.push({
         name: r.name,
-        severity: 'warning',
+        severity: 'error',
         code: 'duplicate-name',
-        message: 'more than one tab has this name; restore will report it as ambiguous and leave it alone',
+        message: 'more than one tab has this name, and restore cannot tell them apart — it would leave both alone, so a restart would stop them and bring back neither. Rename one',
       })
     }
 
@@ -183,6 +195,21 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
         severity: 'error',
         code: 'no-transcript',
         message: `session ${r.session_id.slice(0, 8)}… has no transcript in any Claude config dir — resuming it would open a fresh conversation`,
+      })
+    }
+
+    if (
+      r.session_id &&
+      r.session_source === 'argv' &&
+      opts.transcriptInDir &&
+      opts.transcriptExists(r.session_id) &&
+      !opts.transcriptInDir(r.session_id, dir)
+    ) {
+      problems.push({
+        name: r.name,
+        severity: 'error',
+        code: 'transcript-elsewhere',
+        message: `session ${r.session_id.slice(0, 8)}… came from the running Claude's --resume, but its transcript is not under ${dir || '(no directory)'} — resuming it there would not find it`,
       })
     }
 
