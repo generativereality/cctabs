@@ -3,6 +3,7 @@ import { requireAdapter } from '../core/adapter.js'
 import { classifyTerminalBuffer, parsePermissionMode } from '../core/session-status.js'
 import { collectSessionRows } from '../core/session-rows.js'
 import { readProcessTable } from '../core/claude-procs.js'
+import { suspendedTabsIn } from '../core/suspend-ops.js'
 
 /** Rows of captured output to read per tab — see session-rows.ts. */
 const BUFFER_ROWS = 200
@@ -27,6 +28,8 @@ export const sessionsCommand = define({
     const { tabsById, workspaces, tabNames } = await adapter.getAllData()
     const currentTab = adapter.currentTabId()
     const currentWs = adapter.currentWorkspaceId()
+    const procRows = readProcessTable()
+    const suspended = suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)
 
     console.log('Sessions')
     console.log('='.repeat(50))
@@ -49,17 +52,21 @@ export const sessionsCommand = define({
         const cwd = (b.meta?.['cmd:cwd'] ?? '').replace(process.env.HOME ?? '', '~')
 
         const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
-        const status = classifyTerminalBuffer(buffer)
-        const permissionMode = parsePermissionMode(buffer)
+        const susp = suspended.get(tabId)
+        const onScreen = classifyTerminalBuffer(buffer)
+        const status = susp ? 'suspended' : onScreen === 'suspended' && procRows ? 'terminal' : onScreen
+        const permissionMode = susp ? susp.record.permissionMode : parsePermissionMode(buffer)
 
         const statusLabel =
-          status === 'active' ? '● active (turn in flight)'
+          status === 'suspended' ? `⏸ suspended${susp?.dormant ? ' (dormant — wakes via send/resume, not Enter)' : ''}`
+          : status === 'active' ? '● active (turn in flight)'
           : status === 'idle' ? '○ idle (waiting for input)'
           : status === 'unreadable' ? '? unreadable'
           : '  terminal'
 
         console.log(`  [${tabId.slice(0, 8)}] "${name}"${cur}  ${cwd}`)
         console.log(`    ${statusLabel}${permissionMode ? `  ·  ${permissionMode}` : ''}`)
+        if (susp?.record.sessionId) console.log(`    session ${susp.record.sessionId.slice(0, 8)}… · ${susp.record.dir.replace(process.env.HOME ?? '', '~')}`)
         // An unreadable tab is the one case where the status line alone would
         // mislead, so say what we do know: whether a process is running in it.
         if (status === 'unreadable') {

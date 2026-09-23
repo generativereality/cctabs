@@ -86,6 +86,9 @@ export function parseManifest(raw: string): RestoreEntry[] {
       configDir,
       permissionMode,
       color,
+      // `sessions --json` rows say so with their status; a manifest entry with
+      // an explicit flag. Either way the tab comes back asleep.
+      ...(it.suspended === true || it.status === 'suspended' ? { suspended: true } : {}),
     })
   }
   return entries

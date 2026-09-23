@@ -11,6 +11,8 @@ import { judgeDelivery } from '../core/paste-confirm.js'
 import { resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { locateTranscriptFile, readUserMessages } from '../core/transcript.js'
 import { parseSendArgv } from '../core/send-argv.js'
+import { readProcessTable } from '../core/claude-procs.js'
+import { reviveDormant, suspendedTabsIn, wakeSuspendedTab, reportWake, type WakeTarget } from '../core/suspend-ops.js'
 
 function readStdin(): Promise<string> {
   return new Promise((resolve) => {
@@ -69,7 +71,7 @@ export const sendCommand = define({
     const appendEnter = (ctx.values.enter as boolean | undefined) ?? true
     const force = (ctx.values.force as boolean | undefined) ?? false
     const skipConfirm = (ctx.values['no-confirm'] as boolean | undefined) ?? false
-    const verify = (ctx.values.verify as boolean | undefined) ?? false
+    let verify = (ctx.values.verify as boolean | undefined) ?? false
     const verifyTimeoutSec = (ctx.values['verify-timeout'] as number | undefined) ?? 30
     const waitForPrompt = (ctx.values['wait-for-prompt'] as boolean | undefined) ?? false
     const waitTimeoutSec = (ctx.values['wait-timeout'] as number | undefined) ?? 10
@@ -137,7 +139,7 @@ export const sendCommand = define({
     }
 
     const adapter = requireAdapter()
-    const { tabsById, tabNames } = await adapter.getAllData()
+    const { tabsById, tabNames, workspaces } = await adapter.getAllData()
 
     const resolved = resolveTabTarget(adapter, query, tabsById, tabNames)
     if (!resolved.ok) {
@@ -146,9 +148,48 @@ export const sendCommand = define({
       for (const line of resolved.lines ?? []) consola.log(line)
       process.exit(1)
     }
-    const { blockId, name: tabName, cwd: tabCwd } = resolved.target
+    let { blockId } = resolved.target
+    const { tabId: targetTabId, name: tabName, cwd: tabCwd } = resolved.target
 
-    if (verify && (!tabName || !tabCwd)) {
+    // A suspended target is woken first, and the sender never has to know it
+    // was asleep. The wake does not return until Claude is at a ready prompt —
+    // past the trust dialog, the resume picker and the rest — because text sent
+    // into a tab that is still starting up is silently dropped.
+    let wokenSessionId: string | undefined
+    if (targetTabId) {
+      const susp = suspendedTabsIn(adapter, { tabsById, tabNames }, readProcessTable()).get(targetTabId)
+      if (susp) {
+        if (!susp.record.sessionId) {
+          adapter.closeSocket()
+          consola.error(`"${tabName}" shows the suspended marker, but cctabs has no record of which session it holds (and no process table to ask). Press Enter in the tab to wake it, then send again.`)
+          process.exit(1)
+        }
+        consola.info(`"${tabName}" is suspended — waking it first…`)
+        let target: WakeTarget = { blockId, tabId: targetTabId, name: tabName ?? query, record: susp.record }
+        try {
+          if (susp.dormant) target = await reviveDormant(adapter, target, { workspaces, tabsById })
+        } catch (err) {
+          adapter.closeSocket()
+          consola.error(`Could not wake "${tabName}": ${(err as Error).message}`)
+          process.exit(1)
+        }
+        const woke = await wakeSuspendedTab(adapter, target)
+        if (!woke.ok) {
+          adapter.closeSocket()
+          consola.error(`Could not wake "${tabName}", so nothing was sent: ${woke.detail}`)
+          process.exit(1)
+        }
+        reportWake(tabName ?? query, woke)
+        blockId = target.blockId
+        wokenSessionId = susp.record.sessionId
+        // The screen of a tab that has just repainted a whole conversation is
+        // the least trustworthy evidence there is, so a message sent on a
+        // wake is checked against the session's own transcript by default.
+        if (!skipConfirm && sendEnter && rawText.length > 0) verify = true
+      }
+    }
+
+    if (verify && !wokenSessionId && (!tabName || !tabCwd)) {
       adapter.closeSocket()
       consola.error('--verify needs a named tab: it reads the target session\'s transcript, and a bare block has no session to read.')
       process.exit(1)
@@ -245,7 +286,7 @@ export const sendCommand = define({
     // — it records the user message as received, so the payload's front and
     // tail are checkable against ground truth.
     if (verify && rawText.length > 0 && sendEnter) {
-      const outcome = await verifyDelivered(tabName!, tabCwd!, rawText, verifyTimeoutSec)
+      const outcome = await verifyDelivered(tabName ?? query, tabCwd ?? '', rawText, verifyTimeoutSec, wokenSessionId)
       if (!outcome.delivered) {
         consola.error(`Sent to ${blockId.slice(0, 8)}, but delivery does NOT check out: ${outcome.detail}`)
         process.exit(1)
@@ -294,6 +335,8 @@ async function verifyDelivered(
   tabCwd: string,
   payload: string,
   timeoutSec: number,
+  /** Known session id (a woken suspended tab) — skips the by-title lookup. */
+  knownSessionId?: string,
 ): Promise<{ delivered: boolean; detail: string }> {
   const deadline = Date.now() + timeoutSec * 1000
   let last = judgeDelivery(payload, null)
@@ -303,7 +346,7 @@ async function verifyDelivered(
     await new Promise((r) => setTimeout(r, 1000))
 
     resetTitleIndexCache()
-    const session = resolveTabSession(tabCwd, tabName)
+    const session = knownSessionId ? { id: knownSessionId } : resolveTabSession(tabCwd, tabName)
     if (!session) continue
     sawSession = true
 

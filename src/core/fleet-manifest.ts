@@ -34,6 +34,11 @@ export interface ManifestEntry {
   config_dir?: string
   permission_mode?: string
   color?: string | null
+  /**
+   * The tab was suspended when captured. Restore brings it back as a
+   * placeholder, and restart leaves it alone rather than waking it.
+   */
+  suspended?: boolean
 }
 
 export type ProblemCode =
@@ -230,6 +235,7 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
       ...(r.config_dir ? { config_dir: r.config_dir } : {}),
       ...(r.permission_mode ? { permission_mode: r.permission_mode } : {}),
       ...(r.color !== undefined ? { color: r.color } : {}),
+      ...(r.status === 'suspended' ? { suspended: true } : {}),
     })
   }
 

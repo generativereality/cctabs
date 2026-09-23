@@ -209,7 +209,15 @@ Claude Code'll be able to read, edit, and execute files here.
 Enter to confirm   Esc to cancel
 ```
 
-⚠️ **The marker starts on `No, exit`, so a bare Enter EXITS the session.** The
+⚠️ **The marker starts on `No, exit`, so a bare Enter EXITS the session.** (The
+options are drawn without numbers.) Before this was understood, cctabs's own
+dialog handling pressed exactly that bare Enter — which is how a brief once
+ended up running in the shell. cctabs now answers the dialog by *finding* "Yes,
+I trust this folder", moving the cursor there and confirming it moved before it
+presses Enter, and presses nothing when it can't read the cursor. It does so on
+`cctabs new … --prompt/--file/--path` (an explicitly named directory) and when
+waking or restoring a session in a directory that already has Claude sessions;
+everywhere else the dialog is left for a human. By hand, the
 working keystroke is Down-then-Enter — and `cctabs send` appends the Enter itself
 (it logs `sent "\u001b[B" ⏎`), so this is **one** call, never two:
 
@@ -280,6 +288,10 @@ cctabs restore [dir] [--dry]             # resume every empty tab by name search
 cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs manifest [-o file] [--repoint-missing-dirs <dir>]  # snapshot the fleet as a VALIDATED manifest: one entry per session id, this session left out, dirs + transcripts checked
 cctabs restart [--all | --only a,b] [--dry]      # restart Claude in every tab (new Claude Code version): snapshot → stop → restore → audit. Bare = plan only
+cctabs suspend <tab> [<tab>…] [-c <colour>]  # stop Claude, leave a placeholder that knows its session (NOT on remote control until woken)
+cctabs wake <tab>                        # wake a suspended tab and wait for a READY prompt (also: `resume <name>`, Enter in the tab, or just `send` to it)
+cctabs new <name> [dir] -r <id> --suspended   # open a tab already suspended on a session
+cctabs restore --manifest <file> -c --suspended   # bring a whole fleet back as placeholders, in seconds
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see "Two names"
@@ -586,7 +598,10 @@ A tab is only rebuilt when it has **no captured output AND no running process**.
 cctabs restore                    # search all projects (default)
 cctabs restore --dry              # preview what would be resumed without doing it
 cctabs restore ~/Dev/myapp        # restrict the search to one project dir
+cctabs restore --suspended        # bring them back as placeholders instead — see "Suspended tabs"
 ```
+
+Suspended tabs are left asleep by every restore — waking one is `send`'s job.
 
 ⚠️ **Read the count at the end, and trust it — it can now fail.** After
 spawning, restore re-reads the tab list, checks each new tab has a process, and
@@ -700,6 +715,68 @@ When `claude --resume` reattaches a large or old session, Claude first shows a b
 ```
 
 **Always pick option 2, "Resume full session as-is."** The point of `restore` is to bring the conversation back intact — resuming from a summary discards the live context you're restoring for. `restore` auto-advances this picker for you (it moves down once to option 2 and confirms), so you normally never see it. If you ever do drive it manually (e.g. sending keys to a tab), send **↓ then Enter** — never the bare Enter that would accept the summary, and never option 3, which permanently silences the prompt in that session's config.
+
+## Suspended tabs — `cctabs suspend`, and why `send` wakes them
+
+A **suspended tab** keeps its name, its place in the bar and its Claude session,
+but runs no Claude: a small shell placeholder sits in it instead.
+
+```
+  ⏸ cctabs suspended — <name> · <transcript size> · <dir>
+    press Enter to resume
+```
+
+It exists for fleets. Restoring 66 sessions takes minutes, trips the Tabby
+plugin's spawn timeouts, and floods claude.ai's remote-control list so the live
+sessions fall out of its visible top 20 — when most of those 66 are idle anyway.
+
+```bash
+cctabs suspend old-spike other-idea      # stop Claude in each, leave placeholders
+cctabs suspend old-spike -c "#6c757d"    # …and grey it while asleep (colour comes back on a cctabs wake)
+cctabs restore --manifest fleet.json -c --suspended   # whole fleet back as placeholders: ~1s per tab, no Claude started
+cctabs new spike ~/Dev/x -r <session-id> --suspended   # a tab born asleep
+cctabs sessions                          # ⏸ suspended — `--json`: status "suspended", session_id + cwd still reported
+```
+
+**Waking** — any of these, and the sender never has to know the tab was asleep:
+
+- `cctabs send <tab> …` — wakes it, waits for a READY Claude prompt, then
+  delivers and verifies against the transcript. This is the normal path when one
+  tab messages another.
+- `cctabs wake <tab>` / `cctabs resume <name>` — wake without sending.
+- **Enter in the tab** (a human). Resumes in place; the tab keeps any `-c`
+  colour until you change it.
+
+A wake answers what stands between the keypress and a usable prompt: the
+folder-trust dialog (by locating "Yes" — see the trust gate), the auto-mode
+dialog ("Not now"), the resume picker ("Resume full session as-is", never the
+summary), the mobile-app overlay. It does **not** answer the MCP-server approval
+prompt — that is a security decision — so a wake that meets one fails and says
+so instead of stalling.
+
+⚠️ **A suspended tab is NOT on remote control.** It won't appear on claude.ai or
+the phone until it is woken. That is half the point — it's what keeps the list
+short — but it means a session you want to reach from your phone must be awake.
+
+How the fleet commands treat them:
+
+| Command | Suspended tab |
+|---|---|
+| `sessions` / `--json` | `status: "suspended"`, with `session_id`, `cwd`, `suspended_at` |
+| `manifest` | kept, with `suspended: true` — so restoring from it brings the tab back asleep |
+| `restore` | left asleep. `--suspended` makes every restored entry a placeholder |
+| `restart` | left asleep, never woken (it picks up the new Claude Code when it next wakes) |
+| `close` | closes it and forgets the session's suspended record |
+
+**How cctabs knows** — not from the screen, because Tabby captures nothing for a
+background tab whose PTY hasn't attached. In order of trust: the placeholder's
+own process (its argv starts `true cctabs-suspended <session-id>`), then the
+registry (`~/.config/cctabs/suspended/<session-id>.json`, one file per session),
+then the on-screen marker as a last resort. After a Tabby restart a placeholder
+can come back with no process at all: `sessions` shows it as **dormant**, and
+`send`/`resume`/`wake` put the placeholder back in the same slot before waking
+it; `restore` recreates it asleep. Placeholders need bash or zsh as the tab
+shell (not fish, not cmd.exe).
 
 ## Workflow: Moving sessions across machines
 
@@ -926,6 +1003,11 @@ cctabs send auth --path ~/prompts/task.txt   # hand over a path — the safe way
 cctabs send auth --file ~/prompts/task.txt   # paste the contents (short payloads only, see above)
 echo "do the thing" | cctabs send auth       # pipe via stdin
 ```
+
+⭐ **`send` to a suspended tab just works.** It wakes the tab, waits for Claude
+to reach a ready prompt (answering the folder-trust dialog and the resume picker
+on the way), delivers, and checks the delivery against the session's transcript.
+The sender does not need to know the tab was asleep. See **"Suspended tabs"**.
 
 **What `send` now refuses to do, and why it matters when driving a fleet:**
 

@@ -1,6 +1,9 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
+import { readProcessTable } from '../core/claude-procs.js'
+import { removeRecord } from '../core/suspend.js'
+import { suspendedTabsIn } from '../core/suspend-ops.js'
 
 export const closeCommand = define({
   name: 'close',
@@ -22,7 +25,11 @@ export const closeCommand = define({
     }
     const tabId = matches[0]
     const name = tabNames.get(tabId) ?? tabId.slice(0, 8)
+    // Closing a suspended tab is putting that session down, not moving it:
+    // forget it, or a later tab that happens to take the name would inherit it.
+    const susp = suspendedTabsIn(adapter, { tabsById, tabNames }, readProcessTable()).get(tabId)
     for (const b of tabsById.get(tabId) ?? []) adapter.deleteBlock(b.blockid)
+    if (susp?.record.sessionId) removeRecord(susp.record.sessionId)
     adapter.closeSocket()
     consola.success(`Closed "${name}" [${tabId.slice(0, 8)}]`)
   },

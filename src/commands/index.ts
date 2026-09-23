@@ -25,6 +25,7 @@ import { exportCommand } from './export-cmd.js'
 import { importCommand } from './import-cmd.js'
 import { profileCopyCommand } from './profile-copy.js'
 import { sortCommand } from './sort.js'
+import { suspendCommand, wakeCommand } from './suspend.js'
 
 // Default command: show sessions (most common use)
 const defaultCommand = define({
@@ -92,6 +93,8 @@ const subCommands = new Map([
   ['import', importCommand],
   ['profile-copy', profileCopyCommand],
   ['sort', sortCommand],
+  ['suspend', suspendCommand],
+  ['wake', wakeCommand],
 ].map(([name, command]) => [name, rejectUnknownOptions(command as never)] as const) as Array<[string, never]>)
 
 export async function run(): Promise<void> {

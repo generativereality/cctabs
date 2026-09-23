@@ -163,3 +163,14 @@ describe('buildManifest', () => {
     expect(r.problems.filter((p) => p.code === 'transcript-elsewhere')).toEqual([])
   })
 })
+
+describe('buildManifest — suspended tabs', () => {
+  it('keeps a suspended tab, flagged, so restore brings it back asleep', () => {
+    const r = buildManifest(
+      [row('asleep', { status: 'suspended', session_id: S1, session_lookup: 'found', session_source: 'suspended' })],
+      opts(),
+    )
+    expect(r.entries).toEqual([{ name: 'asleep', dir: '/work/asleep', session_id: S1, suspended: true }])
+    expect(r.problems).toEqual([])
+  })
+})
