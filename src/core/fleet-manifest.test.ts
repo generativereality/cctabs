@@ -139,12 +139,44 @@ describe('buildManifest', () => {
 
   // The argv fallback exists for a renamed worktree, whose transcript sits
   // under the OLD slug; resuming from the new dir would not find it.
-  it('rejects an argv-recovered session whose transcript is not under its dir', () => {
+  // Measured: Claude Code 2.1.280 resumes by id from any directory, so a
+  // session filed under a subdirectory's slug is still restorable from here.
+  it('warns — but keeps — an argv-recovered session filed under another dir', () => {
     const r = buildManifest(
       [row('moved', { session_id: S1, session_lookup: 'not-found', session_source: 'argv' })],
       opts({ transcriptInDir: () => false }),
     )
-    expect(r.problems).toEqual([expect.objectContaining({ code: 'transcript-elsewhere', severity: 'error' })])
+    expect(r.problems).toEqual([expect.objectContaining({ code: 'transcript-elsewhere', severity: 'warning' })])
+    expect(withoutInvalid(r).map((e) => e.name)).toEqual(['moved'])
+  })
+
+  it('points a deleted worktree at its own repo, with no flag needed', () => {
+    const wt = '/work/repo/.claude/worktrees/feature'
+    const r = buildManifest(
+      [row('feature', { cwd: wt, session_id: S1, session_lookup: 'found' })],
+      opts({ dirExists: (p) => p !== wt }),
+    )
+    expect(r.entries[0].dir).toBe('/work/repo')
+    expect(r.problems).toEqual([expect.objectContaining({ code: 'worktree-repointed', severity: 'warning' })])
+  })
+
+  it('handles worktrees of different repos independently — one flag could not', () => {
+    const a = '/work/a/.claude/worktrees/x'
+    const b = '/work/b/.claude/worktrees/y'
+    const r = buildManifest(
+      [row('x', { cwd: a, session_id: S1, session_lookup: 'found' }), row('y', { cwd: b, session_id: S2, session_lookup: 'found' })],
+      opts({ dirExists: (p) => p !== a && p !== b, repointMissingDirs: '/elsewhere' }),
+    )
+    expect(r.entries.map((e) => e.dir)).toEqual(['/work/a', '/work/b'])
+  })
+
+  it('still refuses a deleted worktree whose repo is gone too', () => {
+    const wt = '/gone/repo/.claude/worktrees/feature'
+    const r = buildManifest(
+      [row('feature', { cwd: wt, session_id: S1, session_lookup: 'found' })],
+      opts({ dirExists: (p) => !p.startsWith('/gone') }),
+    )
+    expect(r.problems).toEqual([expect.objectContaining({ code: 'missing-dir', severity: 'error' })])
   })
 
   it('accepts an argv-recovered session whose transcript is under its dir', () => {
