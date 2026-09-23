@@ -14,7 +14,10 @@ A tab is only rebuilt when it has **no captured output AND no running process**.
 cctabs restore                    # search all projects (default)
 cctabs restore --dry              # preview what would be resumed without doing it
 cctabs restore ~/Dev/myapp        # restrict the search to one project dir
+cctabs restore --suspended        # bring them back as placeholders instead — see suspended-tabs.md
 ```
+
+Suspended tabs are left asleep by every restore, and by `restart` — waking one is `send`'s job.
 
 ⚠️ **Read the count at the end, and trust it — it can now fail.** After
 spawning, restore re-reads the tab list, checks each new tab has a process, and

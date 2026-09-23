@@ -129,6 +129,15 @@ export const restartCommand = define({
       entries = entries.filter((e) => only.includes(e.name))
     }
 
+    // Suspended tabs have no Claude to restart, and restoring them would wake
+    // them — the opposite of what suspending asked for. They pick up a new
+    // Claude Code on their own the next time they wake.
+    const asleep = entries.filter((e) => e.suspended)
+    if (asleep.length) {
+      consola.info(`Suspended, left asleep (they start the current Claude Code when woken): ${asleep.map((e) => e.name).join(', ')}`)
+      entries = entries.filter((e) => !e.suspended)
+    }
+
     // -- map entries to processes --
     // Tab → Claude pairings, with the session each tab resolved to.
     const rows = gathered.rows
@@ -191,15 +200,21 @@ export const restartCommand = define({
       consola.warn('Nothing to restore.')
       return
     }
-    await runRestore({ manifest: restoreSet, scopedDir: null, createMissing: true, dryRun: false })
+    const report = await runRestore({ manifest: restoreSet, scopedDir: null, createMissing: true, dryRun: false })
+    // A tab restore found suspended was left asleep on purpose; auditing it for
+    // a running Claude would report it as lost. Matched by name, not object
+    // identity: restore may re-home an entry into a new object, and names are
+    // unique here (checked above).
+    const leftAsleep = new Set(report?.plan.filter((p) => p.action === 'suspended').map((p) => p.entry.name) ?? [])
+    const audited = restoreSet.filter((e) => !leftAsleep.has(e.name))
 
     // -- audit: every restored session has a Claude launched on its id --
     consola.info('Checking every restored tab is running its own session…')
     const auditDeadline = Date.now() + AUDIT_TIMEOUT_MS
-    let audit = auditRestart(restoreSet, liveSessionPids(readProcessTable() ?? []))
+    let audit = auditRestart(audited, liveSessionPids(readProcessTable() ?? []))
     while (audit.missing.length && Date.now() < auditDeadline) {
       await sleep(3000)
-      audit = auditRestart(restoreSet, liveSessionPids(readProcessTable() ?? []))
+      audit = auditRestart(audited, liveSessionPids(readProcessTable() ?? []))
     }
     console.log(`\nRestart audit: ${audit.ok.length} running their session, ${audit.missing.length} missing, ${audit.doubled.length} doubled`)
     if (audit.missing.length) {

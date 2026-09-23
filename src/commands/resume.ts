@@ -10,6 +10,9 @@ import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends 
 import type { SessionOrigin } from '../core/config-dirs.js'
 import { shellQuoteArg } from '../core/shell.js'
 import { applyTabColor, resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
+import { readProcessTable } from '../core/claude-procs.js'
+import { suspendedTabsIn } from '../core/suspend-ops.js'
+import { wakeInPlace } from './suspend.js'
 
 function shellQuoteEnv(env: Record<string, string>): string {
   const entries = Object.entries(env)
@@ -33,10 +36,13 @@ function formatSize(bytes: number): string {
 
 export const resumeCommand = define({
   name: 'resume',
-  description: 'Resume a claude session by name — reuses existing tab or creates a new one',
+  description: 'Resume a claude session by name — wakes it if suspended, else reuses its tab or creates one. Usage: cctabs resume <name> [dir] (dir defaults to cwd)',
   args: {
     name: { type: 'positional', description: 'Tab / session name' },
-    dir: { type: 'positional', description: 'Working directory (default: cwd)' },
+    // `dir` is read from ctx.positionals, deliberately NOT declared: this gunshi
+    // treats every declared positional as required, so declaring it made
+    // `cctabs resume <name>` fail with "Positional argument 'dir' is required"
+    // despite the documented cwd default.
     session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the backend whose Claude config dir the session was found in, else the CURRENT session\'s backend (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude).' },
@@ -56,6 +62,26 @@ export const resumeCommand = define({
 
     const explicitSession = ctx.values.session as string | undefined
     const explicitBackend = ctx.values.backend as string | undefined
+
+    // A suspended tab of this name already knows its session, directory and
+    // backend, so resuming it is waking it — regardless of the cwd this was run
+    // from, which the by-name session search below would otherwise depend on.
+    if (!explicitSession) {
+      const adapter = requireAdapter()
+      const data = await adapter.getAllData()
+      const hits = adapter.resolveTab(displayName, data.tabsById, data.tabNames, { exact: true })
+      const susp = hits.length === 1 ? suspendedTabsIn(adapter, data, readProcessTable()).get(hits[0]) : undefined
+      if (susp) {
+        const block = (data.tabsById.get(hits[0]) ?? []).find((b) => b.view === 'term')
+        const code = block
+          ? await wakeInPlace(adapter, { blockId: block.blockid, tabId: hits[0], name: displayName, record: susp.record }, !!susp.dormant, data)
+          : 1
+        adapter.closeSocket()
+        if (code) process.exit(code)
+        return
+      }
+      adapter.closeSocket()
+    }
     const modelOverride = ctx.values.model as string | undefined
 
     let sessionId: string | undefined

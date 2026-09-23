@@ -132,8 +132,14 @@ Claude Code'll be able to read, edit, and execute files here.
 Enter to confirm   Esc to cancel
 ```
 
-⚠️ **The marker starts on `No, exit`, so a bare Enter EXITS the session.** The
-working keystroke is Down-then-Enter — and `cctabs send` appends the Enter itself
+⚠️ **The marker starts on `No, exit`, so a bare Enter EXITS the session.** (The
+options are drawn without numbers.) cctabs itself used to press exactly that
+bare Enter. It now finds "Yes, I trust this folder", moves the cursor there and
+confirms the move before pressing Enter, and presses nothing when it can't read
+the cursor. It does so on `cctabs new … --prompt/--file/--path` (an explicitly
+named directory) and when waking or restoring a session in a directory that
+already has Claude sessions; everywhere else the dialog is left for a human. By
+hand, the working keystroke is Down-then-Enter — and `cctabs send` appends the Enter itself
 (it logs `sent "\u001b[B" ⏎`), so this is **one** call, never two:
 
 ```bash
@@ -181,6 +187,9 @@ cctabs restore [dir] [--dry]             # resume every empty tab by name search
 cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs manifest [-o file] [--repoint-missing-dirs <dir>]  # snapshot the fleet as a VALIDATED manifest: one entry per session id, this session left out, dirs + transcripts checked
 cctabs restart [--all | --only a,b] [--dry]      # restart Claude in every tab (new Claude Code version): snapshot → stop → restore → audit. Bare = plan only
+cctabs suspend <tab> [<tab>…] [-c <colour>]  # stop Claude, leave a placeholder that knows its session (NOT on remote control until woken)
+cctabs wake <tab>                        # wake a suspended tab, wait for a READY prompt (so do `resume <name>`, Enter, or just `send`)
+cctabs restore --manifest <file> -c --suspended   # bring a whole fleet back as placeholders, in seconds
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see references/tabs.md
@@ -203,6 +212,14 @@ cctabs backends                          # list available backend presets
 cctabs config                            # show config and path
 ```
 
+## Suspended tabs — `send` wakes them
+
+A suspended tab (`cctabs suspend`, `restore --suspended`) keeps its name and
+session but runs a placeholder instead of Claude. **`cctabs send` to one just
+works**: it wakes it, waits for a ready prompt, delivers, and verifies against
+the transcript — the sender doesn't need to know. ⚠️ A suspended tab is **not on
+remote control** until woken. Details: [references/suspended-tabs.md](references/suspended-tabs.md).
+
 ## Reference files — read the one that fits, when it fits
 
 This file holds what every invocation needs. The rest is in `references/`, and each entry says when to open it:
@@ -214,6 +231,7 @@ This file holds what every invocation needs. The rest is in `references/`, and e
 - [references/restore-and-restart.md](references/restore-and-restart.md) — `restore` after a reboot, manifest-driven restore, `cctabs manifest` / `cctabs restart`, and the "Resume from summary" picker.
 - [references/export-import.md](references/export-import.md) — moving tabs and their conversations to another machine.
 - [references/backends-and-accounts.md](references/backends-and-accounts.md) — other model providers (Ollama, Kimi, Qwen, local), another Claude account, and `profile-copy` between accounts.
+- [references/suspended-tabs.md](references/suspended-tabs.md) — `cctabs suspend`/`wake`, `restore --suspended`, how a suspended tab is detected, dormant tabs after a Tabby restart, and what each fleet command does with one. Read before suspending or when a tab shows ⏸.
 - [references/tabs.md](references/tabs.md) — `sort --first`, tab colours, the tab title vs. the live session (RC) name, the `prefix` setting, naming conventions.
 - [references/worktrees.md](references/worktrees.md) — worktrees on an existing branch, why not to create them by hand, recovering a session whose worktree is gone.
 - [references/remote-control.md](references/remote-control.md) — auditing and repairing Remote Control (`/rc`) across the fleet.

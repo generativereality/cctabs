@@ -169,3 +169,14 @@ describe('permission mode round-trip', () => {
     expect(e.color).toBeUndefined()
   })
 })
+
+describe('parseManifest — suspended', () => {
+  it('reads an explicit flag, and a `sessions --json` row whose status says so', () => {
+    const entries = parseManifest(JSON.stringify([
+      { name: 'a', dir: '/a', suspended: true },
+      { name: 'b', dir: '/b', status: 'suspended' },
+      { name: 'c', dir: '/c', status: 'idle' },
+    ]))
+    expect(entries.map((e) => e.suspended)).toEqual([true, true, undefined])
+  })
+})

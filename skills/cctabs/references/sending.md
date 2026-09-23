@@ -16,6 +16,11 @@ cctabs send auth --file ~/prompts/task.txt   # paste the contents (short payload
 echo "do the thing" | cctabs send auth       # pipe via stdin
 ```
 
+⭐ **`send` to a suspended tab just works.** It wakes the tab, waits for Claude
+to reach a ready prompt (answering the folder-trust dialog and the resume picker
+on the way), delivers, and checks the delivery against the session's transcript.
+See [suspended-tabs.md](suspended-tabs.md).
+
 **What `send` now refuses to do, and why it matters when driving a fleet:**
 
 - It **distinguishes three claims that used to be one ✔ line**: nothing arrived

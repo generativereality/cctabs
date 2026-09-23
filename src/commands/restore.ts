@@ -24,6 +24,8 @@ import { shellQuoteArg } from '../core/shell.js'
 import { applyTabColor, resolveColorPreference } from '../core/colors.js'
 import { liveSessionPids, readProcessTable, type ProcRow } from '../core/claude-procs.js'
 import { pidAlive } from '../core/tab-exit.js'
+import { placeholderSessions, readRecords } from '../core/suspend.js'
+import { installPlaceholderInShell, openPlaceholderTab, placeholderShellOrThrow, suspendedTabsIn } from '../core/suspend-ops.js'
 
 /**
  * Settle after each direct-spawn recreate when the backend can't guarantee the
@@ -60,11 +62,16 @@ export const restoreCommand = define({
     dry: { type: 'boolean', short: 'n', description: 'Show what would be resumed without actually doing it' },
     manifest: { type: 'string', short: 'm', description: 'Path to a JSON manifest of {name, dir, session_id?} entries (use "-" for stdin). Accepts cctabs sessions --json output directly.' },
     'create-missing': { type: 'boolean', short: 'c', description: 'When using --manifest, spawn new tabs for entries that have no existing tab' },
+    suspended: { type: 'boolean', short: 's', description: 'Bring tabs back SUSPENDED: named, knowing their session, but running a small placeholder instead of Claude. Takes seconds for a whole fleet. A suspended tab wakes on Enter, on `cctabs resume <tab>`, or when `cctabs send` targets it.' },
   },
   async run(ctx) {
     const dryRun = !!(ctx.values.dry as boolean | undefined)
     const manifestPath = ctx.values.manifest as string | undefined
     const createMissing = (ctx.values['create-missing'] as boolean | undefined) ?? false
+    const suspended = !!(ctx.values.suspended as boolean | undefined)
+    if (suspended) {
+      try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
+    }
 
     if (manifestPath) {
       await runRestore({
@@ -72,6 +79,7 @@ export const restoreCommand = define({
         scopedDir: null,
         createMissing,
         dryRun,
+        suspended,
       })
       return
     }
@@ -86,6 +94,7 @@ export const restoreCommand = define({
       scopedDir: rawDir ? resolve(rawDir.replace(/^~/, homedir())) : null,
       createMissing: false,
       dryRun,
+      suspended,
     })
   },
 })
@@ -128,6 +137,8 @@ export interface RestoreRequest {
   scopedDir: string | null
   createMissing: boolean
   dryRun: boolean
+  /** Restore every entry that has a session as a suspended placeholder. */
+  suspended?: boolean
 }
 
 /** What a restore did, for a caller that has to act on it (`restart`). */
@@ -167,6 +178,7 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
       ? new Set(currentWsData.workspacedata.tabids)
       : new Set<string>(tabsById.keys())
     entries = rehomeEntries(req.manifest, listClaudeConfigDirs(), locateTranscriptFile, (m) => consola.warn(m))
+    if (req.suspended) entries = entries.map((e) => ({ ...e, suspended: true }))
   } else {
     // Scan: one entry per terminal tab, in bar order, each bound to its tab.
     // Live tabs are included so they're reported and so they claim their name
@@ -190,6 +202,7 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
           dir: req.scopedDir ?? undefined,
           tabId,
           color: termBlock?.color,
+          ...(req.suspended ? { suspended: true } : {}),
         })
       }
     }
@@ -216,6 +229,10 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
   if (running.length) {
     consola.info(`Already running: ${running.map((p) => p.entry.name).join(', ')}`)
   }
+  const asleep = plan.filter((p) => p.action === 'suspended')
+  if (asleep.length) {
+    consola.info(`Suspended, left asleep: ${asleep.map((p) => p.entry.name).join(', ')}`)
+  }
 
   const actionable = plan.filter(
     (p) => p.action === 'attach' || p.action === 'recreate' || p.action === 'spawn',
@@ -235,9 +252,9 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
 
   consola.info(`${actionable.length} tab(s) to restore${dryRun ? ' (dry run)' : ''}:`)
   for (const p of plan) {
-    // Already-running tabs are covered by the one-line list above; repeating
-    // them here buries the entries that actually need a decision.
-    if (p.action === 'already-running') continue
+    // Already-running and suspended tabs are covered by the one-line lists
+    // above; repeating them here buries the entries that need a decision.
+    if (p.action === 'already-running' || p.action === 'suspended') continue
     consola.log(`  ${p.entry.name} ${describeDecision(p, dryRun)}`)
   }
 
@@ -341,6 +358,26 @@ export function buildPlanDeps(
   },
 ): PlanDeps {
   const live = opts.procRows ? liveSessionPids(opts.procRows) : undefined
+  // A placeholder waiting on a session holds it as surely as a running Claude
+  // does: restoring that session again elsewhere would put two tabs on it, and
+  // waking either would start a second Claude on one transcript.
+  if (live && opts.procRows) {
+    for (const [id, ph] of placeholderSessions(opts.procRows)) {
+      if (!ph.woken) live.set(id, [...(live.get(id) ?? []), ph.pid])
+    }
+  }
+  // Tabs that are suspended right now, by positive evidence. A dormant one —
+  // registered, but with no placeholder process — is deliberately NOT reported
+  // as suspended here: its tab holds nothing wakeable, so the planner must see
+  // it for what it is (a dead or bare tab) and recreate it, which
+  // `registeredSuspended` turns into recreating it as a placeholder.
+  const suspendedNow = suspendedTabsIn(adapter, opts, opts.procRows ?? null)
+  const suspendedBlocks = new Set(
+    [...suspendedNow].filter(([, m]) => !m.dormant)
+      .map(([tabId]) => (opts.tabsById.get(tabId) ?? []).find((b) => b.view === 'term')?.blockid)
+      .filter(Boolean),
+  )
+  const registered = new Set(readRecords().map((r) => r.sessionId.toLowerCase()))
   // Whether this backend reports pids at all. Asked of the whole snapshot
   // rather than per tab, so we can tell "this tab has no process" from "this
   // plugin is too old to say" without a capability probe: if any tab reports a
@@ -363,11 +400,19 @@ export function buildPlanDeps(
     // be taken as proof that `gapminder`'s tab already exists.
     matchTabs: (name) => adapter.resolveTab(name, opts.tabsById, opts.tabNames, { exact: true }),
     termBlockOf: (tabId) => (opts.tabsById.get(tabId) ?? []).find((b) => b.view === 'term')?.blockid,
-    statusOf: (blockId) => adapter.detectSessionStatus(blockId),
+    statusOf: (blockId) => {
+      if (suspendedBlocks.has(blockId)) return 'suspended'
+      const status = adapter.detectSessionStatus(blockId)
+      // The on-screen marker alone, contradicted by the process table (no
+      // placeholder anywhere for that tab), is a stale screen — let the
+      // planner treat the tab as the shell it now is.
+      return status === 'suspended' && opts.procRows ? 'terminal' : status
+    },
     confirmEmpty: (blockId) => adapter.confirmScrollbackEmpty(blockId),
     resolveSession: (entry) => resolveEntrySession(entry, opts.sessionScope),
     ...(live ? { liveSessionPids: (id: string) => live.get(id) ?? [] } : {}),
     createMissing: opts.createMissing,
+    registeredSuspended: (id) => registered.has(id.toLowerCase()),
   }
 }
 
@@ -454,21 +499,25 @@ export function describeDecision(p: PlannedEntry, dry: boolean): string {
     case 'unreadable':
       return '— could not read this tab, but its process is running; leaving it alone'
     case 'attach':
-      return `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab${originNote(p)}${modeNote(p)}`
+      return p.suspended
+        ? `→ ${dry ? 'would suspend' : 'suspending'} ${shortId(p.sessionId)} into existing tab (placeholder)${originNote(p)}`
+        : `→ ${dry ? 'would resume' : 'resuming'} ${shortId(p.sessionId)} in existing tab${originNote(p)}${modeNote(p)}`
     case 'recreate':
-      return `→ ${dry ? 'would recreate' : 'recreating'} empty tab (no process) with ${shortId(p.sessionId)} in ${p.dir}${originNote(p)}${modeNote(p)}`
+      return `→ ${dry ? 'would recreate' : 'recreating'} empty tab (no process) with ${shortId(p.sessionId)} in ${p.dir}${p.suspended ? ', suspended' : ''}${originNote(p)}${modeNote(p)}`
     case 'duplicate':
       return p.closeTabId
         ? `— duplicate empty tab, ${dry ? 'would close' : 'closing'} (already restoring one)`
         : '— duplicate entry, skipping (already restoring one)'
     case 'spawn':
-      return `→ ${dry ? 'would spawn' : 'spawning'} new tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}${modeNote(p)}`
+      return `→ ${dry ? 'would spawn' : 'spawning'} new ${p.suspended ? 'SUSPENDED ' : ''}tab in ${p.dir} (${shortId(p.sessionId)})${originNote(p)}${modeNote(p)}`
     case 'missing':
       return '— no existing tab; pass --create-missing to spawn one'
     case 'duplicate-session':
       return `— session ${shortId(p.sessionId)} is already being restored by an earlier entry, skipping`
     case 'session-live':
-      return `— session ${shortId(p.sessionId)} is already running in another process, skipping (a second Claude on one transcript)`
+      return `— session ${shortId(p.sessionId)} is already running (or suspended) in another tab, skipping (a second Claude on one transcript)`
+    case 'suspended':
+      return '— suspended, leaving it asleep'
   }
 }
 
@@ -503,6 +552,8 @@ export function summarizeDecision(p: PlannedEntry, dry: boolean): string {
       return `duplicate of session ${shortId(p.sessionId)} — skipped`
     case 'session-live':
       return `session ${shortId(p.sessionId)} already live elsewhere — skipped`
+    case 'suspended':
+      return 'suspended — left asleep'
   }
 }
 
@@ -731,7 +782,21 @@ async function executePlan(
   }
 
   // -- attach: send the resume into tabs that still have a live shell --
-  const attached = plan.filter((p) => p.action === 'attach')
+  // Suspended attaches get the placeholder instead, and are verified from the
+  // process table below rather than by waiting for a Claude to start.
+  const asleep = plan.filter((p) => p.action === 'attach' && p.suspended)
+  for (const p of asleep) {
+    const color = colorForEntry(p, config)
+    if (color !== undefined) await applyTabColor(adapter, p.tabId!, color)
+    try {
+      await installPlaceholderInShell(adapter, p.blockId!, p.tabId!, placeholderRecordOf(p))
+      results.set(p, '… placeholder sent, not yet verified')
+    } catch (err) {
+      results.set(p, `✘ could not suspend: ${(err as Error).message}`)
+      outcomes.set(p, 'failed')
+    }
+  }
+  const attached = plan.filter((p) => p.action === 'attach' && !p.suspended)
   for (const p of attached) {
     // Colour these too, not just the recreated ones. Whether a tab is attached
     // or recreated turns on whether its shell happens to be alive, which after
@@ -788,6 +853,19 @@ async function executePlan(
     if (recreates) consola.info(`Recreating ${recreates} empty tab(s)…`)
 
     const spawnOne = async (p: PlannedEntry) => {
+      if (p.suspended) {
+        try {
+          const newTabId = await openPlaceholderTab(adapter, placeholderRecordOf(p), { color: colorForEntry(p, config) })
+          finalTabId.set(p, newTabId)
+          if (p.closeTabId) replacements.set(p.closeTabId, newTabId)
+          results.set(p, `… ${p.action === 'recreate' ? 'recreated' : 'spawned'} suspended [${newTabId.slice(0, 8)}], not yet verified`)
+          outcomes.set(p, 'unverified')
+        } catch (err) {
+          results.set(p, `✘ ${p.action} (suspended) failed: ${(err as Error).message}`)
+          outcomes.set(p, 'failed')
+        }
+        return
+      }
       try {
         const claudeCmd = p.sessionId
           ? `claude --resume ${p.sessionId} --name ${JSON.stringify(p.entry.name)}${permissionModeFlag(p)}`
@@ -838,14 +916,20 @@ async function executePlan(
   }
 
   // -- verify what we just spawned, before claiming any of it worked --
-  if (toSpawn.length) {
+  const awake = toSpawn.filter((p) => !p.suspended)
+  if (awake.length) {
     await verifySpawns(
       adapter,
-      toSpawn.filter((p) => finalTabId.has(p)).map((p) => ({ p, tabId: finalTabId.get(p)! })),
+      awake.filter((p) => finalTabId.has(p)).map((p) => ({ p, tabId: finalTabId.get(p)! })),
       results,
       outcomes,
     )
   }
+  await verifyPlaceholders(
+    [...asleep, ...toSpawn.filter((p) => p.suspended)].filter((p) => outcomes.get(p) !== 'failed'),
+    results,
+    outcomes,
+  )
 
   // -- rebuild the tab bar --
   // Best-effort: adapters without reorderTabs keep the append order, and
@@ -950,6 +1034,61 @@ async function verifySpawns(
     if (verdict.outcome !== 'restored' && !final) return null
     return { outcome: verdict.outcome, note: `${verdict.note} [${tabOf.get(p)!.slice(0, 8)}]` }
   }, results, outcomes, () => { round++ ; resetTitleIndexCache() })
+}
+
+/** The registry record a suspended restore entry becomes. */
+function placeholderRecordOf(p: PlannedEntry) {
+  return {
+    sessionId: p.sessionId!,
+    name: p.entry.name,
+    dir: p.dir!,
+    backend: p.backend,
+    configDir: p.configDir,
+    permissionMode: p.permissionMode,
+  }
+}
+
+/**
+ * Confirm each suspended entry has a placeholder waiting on its session.
+ *
+ * The process table is the whole check: a placeholder names its session in its
+ * own argv, so nothing here depends on a tab's screen being readable — which,
+ * for a fleet of freshly spawned background tabs, it mostly isn't. Where there
+ * is no process table, the entries stay `unverified`, which is the truth.
+ */
+async function verifyPlaceholders(
+  entries: PlannedEntry[],
+  results: Map<PlannedEntry, string>,
+  outcomes: Map<PlannedEntry, RestoreOutcome>,
+): Promise<void> {
+  if (!entries.length) return
+  consola.info(`Verifying ${entries.length} suspended tab(s)…`)
+  const deadline = Date.now() + 20_000
+  let pending = entries
+  while (pending.length) {
+    const rows = readProcessTable()
+    if (!rows) {
+      for (const p of pending) results.set(p, '? suspended — no process table to confirm the placeholder')
+      return
+    }
+    const waiting = placeholderSessions(rows)
+    const final = Date.now() >= deadline
+    pending = pending.filter((p) => {
+      const ph = waiting.get(p.sessionId!.toLowerCase())
+      if (ph && !ph.woken) {
+        results.set(p, `⏸ suspended ${shortId(p.sessionId)} (placeholder pid ${ph.pid})`)
+        outcomes.set(p, 'restored')
+        return false
+      }
+      if (final) {
+        results.set(p, `✘ no placeholder for ${shortId(p.sessionId)} appeared within 20s`)
+        outcomes.set(p, 'failed')
+        return false
+      }
+      return true
+    })
+    if (pending.length) await sleep(1000)
+  }
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   type ProcMatchVia,
   type ProcRow,
 } from './claude-procs.js'
+import { suspendedTabsIn } from './suspend-ops.js'
 
 /**
  * Rows of captured output to read per tab.
@@ -40,7 +41,7 @@ export interface SessionRow {
    * when that found nothing — the `--resume` in the argv of the Claude running
    * in this tab. Absent when there is no id.
    */
-  session_source?: 'transcript' | 'argv'
+  session_source?: 'transcript' | 'argv' | 'suspended'
   /**
    * For `session_lookup: "not-found"`: how many transcripts exist for
    * this tab's directory under any title. `> 0` means the tab was
@@ -70,6 +71,14 @@ export interface SessionRow {
   claude_pid?: number
   /** How `claude_pid` was matched — see {@link ProcMatchVia}. */
   claude_pid_via?: ProcMatchVia
+  /**
+   * For `status: "suspended"`: when it was suspended, and whether it is
+   * dormant — registered, but with no placeholder process running, which is
+   * what a Tabby restart leaves. A dormant tab still wakes on `send`/`resume`
+   * (cctabs puts the placeholder back first), just not on a bare Enter.
+   */
+  suspended_at?: string
+  suspended_dormant?: boolean
 }
 
 export interface WorkspaceRow {
@@ -103,6 +112,7 @@ export async function collectSessionRows(
         procRows,
       )
     : new Map()
+  const suspended = suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)
 
   const out: WorkspaceRow[] = []
 
@@ -121,8 +131,12 @@ export async function collectSessionRows(
       const cwd = b.meta?.['cmd:cwd'] ?? ''
       // One read, three answers — see BUFFER_ROWS.
       const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
-      const status = classifyTerminalBuffer(buffer)
-      const permissionMode = parsePermissionMode(buffer)
+      const susp = suspended.get(tabId)
+      const onScreen = classifyTerminalBuffer(buffer)
+      // The registry/process verdict wins. A marker on screen that they
+      // contradict is a stale screen: the tab is the shell it now is.
+      const status = susp ? 'suspended' : onScreen === 'suspended' && procRows ? 'terminal' : onScreen
+      const permissionMode = susp ? susp.record.permissionMode : parsePermissionMode(buffer)
       const lastLine = buffer.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? ''
 
       // Worktree-aware resolution: returns the session id AND the directory
@@ -141,7 +155,15 @@ export async function collectSessionRows(
       // is reported as `lookup-failed`, which is not the same answer as
       // "this tab has no session" and must not be flattened into it.
       let lookupError: Error | undefined
-      if (cwd) {
+      if (susp?.record.sessionId) {
+        // The registry names the session exactly; no title search needed, and
+        // the placeholder's cwd may not be where the session resumes.
+        sessionId = susp.record.sessionId
+        sessionDir = susp.record.dir || cwd
+        backend = susp.record.backend
+        configDir = susp.record.configDir
+        source = 'suspended'
+      } else if (cwd) {
         try {
           const resolved = resolveTabSession(cwd, tabName)
           if (resolved) {
@@ -199,6 +221,8 @@ export async function collectSessionRows(
         ...(backend ? { backend } : {}),
         ...(configDir ? { config_dir: configDir } : {}),
         ...(tabProc ? { claude_pid: tabProc.proc.pid, claude_pid_via: tabProc.via } : {}),
+        ...(susp?.record.suspendedAt ? { suspended_at: susp.record.suspendedAt } : {}),
+        ...(susp?.dormant ? { suspended_dormant: true } : {}),
       })
     }
 

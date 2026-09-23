@@ -5,7 +5,7 @@ import { consola } from 'consola'
 import { loadConfig } from './config.js'
 import { requireAdapter, type TerminalAdapter } from './adapter.js'
 import { shellQuoteArg, resolveTabShell, tabLaunchArgv, envPrefixFor } from './shell.js'
-import { autoModeDialogVisible, trustDialogVisible } from './session-status.js'
+import { autoModeDialogVisible, trustDialogState, trustDialogVisible } from './session-status.js'
 import { hasPriorSessions } from './session.js'
 import { applyTabColor, supportsTabColor } from './colors.js'
 import { countPayloadLines, judgePaste, readPasteEvidence, type PasteVerdict } from './paste-confirm.js'
@@ -273,9 +273,12 @@ async function sendInitialPrompt(
  *
  * The two are answered differently, and getting that backwards is the hazard:
  *
- *   - Trust dialog — Enter takes the default ("Yes, I trust this folder"). Only
- *     answered when `trusted` says the directory already holds transcripts from
- *     earlier sessions; otherwise the dialog is doing its job and we leave it.
+ *   - Trust dialog — answered "Yes, I trust this folder", located by text and
+ *     navigated to, never by pressing Enter on the default: current Claude
+ *     Code lists "No, exit" FIRST and highlighted, so the old bare-Enter answer
+ *     quit the session (see answerTrustDialog). Only answered when `trusted`
+ *     says the directory already holds transcripts from earlier sessions;
+ *     otherwise the dialog is doing its job and we leave it.
  *   - Auto-mode dialog — the default is "Set it up", which would kick off an
  *     interactive environment review. We need option 2 ("Not now"), so: ↓ once,
  *     then Enter. Never option 3 ("Don't show again") — permanently suppressing
@@ -286,12 +289,15 @@ async function sendInitialPrompt(
  * disappearing: the captured buffer is append-only, so the prose stays visible
  * forever and "is it still there?" always answers yes. (That trap cost a real
  * debugging session — the dialogs read as still-stuck after they had cleared.)
+ *
+ * Returns false when a dialog was left unanswered (the caller decides whether
+ * that is a warning or a failure); true otherwise.
  */
 export async function clearStartupDialogs(
   adapter: TerminalAdapter,
   blockId: string,
   opts: { sleep?: (ms: number) => Promise<void>; trusted?: boolean; dir?: string } = {},
-): Promise<void> {
+): Promise<boolean> {
   const nap = opts.sleep ?? sleep
   const read = (n: number) => adapter.scrollback(blockId, n)
   // The live input footer — proof we are past every dialog. The dialogs draw ❯
@@ -315,19 +321,66 @@ export async function clearStartupDialogs(
     }
   }
 
-  if (!trustDialogVisible(read(40))) return
+  if (!trustDialogVisible(read(40))) return true
   if (!opts.trusted) {
     consola.warn(
       `Tab is waiting on the folder-trust dialog${opts.dir ? ` for ${opts.dir}` : ''}, and Claude has no earlier session there — leaving it for you to answer.`,
     )
-    return
+    return false
   }
-  for (let attempt = 0; attempt < 18; attempt++) {
-    if (pastDialogs()) return
-    await adapter.sendInput(blockId, '\r') // Enter → default, "Yes, I trust this folder"
-    await nap(800)
+  if (await answerTrustDialog(adapter, blockId, { sleep: nap, pastDialogs })) return true
+  consola.warn('Could not confirm the folder-trust dialog was answered — switch to the tab and choose "Yes, I trust this folder" (NOT the first option on newer Claude Code, which is "No, exit").')
+  return false
+}
+
+/**
+ * Select "Yes, I trust this folder" on the trust dialog, whichever position it
+ * is in, and confirm it landed.
+ *
+ * Enter is pressed only once the cursor has been SEEN on the Yes option. The
+ * sequence per attempt: read the layout, move the cursor by the difference
+ * between it and Yes (↓ or ↑), re-read, and only then Enter. An unreadable
+ * cursor means no Enter at all — on this dialog a wrong guess quits the
+ * session, and an unanswered dialog is recoverable by hand while a quit one
+ * is not.
+ *
+ * Exported for tests; production callers go through clearStartupDialogs.
+ */
+export async function answerTrustDialog(
+  adapter: TerminalAdapter,
+  blockId: string,
+  opts: { sleep?: (ms: number) => Promise<void>; pastDialogs?: () => boolean; attempts?: number } = {},
+): Promise<boolean> {
+  const nap = opts.sleep ?? sleep
+  const read = () => adapter.scrollback(blockId, 40)
+  const past = opts.pastDialogs ?? (() => /automode|foragents|Try["'“]/i.test(adapter.scrollback(blockId, 14).replace(/\s+/g, '')))
+
+  // Same not-ready window as every other dialog: let its key handler attach.
+  await nap(1200)
+  for (let attempt = 0; attempt < (opts.attempts ?? 4); attempt++) {
+    if (past()) return true
+    const state = trustDialogState(read())
+    if (state.yes === undefined || state.cursor === undefined) { await nap(600); continue }
+
+    const delta = state.yes - state.cursor
+    for (let i = 0; i < Math.abs(delta); i++) {
+      await adapter.sendInput(blockId, delta > 0 ? '\x1b[B' : '\x1b[A')
+      await nap(200)
+    }
+    if (delta !== 0) await nap(400)
+
+    // Verify before committing. If the cursor isn't visibly on Yes, go round
+    // again from whatever the screen now says rather than pressing Enter.
+    const after = trustDialogState(read())
+    if (after.cursor !== after.yes || after.yes === undefined) continue
+
+    await adapter.sendInput(blockId, '\r')
+    for (let i = 0; i < 12; i++) {
+      await nap(700)
+      if (past()) return true
+    }
   }
-  consola.warn('Could not confirm the folder-trust dialog was dismissed — switch to the tab and press Enter.')
+  return past()
 }
 
 /**

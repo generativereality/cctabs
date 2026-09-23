@@ -88,6 +88,9 @@ cctabs restore [dir] [--dry]             bring back every tab that lost its sess
 cctabs restore --manifest <file|-> [--create-missing]   ...or drive it from an explicit list
 cctabs manifest [-o file]                validated snapshot: one entry per session, this session left out
 cctabs restart [--all | --only a,b]      restart Claude in every tab, keeping each conversation (bare = plan)
+cctabs suspend <tab>                     stop Claude, keep the tab + its session as a placeholder
+cctabs wake <tab>                        wake a suspended tab (so do `resume`, Enter, or `send`)
+cctabs restore --manifest <f> -c --suspended   bring a whole fleet back asleep, in seconds
 cctabs profile-copy <tab> --to <preset>  copy/move a session into another Claude account
 cctabs backends                          list backend presets (providers / Claude accounts)
 cctabs config                            show config path and values
@@ -122,6 +125,21 @@ echo "focus on the edge cases in the OAuth flow" | cctabs send auth
 cctabs send auth "yes\n"
 cctabs send auth "/clear\n"
 ```
+
+### Suspend the sessions you aren't using
+
+```bash
+cctabs suspend old-spike                              # Claude stops; the tab stays, named, knowing its session
+cctabs restore --manifest fleet.json -c --suspended   # a 60-tab fleet back in seconds, nothing running
+cctabs send old-spike "pick this back up"             # wakes it, waits for a ready prompt, then delivers
+```
+
+A suspended tab runs a tiny placeholder instead of Claude. It wakes on Enter,
+on `cctabs wake`/`resume`, or when another tab `send`s to it — the sender never
+needs to know it was asleep. The trade-off, stated plainly: **a suspended tab is
+not on Remote Control** — it won't show on claude.ai or your phone until woken.
+That is also what keeps the remote-control list down to the sessions you're
+actually using.
 
 ### Check in without switching tabs
 
@@ -226,6 +244,9 @@ Paired with cctabs, the pattern is:
 4. You monitor and steer the whole fleet from your phone while the machine does the work
 
 One remote-controlled session orchestrating a local fleet.
+
+Suspended tabs (`cctabs suspend`) are off Remote Control until woken — but the
+command session can still `cctabs send` to one, which wakes it.
 
 ## Config
 

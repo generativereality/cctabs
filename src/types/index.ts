@@ -76,8 +76,12 @@ export interface AllData {
  * - `unreadable` — no output could be read for this tab. Says nothing about
  *   whether a session is running; it was called `unknown` and reported as
  *   "dead", which is how a live session came to be closed and recreated.
+ * - `suspended` — the tab holds a cctabs placeholder for a known session and
+ *   no Claude is running in it (see core/suspend.ts). Only ever concluded from
+ *   a positive signal — the registry, the placeholder's own process, or its
+ *   on-screen marker — never from the absence of anything.
  */
-export type SessionStatus = 'active' | 'idle' | 'terminal' | 'unreadable'
+export type SessionStatus = 'active' | 'idle' | 'terminal' | 'unreadable' | 'suspended'
 
 /**
  * A permission mode cctabs is willing to hand back to `claude --permission-mode`.

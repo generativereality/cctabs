@@ -463,3 +463,64 @@ describe('planRestore — one session, one Claude', () => {
     expect(plan[0].action).toBe('spawn')
   })
 })
+
+describe('planRestore — suspended tabs', () => {
+  it('leaves a suspended tab asleep rather than attaching a resume into its placeholder', async () => {
+    const plan = await planRestore([mEntry('alpha')], makeDeps([{ id: 't1', name: 'alpha', status: 'suspended' }]))
+    expect(plan[0]).toMatchObject({ action: 'suspended', tabId: 't1' })
+    expect(plan[0].sessionId).toBeUndefined()
+  })
+
+  it('never spawns a second copy of a suspended tab for a repeated entry', async () => {
+    const plan = await planRestore(
+      [mEntry('alpha'), mEntry('alpha')],
+      makeDeps([{ id: 't1', name: 'alpha', status: 'suspended' }], { createMissing: true }),
+    )
+    expect(plan.map((p) => p.action)).toEqual(['suspended', 'suspended'])
+  })
+
+  it('marks spawn, attach and recreate as suspended when the entry asks for it', async () => {
+    const plan = await planRestore(
+      [mEntry('spawned', { suspended: true }), mEntry('attached', { suspended: true }), mEntry('rebuilt', { suspended: true })],
+      makeDeps([
+        { id: 't1', name: 'attached', status: 'terminal' },
+        { id: 't2', name: 'rebuilt', status: 'unreadable', empty: true, live: false },
+      ], { createMissing: true }),
+    )
+    expect(plan.map((p) => [p.action, p.suspended])).toEqual([
+      ['spawn', true],
+      ['attach', true],
+      ['recreate', true],
+    ])
+  })
+
+  it('does not suspend an entry with no session — a fresh Claude has nothing to hold', async () => {
+    const plan = await planRestore(
+      [mEntry('fresh', { suspended: true })],
+      makeDeps([], { createMissing: true, sessionless: ['fresh'] }),
+    )
+    expect(plan[0].action).toBe('spawn')
+    expect(plan[0].suspended).toBeUndefined()
+  })
+
+  it('brings a REGISTERED suspended session back asleep even when the entry does not say so', async () => {
+    // After a Tabby restart a placeholder tab can come back as a bare shell or
+    // with no process; resuming it would wake what the user put to sleep.
+    const deps = makeDeps([{ id: 't1', name: 'alpha', status: 'unreadable', empty: true, live: false }])
+    deps.registeredSuspended = (id) => id === 'sess-alpha'
+    const plan = await planRestore([mEntry('alpha')], deps)
+    expect(plan[0]).toMatchObject({ action: 'recreate', suspended: true })
+  })
+
+  it('recreates a tab whose process is KNOWN dead even when its screen still reads as a shell', async () => {
+    // A placeholder that died leaves its marker as the last output; typing a
+    // resume into that tab would go nowhere.
+    const plan = await planRestore([mEntry('alpha')], makeDeps([{ id: 't1', name: 'alpha', status: 'terminal', live: false }]))
+    expect(plan[0]).toMatchObject({ action: 'recreate', closeTabId: 't1' })
+  })
+
+  it('leaves an already-running tab running, even under --suspended', async () => {
+    const plan = await planRestore([mEntry('alpha', { suspended: true })], makeDeps([{ id: 't1', name: 'alpha', status: 'idle' }]))
+    expect(plan[0].action).toBe('already-running')
+  })
+})

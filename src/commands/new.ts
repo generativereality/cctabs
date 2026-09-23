@@ -10,13 +10,19 @@ import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 import { setupWorktree } from '../core/worktree.js'
 import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
 import { buildPathHandoff } from '../core/handoff.js'
+import { requireAdapter } from '../core/adapter.js'
+import { openPlaceholderTab } from '../core/suspend-ops.js'
+import { locateTranscriptFile } from '../core/transcript.js'
 
 export const newCommand = define({
   name: 'new',
-  description: 'Open a new tab and launch claude',
+  description: 'Open a new tab and launch claude. Usage: cctabs new <name> [dir] (dir defaults to cwd)',
   args: {
     name: { type: 'positional', description: 'Tab name' },
-    dir: { type: 'positional', description: 'Working directory / repo root (default: cwd)' },
+    // `dir` is read from ctx.positionals, deliberately NOT declared: this gunshi
+    // treats every declared positional as required, so declaring it made
+    // `cctabs new <name>` fail with "Positional argument 'dir' is required"
+    // despite the documented cwd default.
     workspace: { type: 'string', short: 'w', description: 'Target workspace' },
     worktree: { type: 'boolean', short: 'W', description: 'Launch claude with --worktree <name> for isolated branch work' },
     file: { type: 'string', short: 'f', description: 'Send initial prompt from file once Claude is ready' },
@@ -26,6 +32,7 @@ export const newCommand = define({
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
+    suspended: { type: 'boolean', short: 's', description: 'Open the tab SUSPENDED (needs --resume): named and holding the session, but running a placeholder instead of Claude until woken by Enter, `cctabs resume`/`wake`, or `cctabs send`.' },
   },
   async run(ctx) {
     const name = ctx.positionals[1]
@@ -41,7 +48,16 @@ export const newCommand = define({
     const inheritedBackend = !explicitBackend && !!backendName
     const modelOverride = ctx.values.model as string | undefined
     const colorInput = ctx.values.color as string | undefined
+    const suspended = !!ctx.values.suspended
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
+    if (suspended && !resumeId) {
+      consola.error('--suspended needs --resume <session-id>: a suspended tab holds an existing session until it is woken. For a fresh session, just `cctabs new`.')
+      process.exit(1)
+    }
+    if (suspended && (promptText || promptFile || handoffPath)) {
+      consola.error('--suspended cannot be combined with --prompt, --file or --path — nothing is running to receive them. Suspend it, then `cctabs send` wakes it and delivers.')
+      process.exit(1)
+    }
 
     const config = loadConfig()
 
@@ -151,6 +167,24 @@ export const newCommand = define({
         consola.error(e?.message ?? String(e))
         process.exit(1)
       }
+    }
+
+    if (suspended) {
+      const located = locateTranscriptFile(resolvedSessionId!)
+      try {
+        const tabId = await openPlaceholderTab(requireAdapter(), {
+          sessionId: resolvedSessionId!,
+          name: displayName,
+          dir: resolve(sessionDir.replace(/^~/, homedir())),
+          backend: backendName || located?.backend,
+          configDir: located?.configDir,
+        }, { afterActive: true, color })
+        consola.success(`⏸ Tab "${displayName}" [${tabId.slice(0, 8)}] suspended on ${resolvedSessionId!.slice(0, 8)}… at ${dir} — wakes on Enter, \`cctabs resume\`, or \`cctabs send\``)
+      } catch (e) {
+        consola.error((e as Error).message)
+        process.exit(1)
+      }
+      return
     }
 
     let claudeCmd: string

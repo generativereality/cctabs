@@ -53,6 +53,14 @@ export interface RestoreEntry extends SessionOrigin {
    * instead of collapsing into a single ambiguous match.
    */
   tabId?: string
+  /**
+   * Bring this entry back as a suspended placeholder rather than a running
+   * Claude (see core/suspend.ts). Set by `restore --suspended`, or carried by
+   * a manifest entry that was suspended when it was captured. Only honoured
+   * for an entry with a session to resume — a fresh Claude has nothing to
+   * suspend.
+   */
+  suspended?: boolean
 }
 
 export type RestoreAction =
@@ -94,6 +102,12 @@ export type RestoreAction =
   | 'spawn'
   /** No tab exists and --create-missing wasn't passed. */
   | 'missing'
+  /**
+   * The matching tab is a suspended placeholder. Left asleep: waking it is
+   * `send`'s or `resume`'s job, and a restore that woke every suspended tab
+   * would undo the point of suspending them.
+   */
+  | 'suspended'
 
 export interface PlannedEntry extends SessionOrigin {
   entry: RestoreEntry
@@ -116,6 +130,8 @@ export interface PlannedEntry extends SessionOrigin {
   color?: string | null
   /** Directory Claude must be launched from. */
   dir?: string
+  /** Restore as a suspended placeholder rather than a running Claude. */
+  suspended?: boolean
 }
 
 /**
@@ -169,6 +185,13 @@ export interface PlanDeps {
   liveSessionPids?(sessionId: string): number[]
   /** Whether entries with no existing tab may be spawned. */
   createMissing: boolean
+  /**
+   * Does the suspended-tab registry say this session was suspended? Such an
+   * entry is restored as a placeholder even when its manifest entry doesn't
+   * say so — the case being a Tabby restart, after which a placeholder tab can
+   * come back as a bare shell, and resuming it would wake the whole fleet.
+   */
+  registeredSuspended?(sessionId: string): boolean
 }
 
 /**
@@ -196,6 +219,7 @@ const KEEPS_TAB: ReadonlySet<RestoreAction> = new Set<RestoreAction>([
   'attach',
   'recreate',
   'spawn',
+  'suspended',
 ])
 
 /**
@@ -246,6 +270,7 @@ export async function planRestore(
     if (status === 'active' || status === 'idle') {
       return { entry, early: 'already-running', tabId, blockId }
     }
+    if (status === 'suspended') return { entry, early: 'suspended', tabId, blockId }
     return { entry, tabId, blockId, status }
   })
 
@@ -324,6 +349,7 @@ export async function planRestore(
       continue
     }
     if (session) claimedSessions.add(session.id)
+    const asSuspended = !!session && (!!entry.suspended || !!deps.registeredSuspended?.(session.id))
 
     if (p.tabId) {
       const noOutput = p.status === 'unreadable' && emptyByBlock.get(p.blockId!) === true
@@ -350,8 +376,12 @@ export async function planRestore(
       restoredNames.add(entry.name)
       claimedTabs.add(p.tabId)
       // Nothing captured AND no process: the shell really is gone, so the tab
-      // has to be rebuilt around the resume rather than sent to.
-      const dead = noOutput && deps.hasLiveProcess(p.tabId) !== true
+      // has to be rebuilt around the resume rather than sent to. A process
+      // KNOWN to be gone means the same whatever the screen still shows —
+      // e.g. a placeholder that died with its marker as the last output,
+      // which reads as a shell and would otherwise be typed into.
+      const liveProcess = deps.hasLiveProcess(p.tabId)
+      const dead = (noOutput && liveProcess !== true) || liveProcess === false
       planned.push({
         entry,
         action: dead ? 'recreate' : 'attach',
@@ -362,6 +392,7 @@ export async function planRestore(
         dir: session.dir,
         permissionMode: entry.permissionMode,
         color: entry.color,
+        ...(asSuspended ? { suspended: true } : {}),
         ...originFor(entry, session),
       })
       continue
@@ -391,6 +422,7 @@ export async function planRestore(
       dir: session?.dir ?? entry.dir,
       permissionMode: entry.permissionMode,
       color: entry.color,
+      ...(asSuspended ? { suspended: true } : {}),
       ...originFor(entry, session),
     })
   }

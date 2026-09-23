@@ -216,3 +216,70 @@ describe('sendTextWithConfirmation', () => {
     expect(verdict.confirmed).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// The folder-trust dialog. Current Claude Code lists "No, exit" FIRST and
+// highlighted, so the old bare-Enter answer quit the session.
+
+import { answerTrustDialog } from './open-session.js'
+
+/** A trust dialog whose cursor moves with ↓/↑ and which clears on Enter-on-Yes. */
+function trustAdapter(layout: 'no-first' | 'yes-first', opts: { dropArrows?: boolean; hideCursor?: boolean; unnumbered?: boolean } = {}) {
+  const options = layout === 'no-first' ? ['No, exit', 'Yes, I trust this folder'] : ['Yes, I trust this folder', 'No, exit']
+  let cursor = 0
+  let outcome: 'pending' | 'trusted' | 'exited' = 'pending'
+  const inputs: string[] = []
+  const render = () => {
+    if (outcome === 'trusted') return '⏵⏵ auto mode on (shift+tab to cycle) · ← for agents'
+    if (outcome === 'exited') return 'motin@host ~ %'
+    return 'Quick safety check: Is this a project you created or one you trust?\n' +
+      options.map((o, i) => `${!opts.hideCursor && i === cursor ? '❯' : ' '} ${opts.unnumbered ? '' : `${i + 1}. `}${o}`).join('\n')
+  }
+  const adapter = {
+    scrollback: () => render(),
+    sendInput: async (_b: string, text: string) => {
+      inputs.push(text)
+      if (outcome !== 'pending') return
+      if (text === DOWN && !opts.dropArrows) cursor = Math.min(cursor + 1, options.length - 1)
+      if (text === '\x1b[A' && !opts.dropArrows) cursor = Math.max(cursor - 1, 0)
+      if (text === ENTER) outcome = options[cursor].startsWith('Yes') ? 'trusted' : 'exited'
+    },
+  } as unknown as TerminalAdapter
+  return { adapter, inputs, outcome: () => outcome }
+}
+
+describe('answerTrustDialog', () => {
+  it('moves to "Yes" before pressing Enter when "No, exit" is first and highlighted', async () => {
+    const t = trustAdapter('no-first')
+    expect(await answerTrustDialog(t.adapter, 'b', NO_SLEEP)).toBe(true)
+    expect(t.outcome()).toBe('trusted')
+    expect(t.inputs).toEqual([DOWN, ENTER])
+  })
+
+  it('does the same on the live layout, which draws no option numbers', async () => {
+    const t = trustAdapter('no-first', { unnumbered: true })
+    expect(await answerTrustDialog(t.adapter, 'b', NO_SLEEP)).toBe(true)
+    expect(t.outcome()).toBe('trusted')
+    expect(t.inputs).toEqual([DOWN, ENTER])
+  })
+
+  it('presses Enter directly on the older Yes-first layout', async () => {
+    const t = trustAdapter('yes-first')
+    expect(await answerTrustDialog(t.adapter, 'b', NO_SLEEP)).toBe(true)
+    expect(t.outcome()).toBe('trusted')
+    expect(t.inputs).toEqual([ENTER])
+  })
+
+  it('never presses Enter when the ↓ did not visibly land', async () => {
+    const t = trustAdapter('no-first', { dropArrows: true })
+    expect(await answerTrustDialog(t.adapter, 'b', NO_SLEEP)).toBe(false)
+    expect(t.inputs).not.toContain(ENTER)
+    expect(t.outcome()).toBe('pending')
+  })
+
+  it('never presses Enter when the cursor cannot be read at all', async () => {
+    const t = trustAdapter('no-first', { hideCursor: true })
+    expect(await answerTrustDialog(t.adapter, 'b', NO_SLEEP)).toBe(false)
+    expect(t.inputs).toEqual([])
+  })
+})

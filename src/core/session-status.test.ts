@@ -265,3 +265,184 @@ describe('promptIsReady', () => {
     expect(promptIsReady('✽ Dilly-dallying… (14m 5s · ↓34.9k tokens)')).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Suspended tabs and the startup dialogs a wake has to get through.
+
+import {
+  claudeInputReady,
+  isSuspended,
+  mcpApprovalDialogVisible,
+  suspendMarkerShowing,
+  trustDialogState,
+} from './session-status.js'
+
+/** Current Claude Code: "No, exit" is option 1 AND highlighted. Bare Enter quits. */
+const TRUST_NO_FIRST = `
+Quick safety check: Is this a project you created or one you trust?
+❯ 1. No, exit
+  2. Yes, I trust this folder
+Enter to confirm · Esc to cancel
+`
+
+/** Older builds: Yes first and highlighted. */
+const TRUST_YES_FIRST = `
+Quick safety check: Is this a project you created or one you trust?
+❯ 1. Yes, I trust this folder
+  2. No, exit
+`
+
+/** Captured live, 2026-09-23, through the plugin's buffer endpoint: unnumbered. */
+const TRUST_LIVE_UNNUMBERED = `
+Quicksafetycheck:Isthisaprojectyoucreatedoroneyoutrust?(Likeyourowncode,awell-knownopensourceproject,orworkfromyourteam).Ifnot,takeamomentto
+reviewwhat'sinthisfolderfirst.
+
+ClaudeCode'llbeabletoread,edit,andexecutefileshere.
+
+Securityguide
+
+❯No,exit
+Yes,Itrustthisfolder
+
+Entertoconfirm·Esctocancel
+`
+
+describe('trustDialogState', () => {
+  it('reads the live, UNNUMBERED layout: Yes is second, the cursor is on "No, exit"', () => {
+    expect(trustDialogState(TRUST_LIVE_UNNUMBERED)).toEqual({ yes: 2, no: 1, cursor: 1 })
+  })
+
+  it('follows the cursor onto Yes in the unnumbered layout after a ↓', () => {
+    expect(trustDialogState(TRUST_LIVE_UNNUMBERED + 'No,exit\n❯Yes,Itrustthisfolder\n').cursor).toBe(2)
+  })
+
+  it('finds Yes second and the cursor on "No, exit" in the current layout', () => {
+    expect(trustDialogState(TRUST_NO_FIRST)).toEqual({ yes: 2, no: 1, cursor: 1 })
+  })
+
+  it('finds Yes first and the cursor on it in the older layout', () => {
+    expect(trustDialogState(TRUST_YES_FIRST)).toEqual({ yes: 1, no: 2, cursor: 1 })
+  })
+
+  it('survives Tabby dropping the spaces between glyphs', () => {
+    expect(trustDialogState('❯1.No,exit\n2.Yes,Itrustthisfolder')).toEqual({ yes: 2, no: 1, cursor: 1 })
+  })
+
+  it('reads the cursor from the LATEST render, after a ↓ repaints the menu', () => {
+    // The buffer is append-only: the first frame stays above the repaint.
+    const afterDown = TRUST_NO_FIRST + '  1. No, exit\n❯ 2. Yes, I trust this folder\n'
+    expect(trustDialogState(afterDown).cursor).toBe(2)
+  })
+
+  it('also reads a repaint that only rewrote the changed line', () => {
+    expect(trustDialogState(TRUST_NO_FIRST + '❯ 2. Yes, I trust this folder\n').cursor).toBe(2)
+  })
+
+  it('leaves the cursor undefined when no option carries the glyph — never a guess', () => {
+    const state = trustDialogState('1. No, exit\n2. Yes, I trust this folder')
+    expect(state.yes).toBe(2)
+    expect(state.cursor).toBeUndefined()
+  })
+})
+
+describe('mcpApprovalDialogVisible', () => {
+  it('spots the first-launch MCP approval prompt', () => {
+    const screen = `New MCP server found in .mcp.json: github
+❯ 1. Use this and all future MCP servers in this project
+  2. Use this MCP server
+  3. Continue without using this MCP server`
+    expect(mcpApprovalDialogVisible(screen)).toBe(true)
+    expect(mcpApprovalDialogVisible(IDLE_TAIL)).toBe(false)
+  })
+})
+
+describe('claudeInputReady', () => {
+  it('is ready at the idle footer', () => {
+    expect(claudeInputReady(IDLE_TAIL)).toBe(true)
+  })
+
+  it('is ready on the welcome placeholder', () => {
+    expect(claudeInputReady('╭───╮\n❯ Try "fix lint errors"\n')).toBe(true)
+  })
+
+  it('is NOT ready on either trust layout, the auto-mode dialog, the picker or MCP', () => {
+    expect(claudeInputReady(TRUST_NO_FIRST)).toBe(false)
+    expect(claudeInputReady(TRUST_YES_FIRST)).toBe(false)
+    expect(claudeInputReady('Set up auto mode for your environment?\n❯ 1. Set it up\n  2. Not now')).toBe(false)
+    expect(claudeInputReady('❯ 1. Resume from summary (recommended)\n  2. Resume full session as-is')).toBe(false)
+    expect(claudeInputReady('New MCP server found in .mcp.json: x\n❯ 1. Use this MCP server')).toBe(false)
+  })
+
+  it('ignores footer words that are only in the repainted history, far above the tail', () => {
+    const history = 'we discussed auto mode for agents\n' + 'plain history line\n'.repeat(30)
+    expect(claudeInputReady(history)).toBe(false)
+  })
+
+  it('is not ready on an empty capture', () => {
+    expect(claudeInputReady('')).toBe(false)
+  })
+})
+
+const PLACEHOLDER_SCREEN = `
+  ⏸ cctabs suspended — gapminder · 2.1MB · ~/Dev/gapminder
+    press Enter to resume
+`
+
+describe('suspended marker', () => {
+  it('classifies a waiting placeholder as suspended, not as a bare terminal', () => {
+    expect(classifyTerminalBuffer(PLACEHOLDER_SCREEN)).toBe('suspended')
+    expect(suspendMarkerShowing(PLACEHOLDER_SCREEN)).toBe(true)
+  })
+
+  it('classifies it as suspended even under the old Claude UI it replaced', () => {
+    expect(classifyTerminalBuffer(IDLE_TAIL + PLACEHOLDER_SCREEN)).toBe('suspended')
+  })
+
+  it('stops saying suspended once the tab has woken — the marker is history then', () => {
+    const woken = PLACEHOLDER_SCREEN + 'w1a2b3c4\n\n▶ cctabs: resuming gapminder (w1a2b3c4)\n' + IDLE_TAIL
+    expect(suspendMarkerShowing(woken)).toBe(false)
+    expect(classifyTerminalBuffer(woken)).toBe('idle')
+  })
+
+  it('never concludes suspended from an empty capture', () => {
+    expect(classifyTerminalBuffer('')).toBe('unreadable')
+    expect(suspendMarkerShowing('')).toBe(false)
+  })
+})
+
+describe('isSuspended', () => {
+  const base = { registered: false, claudeRunning: false, bufferMarker: false }
+
+  it('is never true without a positive signal — emptiness is not suspension', () => {
+    expect(isSuspended(base)).toBe(false)
+    expect(isSuspended({ ...base, placeholder: 'absent', shellAlive: false })).toBe(false)
+    expect(isSuspended({ ...base, shellAlive: undefined })).toBe(false)
+  })
+
+  it('trusts a waiting placeholder process above everything else but a running Claude', () => {
+    expect(isSuspended({ ...base, placeholder: 'waiting' })).toBe(true)
+    expect(isSuspended({ ...base, placeholder: 'waiting', claudeRunning: true })).toBe(false)
+  })
+
+  it('reads a woken placeholder as awake, whatever the registry says', () => {
+    expect(isSuspended({ ...base, registered: true, placeholder: 'woken' })).toBe(false)
+  })
+
+  it('treats a registry entry contradicted by a live non-placeholder shell as stale', () => {
+    expect(isSuspended({ ...base, registered: true, placeholder: 'absent', shellAlive: true })).toBe(false)
+  })
+
+  it('keeps a registered tab with no live shell suspended (dormant after a Tabby restart)', () => {
+    expect(isSuspended({ ...base, registered: true, placeholder: 'absent', shellAlive: false })).toBe(true)
+    expect(isSuspended({ ...base, registered: true, placeholder: 'absent' })).toBe(true)
+  })
+
+  it('without a process table, falls back to the registry, then the marker', () => {
+    expect(isSuspended({ ...base, registered: true })).toBe(true)
+    expect(isSuspended({ ...base, bufferMarker: true })).toBe(true)
+  })
+
+  it('does not let a stale on-screen marker override a readable process table', () => {
+    expect(isSuspended({ ...base, bufferMarker: true, placeholder: 'absent', shellAlive: true })).toBe(false)
+  })
+})
