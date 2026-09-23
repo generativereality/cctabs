@@ -3,7 +3,7 @@ import type { TerminalAdapter } from './adapter.js'
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** True while a pid exists and we're allowed to signal it. */
-function pidAlive(pid: number): boolean {
+export function pidAlive(pid: number): boolean {
   try {
     // Signal 0 checks for existence without delivering anything.
     process.kill(pid, 0)

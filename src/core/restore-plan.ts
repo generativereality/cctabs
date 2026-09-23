@@ -77,6 +77,19 @@ export type RestoreAction =
   | 'recreate'
   /** An earlier entry already claimed this name; close this leftover empty tab. */
   | 'duplicate'
+  /**
+   * An earlier entry already restores this SESSION, under another name. Two
+   * entries on one id is a manifest listing one session twice — the measured
+   * cause was a stale spawn-time `--name` — and acting on both puts two Claudes
+   * on one transcript.
+   */
+  | 'duplicate-session'
+  /**
+   * A Claude is already running this session somewhere — its argv says
+   * `--resume <id>` — so restoring it again would start a second process on a
+   * live transcript. Reported, never acted on.
+   */
+  | 'session-live'
   /** No tab exists — create one. */
   | 'spawn'
   /** No tab exists and --create-missing wasn't passed. */
@@ -148,6 +161,12 @@ export interface PlanDeps {
   hasLiveProcess(tabId: string): boolean | undefined
   /** Find the session to resume for an entry, or null when there is none. */
   resolveSession(entry: RestoreEntry): ResolvedSession | null
+  /**
+   * Pids of live Claude processes launched on this session id, from the
+   * process table. Optional: a backend with no process table to read leaves it
+   * out, and the planner then only de-duplicates within the manifest.
+   */
+  liveSessionPids?(sessionId: string): number[]
   /** Whether entries with no existing tab may be spawned. */
   createMissing: boolean
 }
@@ -253,6 +272,9 @@ export async function planRestore(
   const claimedNames = new Set<string>()
   const restoredNames = new Set<string>()
   const claimedTabs = new Set<string>()
+  // Session ids some entry will resume. Names are not identity — one session
+  // can reach a manifest under two names — so this is checked separately.
+  const claimedSessions = new Set<string>()
   const planned: PlannedEntry[] = []
 
   for (const p of pending) {
@@ -287,6 +309,21 @@ export async function planRestore(
     }
 
     const session = deps.resolveSession(entry)
+
+    if (session && claimedSessions.has(session.id)) {
+      planned.push({ entry, action: 'duplicate-session', tabId: p.tabId, blockId: p.blockId, sessionId: session.id })
+      continue
+    }
+    // Checked before the tab branches below, so it holds for attach, recreate
+    // and spawn alike. The matched tab may be the very one running it, with a
+    // screen that merely failed to read as Claude — typing a resume into it
+    // would be worse than leaving it.
+    const livePids = session ? deps.liveSessionPids?.(session.id) ?? [] : []
+    if (session && livePids.length) {
+      planned.push({ entry, action: 'session-live', tabId: p.tabId, blockId: p.blockId, sessionId: session.id })
+      continue
+    }
+    if (session) claimedSessions.add(session.id)
 
     if (p.tabId) {
       const noOutput = p.status === 'unreadable' && emptyByBlock.get(p.blockId!) === true

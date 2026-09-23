@@ -16,6 +16,8 @@ import { transcriptCommand } from './transcript.js'
 import { sendCommand } from './send.js'
 import { configCommand } from './config-cmd.js'
 import { restoreCommand } from './restore.js'
+import { manifestCommand } from './manifest.js'
+import { restartCommand } from './restart.js'
 import { backendsCommand } from './backends.js'
 import { doctorCommand } from './doctor.js'
 import { installTabbyPluginCommand } from './install-tabby-plugin.js'
@@ -81,6 +83,8 @@ const subCommands = new Map([
   ['send', sendCommand],
   ['config', configCommand],
   ['restore', restoreCommand],
+  ['manifest', manifestCommand],
+  ['restart', restartCommand],
   ['backends', backendsCommand],
   ['doctor', doctorCommand],
   ['install-tabby-plugin', installTabbyPluginCommand],

@@ -16,6 +16,14 @@ export interface Block {
    */
   pid?: number
   /**
+   * The tab's own shell — the process its PTY spawned — when the backend
+   * advertises `stable-pid`. Unlike {@link Block.pid}, which Tabby computes once
+   * two seconds after spawn and which is usually a dead helper process by the
+   * time anyone reads it, this lives exactly as long as the tab's shell does. It
+   * is what ties a tab to the Claude running in it (see `claude-procs.ts`).
+   */
+  shellPid?: number
+  /**
    * The tab's header colour as a CSS colour string, or null when it has none.
    * `undefined` means the backend doesn't report colours at all (see the
    * `tab-color` capability) — which is not the same as "no colour set".

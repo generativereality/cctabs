@@ -125,6 +125,7 @@ export class TabbyAdapter implements TerminalAdapter {
         type: string
         cwd?: string | null
         pid?: number
+        shellPid?: number
         color?: string | null
       }>
     }
@@ -144,6 +145,8 @@ export class TabbyAdapter implements TerminalAdapter {
         // that Tabby never focused has no pty and therefore no pid — which is
         // the genuine "no live shell" case that scrollback only ever guessed at.
         pid: typeof t.pid === 'number' ? t.pid : undefined,
+        // Only plugins advertising `stable-pid` report this — see Block.shellPid.
+        shellPid: typeof t.shellPid === 'number' ? t.shellPid : undefined,
         // Only plugins advertising `tab-color` report this. Left undefined
         // otherwise, which reads as "unknown" rather than "no colour set".
         color: t.color,

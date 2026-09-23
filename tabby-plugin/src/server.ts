@@ -11,7 +11,7 @@ import { bufferLines } from './buffer'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
-const PLUGIN_VERSION = '0.1.4'
+const PLUGIN_VERSION = '0.1.5'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
@@ -28,8 +28,18 @@ const PLUGIN_VERSION = '0.1.4'
  * must probe for this rather than just sending a colour: a plugin predating it
  * ignores the unknown field silently, which is indistinguishable from a colour
  * that was accepted and then didn't render.
+ *
+ * `stable-pid` — GET /api/tabs reports each tab's `shellPid`: the process the
+ * PTY itself spawned (`pty.getPID()`), which lives as long as the tab does, and
+ * POST /api/tabs/identify matches on it. The older `pid` field is Tabby's
+ * `getTruePID()`, computed ONCE, two seconds after spawn, by descending through
+ * single-child chains (tabby-electron/src/pty.ts). For a `zsh -c claude …` tab
+ * that descent lands on Claude's own `caffeinate -t 300` helper, which exits
+ * five minutes later — so on a measured 57-tab fleet 52 tabs reported a pid
+ * that no longer existed, and identify matched none of them. `pid` is kept for
+ * older CLIs; nothing new should read it.
  */
-const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color']
+const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid']
 
 function sleep (ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -54,6 +64,8 @@ interface TabInfo {
   type: string
   cwd?: string | null
   pid?: number
+  /** The PTY's own process — stable for the tab's lifetime. See `stable-pid`. */
+  shellPid?: number
   color?: string | null
 }
 
@@ -289,6 +301,7 @@ export class CctabsServer {
       const isTerm = tab instanceof BaseTerminalTabComponent
       let cwd: string | null | undefined
       let pid: number | undefined
+      let shellPid: number | undefined
       if (isTerm) {
         const session: any = (tab as any).session
         try {
@@ -301,6 +314,10 @@ export class CctabsServer {
           const pty: any = session?.pty
           if (pty?.getTruePID) pid = await pty.getTruePID()
         } catch {}
+        try {
+          const pty: any = session?.pty
+          if (pty?.getPID) shellPid = await pty.getPID()
+        } catch {}
       }
       out.push({
         uuid,
@@ -310,6 +327,7 @@ export class CctabsServer {
         type: isTerm ? 'terminal' : tab.constructor?.name ?? 'tab',
         cwd: cwd ?? null,
         pid,
+        shellPid,
         color: tab.color ?? null,
       })
     }

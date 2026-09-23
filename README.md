@@ -84,6 +84,8 @@ cctabs scrollback <tab> [lines]          read terminal output (default: 50 lines
 cctabs send <tab> [text] [--wait-for-prompt]   send input — arg, --file, or stdin pipe
 cctabs restore [dir] [--dry]             bring back every tab that lost its session
 cctabs restore --manifest <file|-> [--create-missing]   ...or drive it from an explicit list
+cctabs manifest [-o file]                validated snapshot: one entry per session, this session left out
+cctabs restart [--all | --only a,b]      restart Claude in every tab, keeping each conversation (bare = plan)
 cctabs profile-copy <tab> --to <preset>  copy/move a session into another Claude account
 cctabs backends                          list backend presets (providers / Claude accounts)
 cctabs config                            show config path and values

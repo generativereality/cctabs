@@ -91,6 +91,9 @@ export interface TerminalAdapter {
    *     parallel spawning safe.
    *   `tab-color` — tabs carry a colour: openTabDirect accepts one, setTabColor
    *     changes it, and blocksList reports it.
+   *   `stable-pid` — blocksList reports each tab's `shellPid`, and
+   *     currentTabId() matches on it. Without it the only pid on offer is a
+   *     spawn-time snapshot that is usually dead (see Block.shellPid).
    */
   backendCapabilities?(): Promise<string[]>
 

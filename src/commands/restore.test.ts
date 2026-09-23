@@ -401,6 +401,20 @@ describe('summarizeOutcomes', () => {
 describe('judgeSpawn', () => {
   const base = { tabPresent: true, hasTermBlock: true, hasProcess: true as boolean | undefined }
 
+  it('verifies from the process argv before any title has been written', () => {
+    // The false failure this replaces: a running, resumed tab was reported as
+    // "did not come back" because nothing on disk confirmed it yet.
+    const v = judgeSpawn({ ...base, requestedSessionId: 'sess-1234abcd', launchedLive: true })
+    expect(v.outcome).toBe('restored')
+  })
+
+  it('still fails a resume that came back as a different session, whatever argv says', () => {
+    // `claude --resume X` can open a fresh conversation while its argv still
+    // says X — argv proves what was asked for, not what happened.
+    const v = judgeSpawn({ ...base, requestedSessionId: 'sess-1234abcd', resolvedSessionId: 'sess-other000', launchedLive: true })
+    expect(v.outcome).toBe('failed')
+  })
+
   it('verifies a tab that is present, running, and holding the session it asked for', () => {
     const v = judgeSpawn({ ...base, requestedSessionId: 'sess-1234abcd', resolvedSessionId: 'sess-1234abcd' })
     expect(v.outcome).toBe('restored')
