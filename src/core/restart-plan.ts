@@ -10,7 +10,10 @@ import type { RestoreEntry } from './restore-plan.js'
  *
  *   - `argv` — a live Claude launched with `--resume <entry's id>`. Exact.
  *   - `shell-pid` — the Claude under the tab's own shell (`stable-pid`), in a
- *     tab whose session resolved to the entry's id. Exact.
+ *     tab whose session resolved to the entry's id. Exact about the *tab*; the
+ *     session is the tab's title match. So a shell-pid Claude whose own argv
+ *     names a DIFFERENT session is refused — restarting it would swap the
+ *     conversation it is running for the one the title points at.
  *
  * A Claude matched only by its spawn-time `--name` is a guess and is left
  * alone, reported as "restart by hand". Pure.
@@ -44,6 +47,8 @@ export interface RestartInputs {
   nameOnly: Set<string>
   /** Our own pid and every ancestor — never signalled. */
   selfPids: Set<number>
+  /** Pid → the session its argv says it was launched on (`--resume`/`--session-id`). */
+  launchedSession?: Map<number, string>
 }
 
 export function planRestart(entries: RestoreEntry[], inputs: RestartInputs): RestartPlan {
@@ -57,7 +62,10 @@ export function planRestart(entries: RestoreEntry[], inputs: RestartInputs): Res
     }
 
     const fromArgv = inputs.liveSessionPids.get(id) ?? []
-    const fromShell = inputs.shellPidClaude.get(id)
+    let fromShell = inputs.shellPidClaude.get(id)
+    const shellLaunched = fromShell !== undefined ? inputs.launchedSession?.get(fromShell) : undefined
+    const shellConflicts = shellLaunched !== undefined && shellLaunched !== id
+    if (shellConflicts) fromShell = undefined
     const pids = [...new Set([...fromArgv, ...(fromShell !== undefined ? [fromShell] : [])])]
 
     if (pids.some((pid) => inputs.selfPids.has(pid))) {
@@ -68,7 +76,7 @@ export function planRestart(entries: RestoreEntry[], inputs: RestartInputs): Res
       plan.targets.push({ entry, pids, via: fromArgv.length ? 'argv' : 'shell-pid' })
       continue
     }
-    if (inputs.nameOnly.has(id)) {
+    if (shellConflicts || inputs.nameOnly.has(id)) {
       plan.handOnly.push(entry)
       continue
     }

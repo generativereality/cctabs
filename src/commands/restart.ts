@@ -4,7 +4,7 @@ import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
-import { ancestorsOf, liveSessionPids, ownClaudeProc, readProcessTable } from '../core/claude-procs.js'
+import { ancestorsOf, claudeProcsOf, launchedSessionOf, liveSessionPids, ownClaudeProc, readProcessTable } from '../core/claude-procs.js'
 import { parseManifest } from '../core/manifest.js'
 import { withoutInvalid } from '../core/fleet-manifest.js'
 import { auditRestart, entriesToRestore, planRestart } from '../core/restart-plan.js'
@@ -92,6 +92,16 @@ export const restartCommand = define({
         }
         ids.set(e.sessionId, e.name)
       }
+      // Restore resolves an entry by name, so two with one name come back
+      // ambiguous — neither restored, after restart has stopped both.
+      const names = new Set<string>()
+      for (const e of entries) {
+        if (names.has(e.name)) {
+          consola.error(`"${e.name}" appears more than once — restore could bring back neither after they are stopped. Fix the manifest.`)
+          process.exit(1)
+        }
+        names.add(e.name)
+      }
     } else {
       // With --only, a problem on a tab nobody asked to restart must not block
       // the ones that were asked for.
@@ -130,12 +140,18 @@ export const restartCommand = define({
       shellPidClaude: new Map(rows.filter((r) => r.via === 'shell-pid' && r.sessionId).map((r) => [r.sessionId!, r.pid])),
       nameOnly: new Set(rows.filter((r) => r.via === 'argv-name' && r.sessionId).map((r) => r.sessionId!)),
       selfPids,
+      launchedSession: new Map(
+        claudeProcsOf(procRows).flatMap((p) => {
+          const id = launchedSessionOf(p)
+          return id ? [[p.pid, id] as [number, string]] : []
+        }),
+      ),
     })
 
     consola.info(`This session: ${own.name ?? '(unnamed)'} [pid ${own.pid}] — excluded.`)
     for (const t of plan.targets) consola.log(`  ${t.entry.name}: stop pid ${t.pids.join(', ')} (${t.via}), then resume ${shortId(t.entry.sessionId)}`)
     for (const e of plan.notRunning) consola.log(`  ${e.name}: not running — restore brings up ${shortId(e.sessionId)}`)
-    for (const e of plan.handOnly) consola.warn(`  ${e.name}: its Claude was not launched with --resume and is matched only by name — restart it by hand`)
+    for (const e of plan.handOnly) consola.warn(`  ${e.name}: its Claude can't be tied to ${shortId(e.sessionId)} (matched only by name, or its argv resumes a different session) — restart it by hand`)
     for (const e of plan.noSession) consola.warn(`  ${e.name}: no session id — left alone, since restarting would lose its context`)
     for (const e of plan.protected) consola.warn(`  ${e.name}: would mean stopping this session's own process tree — left alone`)
 

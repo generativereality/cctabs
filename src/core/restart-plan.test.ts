@@ -25,6 +25,26 @@ describe('planRestart', () => {
     expect(plan.targets[0]).toMatchObject({ pids: [12], via: 'shell-pid' })
   })
 
+  // The shell pid ties the Claude to the tab, not to the session: the tab's
+  // session is a title match. A Claude whose own argv resumes something else is
+  // running a different conversation, and restarting it onto the title's
+  // session would swap one for the other.
+  it('refuses a shell-pid Claude whose argv names a different session', () => {
+    const plan = planRestart(
+      [e('a', 'S1')],
+      inputs({ shellPidClaude: new Map([['S1', 12]]), launchedSession: new Map([[12, 'S2']]) }),
+    )
+    expect(plan.targets).toEqual([])
+    expect(plan.handOnly.map((x) => x.name)).toEqual(['a'])
+  })
+
+  it('still takes a shell-pid Claude whose argv agrees, or names nothing', () => {
+    for (const launched of [new Map([[12, 'S1']]), new Map<number, string>()]) {
+      const plan = planRestart([e('a', 'S1')], inputs({ shellPidClaude: new Map([['S1', 12]]), launchedSession: launched }))
+      expect(plan.targets[0]).toMatchObject({ pids: [12], via: 'shell-pid' })
+    }
+  })
+
   it('leaves a Claude matched only by --name for a human — that is a guess', () => {
     const plan = planRestart([e('a', 'S1')], inputs({ nameOnly: new Set(['S1']) }))
     expect(plan.targets).toEqual([])
