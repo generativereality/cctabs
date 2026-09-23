@@ -105,6 +105,16 @@ function checkTabbyPlugin (): CheckResult {
  * unusable from inside those tabs (chicken-and-egg). The flags must match
  * open-session.ts to keep the doctor honest.
  */
+/**
+ * The answer a `-l -i -c 'command -v x'` probe printed. Last line, not first:
+ * a login+interactive shell can print its own banner before the command runs
+ * (macOS Terminal's "Restored session: …" is one), and the first line then
+ * reports that banner as the path.
+ */
+export function lastLine (stdout: string): string {
+  return stdout.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean).at(-1) ?? ''
+}
+
 function checkSpawnedShellPath (): CheckResult {
   // Probe the shell a tab would ACTUALLY get. Hardcoding zsh made this check
   // dishonest on Windows twice over: it reported `spawnSync zsh ENOENT` on a
@@ -119,7 +129,7 @@ function checkSpawnedShellPath (): CheckResult {
     return {
       name: 'Spawned shell PATH (node findable)',
       status: 'ok',
-      detail: `${shell.command} → ${r.stdout.trim().split(/\r?\n/)[0]}`,
+      detail: `${shell.command} → ${lastLine(r.stdout)}`,
     }
   }
   return {
@@ -209,7 +219,7 @@ function checkClaudeInSpawnedShell (): CheckResult {
   const args = shell.posix ? ['-l', '-i', '-c', 'command -v claude'] : ['/c', 'where claude']
   const r = spawnSync(shell.command, args, { encoding: 'utf-8', timeout: 8000 })
   if (r.status === 0 && r.stdout?.trim()) {
-    return { name, status: 'ok', detail: r.stdout.trim().split(/\r?\n/)[0] }
+    return { name, status: 'ok', detail: lastLine(r.stdout) }
   }
   const windows = process.platform === 'win32'
   return {
@@ -218,10 +228,10 @@ function checkClaudeInSpawnedShell (): CheckResult {
     detail: `${shell.command}: claude not found`,
     hint: windows
       ? 'On Windows the Claude Code installer does not put itself on PATH — the binary is ' +
-        'usually there. Find it and add its directory, or set `claude.command` in cctabs config ' +
-        'to the full path. New tabs will open on a "command not found" until this resolves.'
-      : 'New tabs will open on a "command not found". Install Claude Code, or set ' +
-        '`claude.command` in cctabs config to its full path.',
+        'usually there. Find it and add its directory to PATH. New tabs will open on a ' +
+        '"command not found" until this resolves.'
+      : 'New tabs will open on a "command not found". Install Claude Code, or add its directory ' +
+        'to PATH in a file a login+interactive shell sources.',
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { agentBashResult, AGENT_BASH_CHECK } from './doctor.js'
+import { agentBashResult, AGENT_BASH_CHECK, lastLine } from './doctor.js'
 
 describe('agentBashResult', () => {
   it('passes when bash is already on PATH', () => {
@@ -32,5 +32,18 @@ describe('agentBashResult', () => {
       agentBashResult(undefined, undefined),
       agentBashResult(undefined, 'C:\\Git\\bin\\bash.exe'),
     ]) expect(r.status).not.toBe('fail')
+  })
+})
+
+describe('lastLine', () => {
+  // Seen on macOS Terminal: the login shell's banner arrived first and the
+  // check reported "Restored session: …" as where claude lives.
+  it('skips a banner the login shell printed before the answer', () => {
+    expect(lastLine('Restored session: Wed 23 Sep 2026\n/Users/x/.local/bin/claude\n'))
+      .toBe('/Users/x/.local/bin/claude')
+  })
+
+  it('handles CRLF and a bare answer', () => {
+    expect(lastLine('C:\\Git\\bin\\bash.exe\r\n')).toBe('C:\\Git\\bin\\bash.exe')
   })
 })
