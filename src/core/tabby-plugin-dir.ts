@@ -27,6 +27,13 @@ export function tabbyPluginsDir(): string {
 }
 
 /**
+ * The Tabby plugin release this CLI installs. Pinned, never the latest: the plugin runs
+ * inside Tabby with the user's full rights, so a new release is taken on deliberately,
+ * by changing this line.
+ */
+export const TABBY_PLUGIN = 'tabby-cctabs@0.1.5'
+
+/**
  * The by-hand install line for this platform, for when the automated path is
  * unavailable. `--legacy-peer-deps` is required: the plugin's peer deps
  * (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm.
@@ -34,6 +41,6 @@ export function tabbyPluginsDir(): string {
 export function manualInstallSnippet(): string {
   const dir = tabbyPluginsDir()
   return platform() === 'win32'
-    ? `npm install --legacy-peer-deps --prefix "${dir}" tabby-cctabs`
-    : `npm install --legacy-peer-deps --prefix "${dir.replace(homedir(), '$HOME')}" tabby-cctabs`
+    ? `npm install --legacy-peer-deps --prefix "${dir}" ${TABBY_PLUGIN}`
+    : `npm install --legacy-peer-deps --prefix "${dir.replace(homedir(), '$HOME')}" ${TABBY_PLUGIN}`
 }

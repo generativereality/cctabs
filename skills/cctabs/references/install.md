@@ -31,7 +31,7 @@ cctabs install-tabby-plugin --yes
 ```
 
 What it does, in order:
-1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs`
+1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs@0.1.5`
 2. Captures the current claude session id from `~/.claude/projects/<slug>/`
 3. Spawns a detached background worker that quits Tabby, waits for it to die, reopens it, then opens a new tab running `claude --resume <id> --fork-session` in your current cwd.
 
@@ -43,7 +43,7 @@ What it does, in order:
 TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
 mkdir -p "$TABBY_PLUGINS"
 [ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
-npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs
+npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs@0.1.5
 # then ask the user to quit + reopen Tabby
 ```
 
