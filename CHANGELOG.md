@@ -3,7 +3,7 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.5.9 — 2026-10-06
 
 - **The Tabby plugin is now installed at a pinned version, never "whatever is newest".** `install-tabby-plugin`, the install line printed when the plugin can't be reached, and the skill's install reference all ran a bare `npm install tabby-cctabs`. That plugin runs inside Tabby with the user's full rights, so a compromised or broken release would have reached every machine that ran the command, with no review in between. All three now install `tabby-cctabs@0.1.5`, from one constant (`TABBY_PLUGIN` in `src/core/tabby-plugin-dir.ts`). A new plugin release reaches users only when a PR changes that line — in the same PR as the CLI change that needs it. A test fails if the skill's hand-written install lines disagree with the constant, because the agent following that doc by hand never sees the constant, and nothing else would notice the drift.
 
