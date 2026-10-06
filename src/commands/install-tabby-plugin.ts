@@ -6,7 +6,7 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { detectTerminal } from '../core/terminal.js'
 import { findLatestSessionId } from '../core/session.js'
-import { tabbyPluginsDir as pluginsDir } from '../core/tabby-plugin-dir.js'
+import { TABBY_PLUGIN, tabbyPluginsDir as pluginsDir } from '../core/tabby-plugin-dir.js'
 
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
@@ -48,10 +48,10 @@ export const installTabbyPluginCommand = define({
     const pkgPath = join(dir, 'package.json')
     if (!existsSync(pkgPath)) writeFileSync(pkgPath, '{"private":true}\n')
 
-    consola.info('Installing tabby-cctabs from npm…')
+    consola.info(`Installing ${TABBY_PLUGIN} from npm…`)
     const npm = spawnSync(
       'npm',
-      ['install', '--legacy-peer-deps', '--silent', '--prefix', dir, 'tabby-cctabs'],
+      ['install', '--legacy-peer-deps', '--silent', '--prefix', dir, TABBY_PLUGIN],
       { stdio: 'inherit' },
     )
     if (npm.status !== 0) {

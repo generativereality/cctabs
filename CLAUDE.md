@@ -117,6 +117,14 @@ version already exists with different contents, bump — don't reuse it.
 The no-gaps rule above applies here too: a `tabby-v*` tag whose run was never
 approved should be re-pointed, not abandoned for the next number.
 
+**Publishing a plugin release does not ship it to anyone.** The CLI installs a pinned
+version — `TABBY_PLUGIN` in `src/core/tabby-plugin-dir.ts` — never the latest, because
+the plugin runs inside Tabby with the user's full rights and a release should be taken
+on deliberately. So a plugin release is two steps: publish `tabby-v<version>`, then bump
+`TABBY_PLUGIN` in the same PR as the CLI change that needs it, and cut a CLI release.
+Also update the version spelled out in `skills/cctabs/references/install.md`;
+`src/core/tabby-plugin-pin.test.ts` fails until you do.
+
 To build locally (for `sideload`, or to check a change before tagging):
 
 ```bash

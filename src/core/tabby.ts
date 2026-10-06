@@ -8,6 +8,7 @@ import type {
 } from '../types/index.js'
 import type { TerminalAdapter } from './adapter.js'
 import { classifyTerminalBuffer } from './session-status.js'
+import { TABBY_PLUGIN } from './tabby-plugin-dir.js'
 import { matchTabsByName, normalizeTabName, type TabMatchOptions } from './tab-match.js'
 
 /**
@@ -27,7 +28,7 @@ export class TabbyPluginUnreachableError extends Error {
       '  cctabs install-tabby-plugin',
       '',
       'Or do it by hand:',
-      `  npm install --legacy-peer-deps --prefix "$HOME/Library/Application Support/tabby/plugins" tabby-cctabs`,
+      `  npm install --legacy-peer-deps --prefix "$HOME/Library/Application Support/tabby/plugins" ${TABBY_PLUGIN}`,
       '  # then quit Tabby (Cmd+Q) and reopen it.',
       '',
       'Verify with: cctabs doctor',
