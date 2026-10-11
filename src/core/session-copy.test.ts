@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { basename, join } from 'path'
 import {
@@ -14,6 +14,7 @@ import {
   removeSourceSession,
   resolveCopyTargetCwd,
   sidecarDirFor,
+  stripBridgePointers,
   sweepMetadataStub,
 } from './session-copy.js'
 import { pathToProjectSlug } from './session.js'
@@ -191,6 +192,27 @@ describe('planSessionCopy / executeSessionCopy', () => {
     expect(existsSync(join(sidecarDirFor(plan.targetJsonl), 'subagents', 'sub.jsonl'))).toBe(true)
   })
 
+  it('leaves the source account\'s Remote Control pointer behind, and only that', () => {
+    // A copied `bridge-session` owned by the old account makes Claude Code veto
+    // the reattach, taint the session, and register Remote Control under a
+    // random name instead of the customTitle — for good.
+    const bridge = JSON.stringify({
+      type: 'bridge-session', sessionId: SESSION, bridgeSessionId: 'cse_01Old',
+      lastSequenceNum: 0, ownerAccountUuid: 'old-acct', ownerOrganizationUuid: 'old-org',
+    })
+    const title = JSON.stringify({ type: 'custom-title', customTitle: 'mmm-win-sign', sessionId: SESSION })
+    const suppression = JSON.stringify({ type: 'history-suppression', sessionId: SESSION, cause: 'migration' })
+    writeFileSync(sourceJsonl, [msg(repo), title, bridge, suppression, bridge, msg(repo, 'assistant')].join('\n') + '\n')
+
+    const plan = planSessionCopy({ sessionId: SESSION, sourceJsonl, targetProjectsRoot: targetProjects })!
+    expect(executeSessionCopy(plan).bridgePointersStripped).toBe(2)
+
+    const copied = readFileSync(plan.targetJsonl, 'utf-8')
+    expect(copied).toBe([msg(repo), title, suppression, msg(repo, 'assistant')].join('\n') + '\n')
+    // The source keeps its pointer: it is still that account's session.
+    expect(readFileSync(sourceJsonl, 'utf-8')).toContain('cse_01Old')
+  })
+
   it('refuses to clobber an existing target unless told to', () => {
     const plan = planSessionCopy({ sessionId: SESSION, sourceJsonl, targetProjectsRoot: targetProjects })!
     executeSessionCopy(plan)
@@ -315,5 +337,19 @@ describe('projectDirHasTranscripts', () => {
   it('ignores a leftover sidecar directory', () => {
     mkdirSync(join(dir, SESSION), { recursive: true })
     expect(projectDirHasTranscripts(dir)).toBe(false)
+  })
+})
+
+describe('stripBridgePointers', () => {
+  it('passes a transcript without pointers through untouched', () => {
+    const content = msg('/r') + '\n'
+    expect(stripBridgePointers(content)).toEqual({ content, removed: 0 })
+  })
+
+  it('keeps a line that only carries bridge-session as a value', () => {
+    // Matched on the parsed type, not the substring, so no other entry can be
+    // dropped by accident.
+    const other = JSON.stringify({ type: 'system', subtype: 'bridge_status', kind: 'bridge-session' })
+    expect(stripBridgePointers(other + '\n')).toEqual({ content: other + '\n', removed: 0 })
   })
 })

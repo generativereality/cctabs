@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  writeFileSync,
   readdirSync,
   renameSync,
   rmSync,
@@ -26,6 +27,8 @@ import { repoRootOf } from './worktree.js'
  *   3. A transcript that is metadata-only is not a conversation but still
  *      carries a customTitle, which is what name resolution matches on. Left
  *      in place it shadows the very session it was left behind by.
+ *   4. The source account's Remote Control pointer must not travel with the
+ *      copy — see stripBridgePointers().
  */
 
 /**
@@ -191,6 +194,8 @@ export function planSessionCopy(opts: {
 
 export interface SessionCopyResult {
   sidecarFilesCopied: number
+  /** `bridge-session` entries left out of the copy (see stripBridgePointers). */
+  bridgePointersStripped: number
 }
 
 /**
@@ -207,14 +212,52 @@ export function executeSessionCopy(plan: SessionCopyPlan, opts: { overwrite?: bo
     throw new Error(`${plan.targetJsonl} already exists (pass --force to overwrite)`)
   }
   mkdirSync(plan.targetProjectDir, { recursive: true })
-  copyFileSync(plan.sourceJsonl, plan.targetJsonl)
+  const content = readFileSync(plan.sourceJsonl, 'utf-8')
+  const { content: copied, removed: bridgePointersStripped } = stripBridgePointers(content)
+  if (bridgePointersStripped) writeFileSync(plan.targetJsonl, copied)
+  else copyFileSync(plan.sourceJsonl, plan.targetJsonl)
 
   let sidecarFilesCopied = 0
   if (plan.sourceSidecar) {
     const targetSidecar = sidecarDirFor(plan.targetJsonl)
     sidecarFilesCopied = copyDirRecursive(plan.sourceSidecar, targetSidecar)
   }
-  return { sidecarFilesCopied }
+  return { sidecarFilesCopied, bridgePointersStripped }
+}
+
+/**
+ * Drop the `bridge-session` entries from a transcript being copied into
+ * another profile.
+ *
+ * Each one records the Remote Control session (`cse_…`) the conversation is
+ * mirrored to, and the account that owns it. Claude Code reads the last one on
+ * resume and tries to reattach. In another profile that owner is a different
+ * account, so Claude Code (2.1.296) vetoes the reattach as
+ * `restored_owner_mismatch`, appends a permanent `history-suppression` entry,
+ * and from then on starts Remote Control with history channels suppressed —
+ * which skips the customTitle and mints the session under a random
+ * `<hostname>-<adj>-<noun>` name. That is why moved tabs showed the right name
+ * in Tabby and a different one in the Remote Control list, on every restart.
+ *
+ * Claude Code's own fork does the same thing: it clears `bridgeSessionId` and
+ * the owner fields on the copy. What it keeps — and so do we — is any
+ * `history-suppression` already in the source; that is a decision Claude Code
+ * made about this conversation, not a pointer to someone else's session.
+ */
+export function stripBridgePointers(content: string): { content: string; removed: number } {
+  if (!content.includes('"bridge-session"')) return { content, removed: 0 }
+  let removed = 0
+  const kept = content.split('\n').filter((line) => {
+    if (!line.includes('"bridge-session"')) return true
+    try {
+      if ((JSON.parse(line) as { type?: unknown }).type !== 'bridge-session') return true
+    } catch {
+      return true
+    }
+    removed++
+    return false
+  })
+  return { content: kept.join('\n'), removed }
 }
 
 export interface SourceRemoval {

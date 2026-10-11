@@ -268,14 +268,18 @@ export const profileCopyCommand = define({
 
     // --- copy ------------------------------------------------------------
     let sidecarFilesCopied = 0
+    let bridgePointersStripped = 0
     try {
-      ;({ sidecarFilesCopied } = executeSessionCopy(plan, { overwrite: force }))
+      ;({ sidecarFilesCopied, bridgePointersStripped } = executeSessionCopy(plan, { overwrite: force }))
     } catch (e) {
       adapter.closeSocket()
       consola.error((e as Error).message)
       process.exit(1)
     }
     consola.success(`Copied transcript${sidecarFilesCopied ? ` + ${sidecarFilesCopied} sidecar file${sidecarFilesCopied === 1 ? '' : 's'}` : ''} → ${plan.targetJsonl}`)
+    if (bridgePointersStripped) {
+      consola.log(`  left out ${bridgePointersStripped} Remote Control pointer${bridgePointersStripped === 1 ? '' : 's'} to the source account's session, so the copy registers under its own name`)
+    }
 
     // Name the copy on disk so `cctabs resume <newName>` finds it. Appended to
     // the copy only — the source keeps its own name.

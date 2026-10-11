@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **Fix: a session moved with `profile-copy` showed up in Remote Control under a random name.** Tabby showed the tab name; the claude.ai/code list showed something like `<hostname>-<adjective>-<noun>`. The copied transcript still held the source account's `bridge-session` entries, which point at that account's Remote Control session. On resume, Claude Code saw a pointer owned by another account, refused to reattach (`restored_owner_mismatch`), marked the session history-suppressed for good, and registered a new Remote Control session without reading its title. `profile-copy` now leaves those entries out of the copy, which is what Claude Code's own fork does. Any `history-suppression` already in the source is kept. Sessions moved before this fix stay suppressed; rename each one once in claude.ai/code (see `references/remote-control.md`).
+
 ## 0.5.9 — 2026-10-06
 
 - **The Tabby plugin is now installed at a pinned version, never "whatever is newest".** `install-tabby-plugin`, the install line printed when the plugin can't be reached, and the skill's install reference all ran a bare `npm install tabby-cctabs`. That plugin runs inside Tabby with the user's full rights, so a compromised or broken release would have reached every machine that ran the command, with no review in between. All three now install `tabby-cctabs@0.1.5`, from one constant (`TABBY_PLUGIN` in `src/core/tabby-plugin-dir.ts`). A new plugin release reaches users only when a PR changes that line — in the same PR as the CLI change that needs it. A test fails if the skill's hand-written install lines disagree with the constant, because the agent following that doc by hand never sees the constant, and nothing else would notice the drift.
