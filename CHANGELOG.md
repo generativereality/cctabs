@@ -3,7 +3,7 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.5.10 — 2026-10-12
 
 - **Fix: a session moved with `profile-copy` showed up in Remote Control under a random name.** Tabby showed the tab name; the claude.ai/code list showed something like `<hostname>-<adjective>-<noun>`. The copied transcript still held the source account's `bridge-session` entries, which point at that account's Remote Control session. On resume, Claude Code saw a pointer owned by another account, refused to reattach (`restored_owner_mismatch`), marked the session history-suppressed for good, and registered a new Remote Control session without reading its title. `profile-copy` now leaves those entries out of the copy, which is what Claude Code's own fork does. Any `history-suppression` already in the source is kept. Sessions moved before this fix stay suppressed; rename each one once in claude.ai/code (see `references/remote-control.md`).
 
