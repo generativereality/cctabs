@@ -434,6 +434,52 @@ describe('planRestore — one session, one Claude', () => {
     expect(actionsOf(plan)).toEqual({ 'new-name': 'spawn', 'old-name': 'duplicate-session' })
   })
 
+  it('restores two different sessions that share a name — both of them', async () => {
+    // 2026-10-10: two `naf-release` sessions in different repos; the second
+    // was skipped as a "duplicate entry" and had to be restored by hand.
+    const plan = await planRestore(
+      [mEntry('naf-release', { sessionId: 'S1' }), mEntry('naf-release', { sessionId: 'S2' })],
+      byId([]),
+    )
+    expect(plan.map((p) => [p.action, p.sessionId])).toEqual([['spawn', 'S1'], ['spawn', 'S2']])
+  })
+
+  it('gives the second same-named session its own tab rather than the first one\'s', async () => {
+    const plan = await planRestore(
+      [mEntry('naf-release', { sessionId: 'S1' }), mEntry('naf-release', { sessionId: 'S2' })],
+      byId([{ id: 't1', name: 'naf-release', status: 'terminal' }]),
+    )
+    expect(plan.map((p) => [p.action, p.tabId, p.sessionId])).toEqual([
+      ['attach', 't1', 'S1'],
+      ['spawn', undefined, 'S2'],
+    ])
+  })
+
+  it('still skips a same-named entry when the first one\'s session is unknown', async () => {
+    // It might be this very session, so neither is touched.
+    const plan = await planRestore(
+      [mEntry('naf-release'), mEntry('naf-release', { sessionId: 'S2' })],
+      byId([{ id: 't1', name: 'naf-release', status: 'active' }]),
+    )
+    expect(plan.map((p) => p.action)).toEqual(['already-running', 'already-running'])
+  })
+
+  it('spawns a same-named session beside a running one that holds a different session', async () => {
+    const plan = await planRestore(
+      [mEntry('naf-release', { sessionId: 'S1' }), mEntry('naf-release', { sessionId: 'S2' })],
+      byId([{ id: 't1', name: 'naf-release', status: 'active' }]),
+    )
+    expect(plan.map((p) => [p.action, p.sessionId])).toEqual([['already-running', undefined], ['spawn', 'S2']])
+  })
+
+  it('treats a session-id prefix as the same session', async () => {
+    const plan = await planRestore(
+      [mEntry('a', { sessionId: 'abcdef12-0000' }), mEntry('a', { sessionId: 'abcdef12' })],
+      byId([]),
+    )
+    expect(plan[1].action).toBe('duplicate')
+  })
+
   it('never spawns a session that a live Claude is already running', async () => {
     const plan = await planRestore([mEntry('alpha', { sessionId: 'S1' })], byId([], { S1: [4242] }))
     expect(plan[0]).toMatchObject({ action: 'session-live', sessionId: 'S1' })

@@ -46,7 +46,7 @@ Do not modify PATH or npm configuration beyond this.
 
 ### Check the installed version isn't stale
 
-On your first cctabs invocation in a session, look at the version banner cctabs prints (`(@generativereality/cctabs vX.Y.Z)`) and at any `[cctabs] OUTDATED ...` warning line in the output. If you see the warning — or if the banner version is older than the version in this skill's `plugin.json` — tell the user:
+On your first cctabs invocation in a session, look at the version banner cctabs prints (`(@generativereality/cctabs vX.Y.Z)`) and at any `[cctabs] OUTDATED ...` warning line (on stderr, so `--json` output stays clean). If you see the warning — or if the banner version is older than the version in this skill's `plugin.json` — tell the user:
 
 > *"Your installed cctabs is `vX.Y.Z`; the current release is `vA.B.C`. Want me to upgrade with `npm install -g @generativereality/cctabs@latest` before continuing?"*
 
@@ -192,7 +192,7 @@ cctabs wake <tab>                        # wake a suspended tab, wait for a READ
 cctabs restore --manifest <file> -c --suspended   # bring a whole fleet back as placeholders, in seconds
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
-cctabs rename <name-or-id> <new-name>    # rename the tab title + on-disk customTitle (so `resume` finds it); NOT the live claude/RC name — see references/tabs.md
+cctabs rename <name-or-id> <new-name>    # tab title + live claude/RC name + on-disk customTitle, so the name survives a restart — see references/tabs.md
 cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
 cctabs whoami [--json]                   # which tab is THIS session in? prints the tab name, or "unknown"
 cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activity, newest first (Tabby only)
@@ -470,9 +470,9 @@ cctabs close e5f6a7b8                  # close by block ID prefix
 
 ## Notes
 
-- Tab names are matched by exact name or prefix (case-insensitive)
+- Tab names are matched by exact name, then by prefix, ignoring case — except that an exact-case match wins, so `dal` and `DAL` are two different targets
 - Block IDs can be abbreviated to the first 8 characters
-- `cctabs new` and `cctabs resume` automatically pass `--name <tab-name>` to claude, syncing the session display name with the tab title. `cctabs rename` changes the tab title and the on-disk `customTitle` (so `resume`/`restore` find the new name) but not the live session/RC name — to also rename that use `cctabs send <tab> "/rename <newName>"` (see "Two names" in [references/tabs.md](references/tabs.md))
+- `cctabs new` and `cctabs resume` automatically pass `--name <tab-name>` to claude, syncing the session display name with the tab title. `cctabs rename` changes the tab title, the live session/RC name (it sends Claude `/rename`) and the on-disk `customTitle`, so `resume`/`restore` find the new name after a restart (see "Two names" in [references/tabs.md](references/tabs.md))
 - Configured `claude.flags` in `~/.config/cctabs/config.toml` are applied to every session
 - `defaults.prefix` in `~/.config/cctabs/config.toml` (empty by default) is prepended to both the tab title and the `claude --name` for every name minted by `new`/`resume`/`fork` — set it to disambiguate this machine when multiple machines share one claude.ai remote-control list
 - `cctabs send` resolves tab names to their terminal block automatically

@@ -295,6 +295,12 @@ export async function planRestore(
   // `restoredNames` is the narrower set we're willing to CLOSE a leftover tab
   // for: only when this restore actively brought that name back up.
   const claimedNames = new Set<string>()
+  // name → the session id of each entry that claimed it (undefined: unknown).
+  const nameOwners = new Map<string, Array<string | undefined>>()
+  const claimName = (name: string, sessionId: string | undefined) => {
+    claimedNames.add(name)
+    nameOwners.set(name, [...(nameOwners.get(name) ?? []), sessionId])
+  }
   const restoredNames = new Set<string>()
   const claimedTabs = new Set<string>()
   // Session ids some entry will resume. Names are not identity — one session
@@ -305,12 +311,30 @@ export async function planRestore(
   for (const p of pending) {
     const { entry } = p
 
+    // A name is not an identity. Two different sessions can carry the same name
+    // (2026-10-10: two `naf-release` sessions in different repos), and a
+    // manifest entry naming its own session id that no earlier claimant of the
+    // name holds is a separate tab, not a duplicate. It can't have the tab the
+    // name resolved to — that belongs to the claimant — so it gets its own.
+    let session: ResolvedSession | null | undefined
+    let sharesNameOnly = false
+    if (claimedNames.has(entry.name) && !entry.tabId && entry.sessionId) {
+      session = deps.resolveSession(entry)
+      sharesNameOnly = !!session && distinctFromOwners(nameOwners.get(entry.name), session.id)
+      if (sharesNameOnly) {
+        p.early = undefined
+        p.tabId = undefined
+        p.blockId = undefined
+        p.status = undefined
+      }
+    }
+
     if (p.early) {
       const out: PlannedEntry = { entry, action: p.early, tabId: p.tabId, blockId: p.blockId }
       // A tab that stays put still owns its name, so a later duplicate entry
       // can't restore over it.
       if (KEEPS_TAB.has(p.early)) {
-        claimedNames.add(entry.name)
+        claimName(entry.name, entry.sessionId)
         if (p.tabId) claimedTabs.add(p.tabId)
       }
       planned.push(out)
@@ -321,7 +345,7 @@ export async function planRestore(
     // leftover empty tab is closed, but only when the name was actually restored
     // — an empty tab shadowed by an already-running one is reported and left for
     // the user, since nothing here put that session back on screen.
-    if (claimedNames.has(entry.name) || (p.tabId && claimedTabs.has(p.tabId))) {
+    if (!sharesNameOnly && (claimedNames.has(entry.name) || (p.tabId && claimedTabs.has(p.tabId)))) {
       const ownsTab = !!entry.tabId && p.tabId === entry.tabId && !claimedTabs.has(p.tabId)
       planned.push({
         entry,
@@ -333,7 +357,7 @@ export async function planRestore(
       continue
     }
 
-    const session = deps.resolveSession(entry)
+    if (session === undefined) session = deps.resolveSession(entry)
 
     if (session && claimedSessions.has(session.id)) {
       planned.push({ entry, action: 'duplicate-session', tabId: p.tabId, blockId: p.blockId, sessionId: session.id })
@@ -361,7 +385,7 @@ export async function planRestore(
       // live 4,000-turn session its tab: an empty capture was read as an empty
       // tab, and the tab was closed and rebuilt underneath a running Claude.
       if (noOutput && deps.hasLiveProcess(p.tabId) === true) {
-        claimedNames.add(entry.name)
+        claimName(entry.name, session?.id)
         claimedTabs.add(p.tabId)
         planned.push({ entry, action: 'unreadable', tabId: p.tabId, blockId: p.blockId })
         continue
@@ -372,7 +396,7 @@ export async function planRestore(
         planned.push({ entry, action: 'no-session', tabId: p.tabId, blockId: p.blockId })
         continue
       }
-      claimedNames.add(entry.name)
+      claimName(entry.name, session.id)
       restoredNames.add(entry.name)
       claimedTabs.add(p.tabId)
       // Nothing captured AND no process: the shell really is gone, so the tab
@@ -411,7 +435,7 @@ export async function planRestore(
       })
       continue
     }
-    claimedNames.add(entry.name)
+    claimName(entry.name, session?.id)
     restoredNames.add(entry.name)
     // A spawn with no session starts a fresh Claude, which is still a restore
     // of the tab itself — the manifest asked for it to exist.
@@ -428,6 +452,22 @@ export async function planRestore(
   }
 
   return planned
+}
+
+/**
+ * Is `sessionId` a different session from every claimant of a name? An owner
+ * whose session is unknown might be this very session, so it never counts as
+ * distinct — the duplicate skip stays the default. Manifest ids can be
+ * prefixes, hence the two-way prefix test.
+ */
+export function distinctFromOwners(owners: Array<string | undefined> | undefined, sessionId: string): boolean {
+  if (!owners?.length) return false
+  const id = sessionId.toLowerCase()
+  return owners.every((o) => {
+    if (!o) return false
+    const other = o.toLowerCase()
+    return !id.startsWith(other) && !other.startsWith(id)
+  })
 }
 
 /**

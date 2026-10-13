@@ -450,10 +450,10 @@ function endsWithNewline(file: string): boolean {
  * cctabs' name resolution reads the LAST customTitle, so after this
  * `cctabs resume <newTitle>` finds the session.
  *
- * This exists because neither Claude's in-session `/rename` nor a bare terminal
- * tab-title change touches disk — both only relabel the ephemeral tab / live RC
- * session — so a rename is otherwise invisible to resume-by-name. Append-only;
- * never rewrites existing lines.
+ * Only safe when NO Claude is running the session: a running Claude re-writes
+ * its in-memory title after every turn, so this line would last one turn. For a
+ * live session `cctabs rename` sends `/rename` instead (see rename-plan.ts).
+ * Append-only; never rewrites existing lines.
  */
 export function persistSessionTitle(file: string, sessionId: string, newTitle: string): void {
   const line = JSON.stringify({ type: 'custom-title', customTitle: newTitle, sessionId })

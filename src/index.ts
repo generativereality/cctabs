@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import updateNotifier from 'update-notifier'
 import { run } from './commands/index.js'
+import { outdatedBanner } from './core/version-check.js'
 import pkg from '../package.json'
 
 // Non-blocking daily update check. We also print our own one-line warning
@@ -8,14 +9,13 @@ import pkg from '../package.json'
 // shell tool) — update-notifier's pretty banner is suppressed without a
 // TTY, which means agent-driven invocations would never see "you're on an
 // old build" otherwise.
+//
+// stderr, never stdout: stdout is data (`cctabs sessions --json` is read by
+// scripts, and a banner line ahead of the JSON breaks every one of them).
 const notifier = updateNotifier({ pkg })
 notifier.notify()
-if (notifier.update && notifier.update.latest !== notifier.update.current) {
-  const { current, latest } = notifier.update
-  process.stdout.write(
-    `[cctabs] OUTDATED ${current} < ${latest} — run: npm install -g ${pkg.name}@latest\n`,
-  )
-}
+const banner = outdatedBanner(notifier.update, pkg.name)
+if (banner) process.stderr.write(banner)
 
 run().catch((err: unknown) => {
   console.error(err instanceof Error ? err.message : String(err))
