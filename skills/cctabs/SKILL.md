@@ -190,6 +190,7 @@ cctabs restart [--all | --only a,b] [--dry]      # restart Claude in every tab (
 cctabs suspend <tab> [<tab>…] [-c <colour>]  # stop Claude, leave a placeholder that knows its session (NOT on remote control until woken)
 cctabs wake <tab>                        # wake a suspended tab, wait for a READY prompt (so do `resume <name>`, Enter, or just `send`)
 cctabs restore --manifest <file> -c --suspended   # bring a whole fleet back as placeholders, in seconds
+cctabs restore --manifest <file> -c --suspend-older-than 3d   # one run: recent sessions running, quieter ones asleep — new tabs go after the existing bar, in manifest order
 cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # tab title + live claude/RC name + on-disk customTitle, so the name survives a restart — see references/tabs.md

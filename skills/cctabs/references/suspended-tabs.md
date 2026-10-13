@@ -16,6 +16,7 @@ sessions fall out of its visible top 20 — when most of those 66 are idle anywa
 cctabs suspend old-spike other-idea      # stop Claude in each, leave placeholders
 cctabs suspend old-spike -c "#6c757d"    # …and grey it while asleep (colour comes back on a cctabs wake)
 cctabs restore --manifest fleet.json -c --suspended   # whole fleet back as placeholders: ~1s per tab, no Claude started
+cctabs restore --manifest fleet.json -c --suspend-older-than 3d   # one run: recent ones running, the rest asleep
 cctabs new spike ~/Dev/x -r <session-id> --suspended   # a tab born asleep
 cctabs sessions                          # ⏸ suspended — `--json`: status "suspended", session_id + cwd still reported
 ```
@@ -46,7 +47,7 @@ How the fleet commands treat them:
 |---|---|
 | `sessions` / `--json` | `status: "suspended"`, with `session_id`, `cwd`, `suspended_at` |
 | `manifest` | kept, with `suspended: true` — so restoring from it brings the tab back asleep |
-| `restore` | left asleep. `--suspended` makes every restored entry a placeholder |
+| `restore` | left asleep. `--suspended` makes every restored entry a placeholder; `--suspend-older-than <age>` or a per-entry `"suspended": true` does it per entry, in one run |
 | `restart` | left asleep, never woken (it picks up the new Claude Code when it next wakes) |
 | `close` | closes it and forgets the session's suspended record |
 

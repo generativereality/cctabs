@@ -25,6 +25,7 @@ import { applyTabColor, resolveColorPreference } from '../core/colors.js'
 import { liveSessionPids, readProcessTable, type ProcRow } from '../core/claude-procs.js'
 import { pidAlive } from '../core/tab-exit.js'
 import { placeholderSessions, readRecords } from '../core/suspend.js'
+import { parseAgeCutoff, suspendOlderThan } from '../core/restore-age.js'
 import { installPlaceholderInShell, openPlaceholderTab, placeholderShellOrThrow, suspendedTabsIn } from '../core/suspend-ops.js'
 
 /**
@@ -60,22 +61,48 @@ export const restoreCommand = define({
   description: 'Resume Claude sessions in terminal-state tabs (e.g. after a reboot). With --manifest, drive from an explicit list and optionally spawn missing tabs.',
   args: {
     dry: { type: 'boolean', short: 'n', description: 'Show what would be resumed without actually doing it' },
-    manifest: { type: 'string', short: 'm', description: 'Path to a JSON manifest of {name, dir, session_id?} entries (use "-" for stdin). Accepts cctabs sessions --json output directly.' },
+    manifest: { type: 'string', short: 'm', description: 'Path to a JSON manifest of {name, dir, session_id?, suspended?} entries (use "-" for stdin). Accepts `cctabs manifest` and `cctabs sessions --json` output directly. Tabs already in the bar keep their places; tabs it creates are appended after them in manifest order — so order the manifest the way you want the new tabs. An entry with "suspended": true comes back as a placeholder, so one run can mix running and suspended tabs.' },
     'create-missing': { type: 'boolean', short: 'c', description: 'When using --manifest, spawn new tabs for entries that have no existing tab' },
     suspended: { type: 'boolean', short: 's', description: 'Bring tabs back SUSPENDED: named, knowing their session, but running a small placeholder instead of Claude. Takes seconds for a whole fleet. A suspended tab wakes on Enter, on `cctabs resume <tab>`, or when `cctabs send` targets it.' },
+    'suspend-older-than': { type: 'string', description: 'With --manifest: bring back SUSPENDED only the entries whose session was last active before this — an age (90m, 12h, 3d, 2w) or a date (2026-10-10). The rest come back running, in the same run and in manifest order.' },
   },
   async run(ctx) {
     const dryRun = !!(ctx.values.dry as boolean | undefined)
     const manifestPath = ctx.values.manifest as string | undefined
     const createMissing = (ctx.values['create-missing'] as boolean | undefined) ?? false
     const suspended = !!(ctx.values.suspended as boolean | undefined)
-    if (suspended) {
-      try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
+    const olderThan = ctx.values['suspend-older-than'] as string | undefined
+    if (olderThan && suspended) {
+      consola.error('--suspend-older-than and --suspended contradict each other: the first splits the manifest, the second suspends all of it. Pick one.')
+      process.exit(1)
+    }
+    if (olderThan && !manifestPath) {
+      consola.error('--suspend-older-than needs --manifest: it decides per manifest entry.')
+      process.exit(1)
     }
 
     if (manifestPath) {
+      let manifest = readManifestOrExit(manifestPath)
+      if (olderThan) {
+        let cutoff: number
+        try { cutoff = parseAgeCutoff(olderThan) } catch (e) { consola.error((e as Error).message); process.exit(1) }
+        const split = suspendOlderThan(manifest, cutoff, (id) => locateTranscriptFile(id)?.mtime)
+        manifest = split.entries
+        consola.info(
+          `${split.suspended} of ${manifest.length} entr${manifest.length === 1 ? 'y' : 'ies'} last active before ` +
+          `${new Date(cutoff).toLocaleString()} → suspended; the rest come back running`,
+        )
+        if (split.unknown.length) {
+          consola.warn(`No transcript to date ${split.unknown.length} entr${split.unknown.length === 1 ? 'y' : 'ies'}, so left running: ${split.unknown.join(', ')}`)
+        }
+      }
+      // Checked against the final entries, so a manifest that marks entries
+      // suspended itself gets the same up-front refusal as --suspended.
+      if (suspended || manifest.some((e) => e.suspended && e.sessionId)) {
+        try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
+      }
       await runRestore({
-        manifest: readManifestOrExit(manifestPath),
+        manifest,
         scopedDir: null,
         createMissing,
         dryRun,
@@ -88,6 +115,9 @@ export const restoreCommand = define({
       consola.warn('--create-missing has no effect without --manifest; ignoring.')
     }
 
+    if (suspended) {
+      try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
+    }
     const rawDir = ctx.positionals[1]
     await runRestore({
       manifest: null,
@@ -157,9 +187,16 @@ export interface RestoreReport {
  * `--dry` stops immediately after planning. Planning itself performs no
  * mutations, so a dry run reports exactly the decisions a real run would act on.
  */
-export async function runRestore(req: RestoreRequest): Promise<RestoreReport | undefined> {
+export async function runRestore(
+  req: RestoreRequest,
+  // Injectable so a whole restore can be exercised against a fake terminal —
+  // the only way to test what it does to a bar without doing it to a real one.
+  adapter: TerminalAdapter = requireAdapter(),
+  // openSession talks to the terminal through its own adapter lookup, so the
+  // fake-terminal test has to be able to replace it too.
+  spawnSession: typeof openSession = openSession,
+): Promise<RestoreReport | undefined> {
   const { dryRun } = req
-  const adapter = requireAdapter()
   const { tabsById, tabNames, workspaces } = await adapter.getAllData()
   const currentTab = adapter.currentTabId()
   // Read once for planning: which sessions a live Claude is already running.
@@ -177,6 +214,9 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
     scopeTabIds = currentWsData
       ? new Set(currentWsData.workspacedata.tabids)
       : new Set<string>(tabsById.keys())
+    // The bar as it stands — so the tabs already in it, the invoking one
+    // above all, keep their places and new tabs are appended after them.
+    baseOrder = currentWsData ? [...currentWsData.workspacedata.tabids] : [...tabsById.keys()]
     entries = rehomeEntries(req.manifest, listClaudeConfigDirs(), locateTranscriptFile, (m) => consola.warn(m))
     if (req.suspended) entries = entries.map((e) => ({ ...e, suspended: true }))
   } else {
@@ -267,6 +307,7 @@ export async function runRestore(req: RestoreRequest): Promise<RestoreReport | u
     await executePlan(adapter, plan, results, outcomes, {
       baseOrder,
       blocksOf: (tabId) => (tabsById.get(tabId) ?? []).map((b) => b.blockid),
+      spawnSession,
     })
   }
 
@@ -754,6 +795,18 @@ const VERIFY_POLL_MS = 3000
 /** Initial wait before the first attach check. */
 const ATTACH_SETTLE_MS = 10_000
 
+/**
+ * The waits above, in one place a test can shorten. Production never changes
+ * them; the fake-terminal test of a whole restore would otherwise spend a
+ * minute sleeping through verification it doesn't care about.
+ */
+export const RESTORE_TIMING = {
+  verifySettleMs: VERIFY_SETTLE_MS,
+  verifyDeadlineMs: VERIFY_DEADLINE_MS,
+  verifyPollMs: VERIFY_POLL_MS,
+  attachSettleMs: ATTACH_SETTLE_MS,
+}
+
 /** Carry out a plan. Only ever called for a real (non-dry) run. */
 async function executePlan(
   adapter: TerminalAdapter,
@@ -761,10 +814,11 @@ async function executePlan(
   results: Map<PlannedEntry, string>,
   outcomes: Map<PlannedEntry, RestoreOutcome>,
   ctx: {
-    /** Scan mode: the full pre-restore tab order to rebuild. */
+    /** The bar as it was before the restore — see buildDesiredOrder. */
     baseOrder: string[] | undefined
     /** Every block in a tab, from the snapshot taken before planning. */
     blocksOf: (tabId: string) => string[]
+    spawnSession: typeof openSession
   },
 ): Promise<void> {
   const config = loadConfig()
@@ -819,7 +873,7 @@ async function executePlan(
   // -- verify the attaches actually started Claude --
   if (attached.length) {
     consola.info('Waiting for sessions to start…')
-    await sleep(ATTACH_SETTLE_MS)
+    await sleep(RESTORE_TIMING.attachSettleMs)
     const launches = new LaunchTracker(adapter)
     await pollUntilSettled(attached, (p, final) => {
       // The process's own argv is the strongest answer — once it has stayed up
@@ -873,7 +927,7 @@ async function executePlan(
           // for this tab, and the mode is part of what it asked for.
           : `claude${permissionModeFlag(p)}`
         const { env, model } = launchEnvFor(p.backend, p.configDir)
-        const newTabId = await openSession({
+        const newTabId = await ctx.spawnSession({
           tabName: p.entry.name,
           dir: p.dir!,
           claudeCmd,
@@ -972,7 +1026,7 @@ async function verifySpawns(
   if (!spawned.length) return
 
   consola.info(`Verifying ${spawned.length} spawned tab(s)…`)
-  await sleep(VERIFY_SETTLE_MS)
+  await sleep(RESTORE_TIMING.verifySettleMs)
 
   const tabOf = new Map(spawned.map(({ p, tabId }) => [p, tabId]))
   // Names more than one spawn shares. Resolving one of those by name finds the
@@ -1157,7 +1211,7 @@ async function pollUntilSettled(
   outcomes: Map<PlannedEntry, RestoreOutcome>,
   beforeRound: () => void = resetTitleIndexCache,
 ): Promise<void> {
-  const deadline = Date.now() + VERIFY_DEADLINE_MS
+  const deadline = Date.now() + RESTORE_TIMING.verifyDeadlineMs
   let pending = entries.filter((p) => outcomes.get(p) !== 'failed')
   while (pending.length) {
     const final = Date.now() >= deadline
@@ -1170,7 +1224,7 @@ async function pollUntilSettled(
       outcomes.set(p, v.outcome)
     }
     pending = still
-    if (pending.length) await sleep(Math.min(VERIFY_POLL_MS, Math.max(0, deadline - Date.now())))
+    if (pending.length) await sleep(Math.min(RESTORE_TIMING.verifyPollMs, Math.max(0, deadline - Date.now())))
   }
 }
 

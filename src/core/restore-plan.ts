@@ -473,34 +473,41 @@ export function distinctFromOwners(owners: Array<string | undefined> | undefined
 /**
  * Work out the tab order to rebuild after execution.
  *
- * Recreated and spawned tabs are appended to the end of the bar, so without
- * this a restore comes back scrambled. Two shapes, one function:
+ * The rule, for both modes: **tabs that were already in the bar keep their
+ * places, and tabs this restore created are appended after them, in plan
+ * (manifest) order.** A recreated tab takes the slot of the one it replaced.
  *
- *   - Scan mode passes `baseOrder` (the full pre-restore tab order, including
- *     live tabs, the current tab, and anything restore didn't touch) and the
- *     order is that list with each replaced tab id swapped for its replacement.
- *   - Manifest mode passes no `baseOrder`; the manifest itself carries the
- *     desired order, so it's just each entry's final tab id in manifest order.
+ * `baseOrder` is the bar as it was before the restore — every tab, including
+ * the one running it and anything the restore didn't touch. It used to be
+ * scan-mode only; manifest mode passed just its own entries, and because the
+ * terminal sorts a listed tab ahead of every unlisted one, each manifest run
+ * moved its own batch to the FRONT. Measured: a full restore then a second
+ * `--suspended` one left the suspended batch at the top, ahead of the first
+ * batch and of the tab that had run both.
  *
  * `replacements` maps a pre-restore tab id to the tab that replaced it; ids
- * mapped to null (closed duplicates) drop out entirely.
+ * mapped to null (closed duplicates, failed recreates) drop out entirely.
  */
 export function buildDesiredOrder(
   finalTabIds: Array<string | undefined>,
   replacements: Map<string, string | null>,
-  baseOrder?: string[],
+  baseOrder: string[] = [],
 ): string[] {
-  if (baseOrder) {
-    const out: string[] = []
-    for (const id of baseOrder) {
-      if (!replacements.has(id)) {
-        out.push(id)
-        continue
-      }
-      const replacement = replacements.get(id)
-      if (replacement) out.push(replacement)
+  const out: string[] = []
+  for (const id of baseOrder) {
+    if (!replacements.has(id)) {
+      out.push(id)
+      continue
     }
-    return out
+    const replacement = replacements.get(id)
+    if (replacement) out.push(replacement)
   }
-  return finalTabIds.filter((id): id is string => !!id)
+  const placed = new Set(out)
+  for (const id of finalTabIds) {
+    if (id && !placed.has(id)) {
+      out.push(id)
+      placed.add(id)
+    }
+  }
+  return out
 }

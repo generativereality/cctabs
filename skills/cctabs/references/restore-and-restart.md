@@ -55,6 +55,17 @@ cctabs restore --manifest snapshot.json --dry   # preview first
 cctabs restore --manifest snapshot.json --create-missing   # spawn tabs for entries with none
 ```
 
+**What order the bar comes back in.** Tabs already in the bar keep their places — above all the tab you ran `restore` from — and every tab the restore *creates* is appended after them, **in manifest order**. A recreated tab takes the slot of the dead one it replaced. So order the manifest the way you want the new tabs, and put the batch you want nearest the front first. To reorder afterwards, `cctabs sort --first a,b,c` pins exactly those tabs to the front in that order (see [tabs.md](tabs.md)).
+
+⛔ **Don't split one restore into two runs to mix running and suspended tabs** — each run appends its own batch, so the order becomes "whichever ran last goes last" rather than anything you chose. Mix them in one run instead:
+
+```bash
+cctabs restore --manifest snapshot.json -c --suspend-older-than 3d   # quiet for 3+ days → suspended, the rest running
+cctabs restore --manifest snapshot.json -c                          # …or mark entries "suspended": true yourself
+```
+
+`--suspend-older-than` takes an age (`90m`, `12h`, `3d`, `2w`) or a date (`2026-10-10`, local time), judged by each session's last transcript write. An entry whose transcript can't be found is left running and named, not guessed at. Before 0.5.11, a manifest restore listed only its own tabs when rebuilding the bar, and the terminal sorts listed tabs ahead of unlisted ones — so each run moved its batch to the **front**, ahead of the tab that ran it.
+
 **`session_id: null` now says why.** Every row carries `session_lookup`:
 `found`, `not-found` (searched every config dir; nothing is titled after this
 tab — with `sessions_in_dir` counting the transcripts that *do* exist for its
