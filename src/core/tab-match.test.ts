@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { matchTabsByName, normalizeTabName } from './tab-match.js'
+import { matchTabsByName, normalizeTabName, tabsNamed, nameClashWarning } from './tab-match.js'
 
 const TABS = new Map<string, string>([
   ['aaaaaaaa-1111', 'gapminder'],
@@ -15,6 +15,18 @@ describe('matchTabsByName', () => {
 
   it('matches names case-insensitively', () => {
     expect(matchTabsByName('portfolio', IDS, TABS)).toEqual(['cccccccc-3333'])
+  })
+
+  it('lets an exact-case match win over a case-only twin', () => {
+    // `dal` and `DAL` are two tabs; `close dal` used to call that ambiguous.
+    const names = new Map([['d1', 'dal'], ['d2', 'DAL']])
+    expect(matchTabsByName('dal', ['d1', 'd2'], names)).toEqual(['d1'])
+    expect(matchTabsByName('DAL', ['d1', 'd2'], names, { exact: true })).toEqual(['d2'])
+  })
+
+  it('stays ambiguous when no candidate matches the case exactly', () => {
+    const names = new Map([['d1', 'dal'], ['d2', 'DAL']])
+    expect(matchTabsByName('Dal', ['d1', 'd2'], names)).toEqual(['d1', 'd2'])
   })
 
   it('falls back to name prefixes when nothing matches exactly', () => {
@@ -78,5 +90,22 @@ describe('normalizeTabName', () => {
   it('does not eat a long symbol run or an all-symbol title', () => {
     expect(normalizeTabName('>>>> deploy')).toBe('>>>> deploy')
     expect(normalizeTabName('✳')).toBe('✳')
+  })
+})
+
+describe('tabsNamed', () => {
+  const names = new Map([['t1', 'dal'], ['t2', '✳ naf-release'], ['t3', 'other']])
+  it('finds case-only twins', () => {
+    expect(tabsNamed('DAL', names)).toEqual(['t1'])
+  })
+  it('sees through a status glyph', () => {
+    expect(tabsNamed('naf-release', names)).toEqual(['t2'])
+  })
+  it('does not count the tab being renamed', () => {
+    expect(tabsNamed('dal', names, 't1')).toEqual([])
+  })
+  it('warns only on a clash', () => {
+    expect(nameClashWarning('x', [], names)).toBeNull()
+    expect(nameClashWarning('DAL', ['t1'], names)).toContain('[t1]')
   })
 })

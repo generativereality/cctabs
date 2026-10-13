@@ -46,16 +46,21 @@ Every session actually carries **two independent names**, and it's easy to chang
 1. **Tabby tab title** — the text on the terminal tab. Set by `cctabs new`/`resume`/`fork`, and changeable with `cctabs rename`.
 2. **The claude session name** — the **remote-control (RC) session name shown on claude.ai** when you control the session from the web/mobile app. It mirrors the session's **current local name**, which is *initialized* from the launch `--name` (what cctabs passes) and thereafter changed by `/rename`.
 
-There's also a third, on-disk name that matters for lookup: the **`customTitle` recorded in the session's `.jsonl`**, which is what `cctabs resume <name>` / `restore` search by. cctabs writes it at launch via `--name`; **Claude's in-session `/rename` does NOT rewrite it** (it only relabels the live/RC session), so a session renamed *only* with `/rename` stays findable by resume under its **original** name — a known limitation.
+There's also a third, on-disk name that matters for lookup: the **`customTitle` recorded in the session's `.jsonl`**, which is what `cctabs resume <name>` / `restore` search by. It is written at launch via `--name`, by Claude's `/rename` (immediately, as a `custom-title` + `agent-name` pair), and — the part that matters — **re-written by a running Claude after every turn from its in-memory title**. So a title written to disk behind a running Claude's back lasts only until its next turn.
 
-`cctabs rename <tab> <newName>` changes the **tab title** and now **also persists `customTitle` to the session's `.jsonl`**, so `cctabs resume <newName>` finds it afterwards. It still does **not** touch the running claude session, so the claude.ai RC name is unchanged. To rename the **live** claude session (and therefore its RC name), send Claude Code's `/rename` slash command into the tab:
+`cctabs rename <tab> <newName>` keeps all three in step:
 
 ```bash
-cctabs rename mytab new-title                 # tab title + on-disk customTitle (so `resume new-title` finds it)
-cctabs send mytab "/rename new-title"          # live claude session + RC name (Claude replies "Session renamed to: …")
+cctabs rename mytab new-title    # tab title, live claude/RC name and on-disk customTitle
 ```
 
-Use both together when you want the tab title, the resume-by-name lookup, and the RC name all in sync on an already-running session.
+- **Claude running in the tab:** it relabels the tab and types `/rename new-title` into the session, so Claude itself changes its name and records it. Sent mid-turn, Claude queues it and applies it when the turn ends. This is what makes the name survive a restart.
+- **No Claude running** (it has exited, the tab is a shell): it appends the `customTitle` to the session's `.jsonl` instead; nothing is left to overwrite it.
+- **A suspended tab** is refused: its placeholder relaunches Claude with the old `--name`, which would undo the rename. `cctabs wake` it first.
+
+Before 0.5.11, `rename` only appended to disk, and a running session put its old title back on its next turn — `pay-bills-3009` restored as `pay-bills-2609` (2026-10-05).
+
+`rename` also warns when another tab already has the new name, ignoring case: two tabs with one name, or `dal` beside `DAL`, make every name-based command need the tab id.
 
 > **How the RC name behaves (validated by controlled test).** The RC name tracks the session's **current local name** — *not* the launch `--name`. Launch `--name` only sets the *initial* name; a `/rename` changes it, and the change **persists across reconnects** — both a manual `/remote-control` toggle and an automatic (network-drop) reconnect re-register under the *current local name*, so **reconnect does NOT revert to the launch name**. The one catch: `/rename` only reaches the RC list **while the session is connected**. If you `/rename` a session whose remote-control bridge is **disconnected**, the local name changes but the RC list keeps showing the last-registered name until the session **reconnects**, at which point it syncs. So a session showing a stale name in the RC list is almost always one that was renamed **while disconnected** (or never renamed) — reconnect it, or `/rename` it once it's connected (`cctabs sessions` shows which are live). The zero-fuss option is to launch prefixed in the first place via the `prefix` config below, so the name is right from the first registration and there's nothing to re-apply.
 
@@ -79,17 +84,14 @@ It is **idempotent** — a name you already typed with the prefix (`mbp18-auth`)
 
 ### Recipe: prefix all *existing* tabs on this machine
 
-Setting `prefix` only affects newly-minted names. To retro-apply a prefix (e.g. `mbp18-`) to tabs/sessions that are already live, do both renames for each tab:
+Setting `prefix` only affects newly-minted names. To retro-apply a prefix (e.g. `mbp18-`) to tabs/sessions that are already live, rename each tab — `cctabs rename` renames the live Claude session (and so its RC name) along with the tab:
 
 ```bash
 # For each existing tab NAME (from `cctabs sessions`):
-cctabs rename auth mbp18-auth                  # 1. tab title
-cctabs send   auth "/rename mbp18-auth"        # 2. live claude session + RC name
-# (send resolves by the CURRENT name, so rename the title AFTER, or send first then rename —
-#  just don't rename the title and then try to `send` by the old name.)
+cctabs rename auth mbp18-auth
 ```
 
-Order that's safe: **`send` the `/rename` first (matches the current title), then `cctabs rename` the tab title.** Claude acknowledges each `/rename` with "Session renamed to: …". After this one-time sweep, set `prefix` in config so all *future* tabs carry it automatically.
+After this one-time sweep, set `prefix` in config so all *future* tabs carry it automatically.
 
 **The `/rename` only reaches the RC list for sessions that are currently connected** (see the note above — RC tracks the current local name, and `/rename` pushes it only over a live bridge). So:
 - **Connected sessions:** `/rename` updates RC and the change survives reconnects. Done.

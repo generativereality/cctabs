@@ -975,6 +975,12 @@ async function verifySpawns(
   await sleep(VERIFY_SETTLE_MS)
 
   const tabOf = new Map(spawned.map(({ p, tabId }) => [p, tabId]))
+  // Names more than one spawn shares. Resolving one of those by name finds the
+  // newest session carrying it — the other entry's, as often as not — which
+  // judgeSpawn would read as "came back as a DIFFERENT session". Their process
+  // is the evidence instead.
+  const nameCount = new Map<string, number>()
+  for (const { p } of spawned) nameCount.set(p.entry.name, (nameCount.get(p.entry.name) ?? 0) + 1)
   const launches = new LaunchTracker(adapter)
   // Re-read the terminal once per round, not once per tab.
   let snapshot: { round: number; tabsById: Map<string, Block[]> | null } = { round: -1, tabsById: null }
@@ -1003,7 +1009,7 @@ async function verifySpawns(
     const term = blocks.find((b) => b.view === 'term')
 
     let resolvedSessionId: string | undefined
-    if (p.dir) {
+    if (p.dir && nameCount.get(p.entry.name) === 1) {
       try {
         resolvedSessionId = resolveTabSession(p.dir, p.entry.name)?.id
       } catch {

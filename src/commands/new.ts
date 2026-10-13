@@ -11,6 +11,7 @@ import { setupWorktree } from '../core/worktree.js'
 import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
 import { buildPathHandoff } from '../core/handoff.js'
 import { requireAdapter } from '../core/adapter.js'
+import { tabsNamed, nameClashWarning } from '../core/tab-match.js'
 import { openPlaceholderTab } from '../core/suspend-ops.js'
 import { locateTranscriptFile } from '../core/transcript.js'
 
@@ -168,6 +169,15 @@ export const newCommand = define({
         process.exit(1)
       }
     }
+
+    // Best-effort: a terminal we can't list now is the open's problem to report.
+    try {
+      const probe = requireAdapter()
+      const { tabNames } = await probe.getAllData()
+      probe.closeSocket()
+      const clash = nameClashWarning(displayName, tabsNamed(displayName, tabNames), tabNames)
+      if (clash) consola.warn(clash)
+    } catch { /* never block a new tab on the warning */ }
 
     if (suspended) {
       const located = locateTranscriptFile(resolvedSessionId!)

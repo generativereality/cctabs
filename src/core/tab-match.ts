@@ -43,8 +43,8 @@ export interface TabMatchOptions {
 }
 
 /**
- * Resolve `query` against the given tab ids. Exact name matches (case
- * insensitive) always win; otherwise, unless `exact` is set, fall back to
+ * Resolve `query` against the given tab ids. Exact name matches always win —
+ * case-sensitive first, then case-insensitive; otherwise, unless `exact` is set, fall back to
  * id-prefix and name-prefix matches.
  */
 export function matchTabsByName(
@@ -54,6 +54,11 @@ export function matchTabsByName(
   opts: TabMatchOptions = {},
 ): string[] {
   const q = query.toLowerCase()
+
+  // The name exactly as typed wins over its case-only twins: `dal` and `DAL`
+  // are two tabs, and `close dal` must not call that ambiguous (2026-10-10).
+  const exactCase = tabIds.filter((tid) => tabNames.get(tid) === query)
+  if (exactCase.length > 0) return exactCase
 
   const exact = tabIds.filter((tid) => (tabNames.get(tid) ?? '').toLowerCase() === q)
   if (exact.length > 0) return exact
@@ -66,4 +71,24 @@ export function matchTabsByName(
     const name = tabNames.get(tid) ?? ''
     return tid.startsWith(query) || name.toLowerCase().startsWith(q)
   })
+}
+
+/**
+ * Other tabs already carrying `name`, ignoring case. Two tabs with one name —
+ * or names differing only in case — make every later name-based command
+ * (close, send, restore) ambiguous, so `new` and `rename` warn when they are
+ * about to create one. A warning, not a refusal: a deliberate twin is allowed.
+ */
+export function tabsNamed(name: string, tabNames: Map<string, string>, exceptTabId?: string): string[] {
+  const q = normalizeTabName(name).toLowerCase()
+  return [...tabNames.entries()]
+    .filter(([tid, n]) => tid !== exceptTabId && normalizeTabName(n).toLowerCase() === q)
+    .map(([tid]) => tid)
+}
+
+/** The warning for {@link tabsNamed}'s result, or null when there's no clash. */
+export function nameClashWarning(name: string, clashes: string[], tabNames: Map<string, string>): string | null {
+  if (!clashes.length) return null
+  const list = clashes.map((tid) => `"${tabNames.get(tid)}" [${tid.slice(0, 8)}]`).join(', ')
+  return `Another tab is already named like "${name}": ${list}. Name-based commands (close, send, restore) will need the tab id to tell them apart.`
 }
