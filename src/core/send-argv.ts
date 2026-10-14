@@ -24,6 +24,7 @@ export const SEND_VALUE_FLAGS: ReadonlySet<string> = new Set([
   '--path', '-p',
   '--wait-timeout',
   '--verify-timeout',
+  '--draft-wait',
 ])
 
 export interface SendArgv {

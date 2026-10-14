@@ -7,6 +7,7 @@ import type {
   WorkspaceData,
 } from '../types/index.js'
 import type { TerminalAdapter } from './adapter.js'
+import { readInputDraft, type DraftState, type ScreenRow } from './input-draft.js'
 import { classifyTerminalBuffer } from './session-status.js'
 import { TABBY_PLUGIN } from './tabby-plugin-dir.js'
 import { matchTabsByName, normalizeTabName, type TabMatchOptions } from './tab-match.js'
@@ -94,7 +95,13 @@ export class TabbyAdapter implements TerminalAdapter {
   ): Promise<unknown> {
     const res = await fetch(this.url(path), {
       method,
-      headers: body ? { 'content-type': 'application/json' } : undefined,
+      // One connection per request. Node's fetch keeps the socket alive, and a
+      // request on a socket that sat idle stalls: measured against the real
+      // plugin (Node 26), ~50ms fresh but exactly +2000ms on a reused socket
+      // after 1s idle, every time — and anything that polls with a sleep
+      // between calls (a wake, a restore's verification, the draft guard) hits
+      // exactly that. With `connection: close` the same requests take ~3ms.
+      headers: body ? { 'content-type': 'application/json', connection: 'close' } : { connection: 'close' },
       body: body ? JSON.stringify(body) : undefined,
     })
     if (res.status === 404) return null
@@ -269,6 +276,19 @@ export class TabbyAdapter implements TerminalAdapter {
     } catch {
       this.cachedCapabilities = []
       return []
+    }
+  }
+
+  async inputDraft(blockId: string): Promise<DraftState> {
+    if (!(await this.backendCapabilities()).includes('screen')) {
+      return { state: 'unknown', why: 'the Tabby plugin predates the `screen` capability' }
+    }
+    try {
+      const r = (await this.http('GET', `/api/tabs/${blockId}/screen`)) as { attached?: boolean; rows?: ScreenRow[] } | null
+      if (!r?.attached || !Array.isArray(r.rows)) return { state: 'unknown', why: 'the tab has never been shown, so it has no screen' }
+      return readInputDraft(r.rows)
+    } catch (err) {
+      return { state: 'unknown', why: `could not read the screen: ${(err as Error).message}` }
     }
   }
 
