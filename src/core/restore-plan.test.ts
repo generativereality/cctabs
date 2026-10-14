@@ -349,6 +349,23 @@ describe('buildDesiredOrder', () => {
     const order = buildDesiredOrder(['t3', undefined, 't1'], new Map())
     expect(order).toEqual(['t3', 't1'])
   })
+
+  // The measured case: one tab open (the one running the restore), a full
+  // restore of batch A, then a second restore of batch B. Each run must append
+  // its spawned tabs after everything already in the bar.
+  it('appends spawned tabs after the existing bar, keeping the invoking tab first', () => {
+    const first = buildDesiredOrder(['a1', 'a2'], new Map(), ['coord'])
+    expect(first).toEqual(['coord', 'a1', 'a2'])
+    const second = buildDesiredOrder(['b1', 'b2'], new Map(), ['coord', 'a1', 'a2'])
+    expect(second).toEqual(['coord', 'a1', 'a2', 'b1', 'b2'])
+  })
+
+  it('keeps an attached tab in its slot and a recreated one in its predecessor\'s', () => {
+    // 'x' attached in place (it is in both lists), 'dead' recreated as 'new',
+    // 's' spawned fresh.
+    const order = buildDesiredOrder(['x', 'new', 's'], new Map([['dead', 'new']]), ['dead', 'coord', 'x'])
+    expect(order).toEqual(['new', 'coord', 'x', 's'])
+  })
 })
 
 /**
