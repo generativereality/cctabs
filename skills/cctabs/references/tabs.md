@@ -58,7 +58,7 @@ cctabs rename mytab new-title    # tab title, live claude/RC name and on-disk cu
 - **No Claude running** (it has exited, the tab is a shell): it appends the `customTitle` to the session's `.jsonl` instead; nothing is left to overwrite it.
 - **A suspended tab** is refused: its placeholder relaunches Claude with the old `--name`, which would undo the rename. `cctabs wake` it first.
 
-Before 0.5.11, `rename` only appended to disk, and a running session put its old title back on its next turn — `pay-bills-3009` restored as `pay-bills-2609` (2026-10-05).
+Before 0.5.10, `rename` only appended to disk, and a running session put its old title back on its next turn — `pay-bills-3009` restored as `pay-bills-2609` (2026-10-05).
 
 `rename` also warns when another tab already has the new name, ignoring case: two tabs with one name, or `dal` beside `DAL`, make every name-based command need the tab id.
 
