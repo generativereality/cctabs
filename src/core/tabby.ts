@@ -7,6 +7,7 @@ import type {
   WorkspaceData,
 } from '../types/index.js'
 import type { TerminalAdapter } from './adapter.js'
+import { pluginTimeoutSec, isTransientCurlExit, splitCurlOutput, TabbyPluginRequestError } from './plugin-request.js'
 import { readInputDraft, type DraftState, type ScreenRow } from './input-draft.js'
 import { classifyTerminalBuffer } from './session-status.js'
 import { TABBY_PLUGIN } from './tabby-plugin-dir.js'
@@ -70,16 +71,47 @@ export class TabbyAdapter implements TerminalAdapter {
    */
   private ensureHealthy(): void {
     if (this.healthChecked) return
-    const r = spawnSync(
-      'curl',
-      ['-fsS', '--max-time', '3', this.url('/api/health')],
-      { encoding: 'utf-8' },
-    )
-    if (r.status !== 0 || !r.stdout) {
-      const reason = (r.stderr || '').trim() || `curl exit ${r.status}`
-      throw new TabbyPluginUnreachableError(this.host, this.port, reason)
+    let r
+    try {
+      r = this.request('GET', '/api/health', 'Checking the Tabby plugin')
+    } catch (err) {
+      // Busy is not absent: a plugin that's slow to answer must not get
+      // "install the plugin" advice.
+      if (err instanceof TabbyPluginRequestError && err.timedOut) throw err
+      throw new TabbyPluginUnreachableError(this.host, this.port, (err as Error).message)
+    }
+    if (r.status !== 200 || !r.body) {
+      throw new TabbyPluginUnreachableError(this.host, this.port, `/api/health answered HTTP ${r.status}`)
     }
     this.healthChecked = true
+  }
+
+  /**
+   * One sync request through curl, retried once if it timed out or the
+   * connection failed. Returns any HTTP answer, 404s included — those are
+   * answers. Throws only when there is no answer at all, because a request
+   * that failed is not an empty result (see plugin-request.ts).
+   */
+  private request(
+    method: 'GET' | 'POST',
+    path: string,
+    what: string,
+    opts: { body?: unknown; timeoutSec?: number; retry?: boolean } = {},
+  ): { status: number; body: string } {
+    const timeout = String(opts.timeoutSec ?? pluginTimeoutSec())
+    const args = ['-sS', '-X', method, '--max-time', timeout, '-w', '\n%{http_code}']
+    if (opts.body !== undefined) args.push('-H', 'content-type: application/json', '--data', JSON.stringify(opts.body))
+    args.push(this.url(path))
+    const attempts = opts.retry === false ? 1 : 2
+    let last: { status: number | null; stderr: string } = { status: null, stderr: '' }
+    for (let i = 0; i < attempts; i++) {
+      const r = spawnSync('curl', args, { encoding: 'utf-8' })
+      const parsed = r.status === 0 ? splitCurlOutput(r.stdout ?? '') : null
+      if (parsed) return parsed
+      last = { status: r.status, stderr: (r.stderr || '').trim() }
+      if (!isTransientCurlExit(r.status)) break
+    }
+    throw new TabbyPluginRequestError(what, last.stderr || `curl exit ${last.status}`, last.status === 28)
   }
 
   // ---- HTTP helpers ----
@@ -121,12 +153,8 @@ export class TabbyAdapter implements TerminalAdapter {
     this.ensureHealthy()
     // We deopt to a sync curl spawn here so the
     // existing command code can keep its synchronous shape.
-    const out = spawnSync(
-      'curl',
-      ['-fsS', '--max-time', '5', this.url('/api/tabs')],
-      { encoding: 'utf-8' },
-    )
-    if (out.status !== 0 || !out.stdout) return []
+    const out = this.request('GET', '/api/tabs', 'Reading the tab list')
+    if (out.status !== 200) throw new TabbyPluginRequestError('Reading the tab list', `HTTP ${out.status}`, false)
     let parsed: {
       tabs: Array<{
         uuid: string
@@ -138,10 +166,11 @@ export class TabbyAdapter implements TerminalAdapter {
       }>
     }
     try {
-      parsed = JSON.parse(out.stdout)
+      parsed = JSON.parse(out.body)
     } catch {
-      return []
+      throw new TabbyPluginRequestError('Reading the tab list', 'the plugin answered with something that is not JSON', false)
     }
+    if (!Array.isArray(parsed?.tabs)) throw new TabbyPluginRequestError('Reading the tab list', 'the answer has no `tabs` list', false)
     return parsed.tabs
       .filter((t) => t.type === 'terminal')
       .map((t) => ({
@@ -162,14 +191,22 @@ export class TabbyAdapter implements TerminalAdapter {
   }
 
   scrollback(blockId: string, lastN = 50): string {
-    const out = spawnSync(
-      'curl',
-      ['-fsS', '--max-time', '5', this.url(`/api/tabs/${blockId}/buffer?lines=${lastN}`)],
-      { encoding: 'utf-8' },
-    )
-    if (out.status !== 0 || !out.stdout) return ''
+    // '' on failure is deliberate here, and safe: an empty capture already
+    // means "unreadable" everywhere (liveness comes from the pid, never from
+    // scrollback). Shorter than the default and not retried, because a fleet
+    // command reads this once per tab.
+    let out
     try {
-      const parsed = JSON.parse(out.stdout) as { lines: string[] }
+      out = this.request('GET', `/api/tabs/${blockId}/buffer?lines=${lastN}`, 'Reading a tab', {
+        timeoutSec: Math.min(10, pluginTimeoutSec()),
+        retry: false,
+      })
+    } catch {
+      return ''
+    }
+    if (out.status !== 200 || !out.body) return ''
+    try {
+      const parsed = JSON.parse(out.body) as { lines: string[] }
       return parsed.lines.join('\n')
     } catch {
       return ''
@@ -197,11 +234,11 @@ export class TabbyAdapter implements TerminalAdapter {
   }
 
   deleteBlock(blockId: string): void {
-    spawnSync(
-      'curl',
-      ['-fsS', '-X', 'POST', '--max-time', '5', this.url(`/api/tabs/${blockId}/close`)],
-      { encoding: 'utf-8' },
-    )
+    const r = this.request('POST', `/api/tabs/${blockId}/close`, `Closing tab ${blockId.slice(0, 8)}`)
+    // 404 is "already gone", which is what closing wanted.
+    if (r.status !== 200 && r.status !== 404) {
+      throw new TabbyPluginRequestError(`Closing tab ${blockId.slice(0, 8)}`, `HTTP ${r.status}`, false)
+    }
   }
 
   async newTab(_focusWindowId?: string): Promise<boolean> {
@@ -398,28 +435,16 @@ export class TabbyAdapter implements TerminalAdapter {
     if (this.cachedSelfUuid !== null) return this.cachedSelfUuid
 
     const pids = walkAncestorPids(process.pid)
-    const out = spawnSync(
-      'curl',
-      [
-        '-fsS',
-        '-X',
-        'POST',
-        '-H',
-        'content-type: application/json',
-        '--max-time',
-        '5',
-        '--data',
-        JSON.stringify({ pids }),
-        this.url('/api/tabs/identify'),
-      ],
-      { encoding: 'utf-8' },
-    )
-    if (out.status !== 0 || !out.stdout) {
+    // A 404 is the plugin saying "none of these pids is a tab": we're not in
+    // Tabby. A request that FAILED says nothing, and must not be read as that
+    // — restore uses this to keep its hands off the tab it is running in.
+    const out = this.request('POST', '/api/tabs/identify', 'Finding which tab cctabs is running in', { body: { pids } })
+    if (out.status !== 200 || !out.body) {
       this.cachedSelfUuid = ''
       return null
     }
     try {
-      const parsed = JSON.parse(out.stdout) as { uuid?: string }
+      const parsed = JSON.parse(out.body) as { uuid?: string }
       this.cachedSelfUuid = parsed.uuid ?? ''
       return parsed.uuid ?? null
     } catch {

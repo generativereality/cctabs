@@ -237,7 +237,7 @@ This file holds what every invocation needs. The rest is in `references/`, and e
 - [references/tabs.md](references/tabs.md) — `sort --first`, tab colours, the tab title vs. the live session (RC) name, the `prefix` setting, naming conventions.
 - [references/worktrees.md](references/worktrees.md) — worktrees on an existing branch, why not to create them by hand, recovering a session whose worktree is gone.
 - [references/remote-control.md](references/remote-control.md) — auditing and repairing Remote Control (`/rc`) across the fleet.
-- [references/troubleshooting.md](references/troubleshooting.md) — `cctabs new` timeouts.
+- [references/troubleshooting.md](references/troubleshooting.md) — `cctabs new` timeouts, and "the Tabby plugin did not answer within Ns" (an overloaded Tabby).
 
 ## Which tab am I in? — `cctabs whoami`
 

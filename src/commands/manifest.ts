@@ -98,6 +98,12 @@ export const manifestCommand = define({
     }
 
     const entries = ctx.values['drop-invalid'] ? withoutInvalid(result) : result.entries
+    // An empty fleet is a legitimate answer, but it is also what a bad read
+    // used to look like (0 entries, ✔). Say it in words, on stderr, so nobody
+    // mistakes it for a capture and closes their tabs on the strength of it.
+    if (!entries.length) {
+      consola.warn('No sessions to capture: no other terminal tab is running a Claude session. The manifest will be empty.')
+    }
     const json = manifestJson(entries)
     if (output) {
       writeFileSync(output, json)
