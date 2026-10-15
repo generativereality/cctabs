@@ -336,6 +336,18 @@ export function isSuspended(s: SuspendSignals): boolean {
  * permanently suppresses a prompt the user may want later, and that is the
  * user's call to make, not ours.
  */
+/**
+ * Claude Code's one-time "Bypass Permissions mode" acceptance, shown on a
+ * machine that has never accepted it when Claude starts with a bypass-capable
+ * flag. Its default is "No, exit", so an Enter meant for something else quits
+ * the session. It is consent to run tools without asking — cctabs must never
+ * answer it, only stop and say so.
+ */
+export function bypassAcceptVisible(buffer: string): boolean {
+  const c = stripWhitespace(buffer)
+  return /BypassPermissionsmode/i.test(c) && /Yes,?Iaccept/i.test(c)
+}
+
 export function autoModeDialogVisible(buffer: string): boolean {
   const c = stripWhitespace(buffer)
   return /Setupautomodeforyourenvironment/i.test(c) || (/1\.Setitup/i.test(c) && /2\.Notnow/i.test(c))

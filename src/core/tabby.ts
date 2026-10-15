@@ -316,6 +316,16 @@ export class TabbyAdapter implements TerminalAdapter {
     }
   }
 
+  async screenText(blockId: string): Promise<string | null> {
+    if (!(await this.backendCapabilities()).includes('screen')) return null
+    try {
+      const r = (await this.http('GET', `/api/tabs/${blockId}/screen`)) as { attached?: boolean; rows?: ScreenRow[] } | null
+      return r?.attached && Array.isArray(r.rows) ? r.rows.map((x) => x.text).join('\n') : null
+    } catch {
+      return null
+    }
+  }
+
   async inputDraft(blockId: string): Promise<DraftState> {
     if (!(await this.backendCapabilities()).includes('screen')) {
       return { state: 'unknown', why: 'the Tabby plugin predates the `screen` capability' }

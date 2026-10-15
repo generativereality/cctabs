@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
-import { confirmResumePicker, sendTextWithConfirmation } from './open-session.js'
+import { confirmResumePicker, sendTextWithConfirmation, readTab, clearStartupDialogs } from './open-session.js'
 import type { TerminalAdapter } from './adapter.js'
+import { bypassAcceptVisible } from './session-status.js'
 
 // The literal screens each state renders. Whitespace is irrelevant to the
 // detectors (they strip it), but we keep realistic spacing to mirror what
@@ -281,5 +282,82 @@ describe('answerTrustDialog', () => {
     const t = trustAdapter('no-first', { hideCursor: true })
     expect(await answerTrustDialog(t.adapter, 'b', NO_SLEEP)).toBe(false)
     expect(t.inputs).toEqual([])
+  })
+})
+
+describe('dialogs read off the screen (Windows)', () => {
+  it('answers the trust dialog from the screen when the stream shows no cursor', async () => {
+    // Windows: ConPTY repaints the dialog in fragments, so the output stream
+    // never shows which option is highlighted, and the dialog was left open.
+    // The screen shows it.
+    const options = ['No, exit', 'Yes, I trust this folder']
+    let cursor = 0
+    let outcome: 'pending' | 'trusted' | 'exited' = 'pending'
+    const inputs: string[] = []
+    const body = (glyph: boolean) => outcome === 'trusted'
+      ? '⏵⏵ auto mode on (shift+tab to cycle) · ← for agents'
+      : 'Quick safety check: Is this a project you created or one you trust?\n' +
+        options.map((o, i) => `${glyph && i === cursor ? '❯' : ' '} ${o}`).join('\n')
+    const a = {
+      scrollback: () => body(false),
+      screenText: async () => body(true),
+      sendInput: async (_b: string, t: string) => {
+        inputs.push(t)
+        if (t === DOWN) cursor = Math.min(cursor + 1, 1)
+        if (t === ENTER) outcome = options[cursor].startsWith('Yes') ? 'trusted' : 'exited'
+      },
+    } as unknown as TerminalAdapter
+    expect(await answerTrustDialog(a, 'b', NO_SLEEP)).toBe(true)
+    expect(outcome as string).toBe('trusted')
+    expect(inputs).toEqual([DOWN, ENTER])
+  })
+
+  it('readTab prefers the screen and falls back to the stream', async () => {
+    const a = { scrollback: () => 'stream', screenText: async () => 'screen' } as unknown as TerminalAdapter
+    expect(await readTab(a, 'b', 10)).toBe('screen')
+    const old = { scrollback: () => 'stream', screenText: async () => null } as unknown as TerminalAdapter
+    expect(await readTab(old, 'b', 10)).toBe('stream')
+    const none = { scrollback: () => 'stream' } as unknown as TerminalAdapter
+    expect(await readTab(none, 'b', 10)).toBe('stream')
+  })
+})
+
+describe('the Bypass Permissions acceptance', () => {
+  const BYPASS = 'WARNING: Claude Code running in Bypass Permissions mode\n' +
+    'By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.\n' +
+    '❯ No, exit\n  Yes, I accept\nEnter to confirm · Esc to cancel'
+
+  it('is recognised', () => {
+    expect(bypassAcceptVisible(BYPASS)).toBe(true)
+    expect(bypassAcceptVisible('❯ Try "edit a file"   auto mode')).toBe(false)
+  })
+
+  it('is never answered: clearStartupDialogs types nothing and reports it open', async () => {
+    const inputs: string[] = []
+    const a = { scrollback: () => BYPASS, sendInput: async (_b: string, t: string) => { inputs.push(t) } } as unknown as TerminalAdapter
+    expect(await clearStartupDialogs(a, 'b', { trusted: true, ...NO_SLEEP })).toBe(false)
+    expect(inputs).toEqual([])
+  })
+})
+
+describe('trust, then the bypass acceptance (a fresh machine)', () => {
+  it('answers trust, then stops at bypass with a message about bypass — Claude left running', async () => {
+    let stage: 'trust' | 'bypass' = 'trust'
+    let cursor = 0
+    const inputs: string[] = []
+    const screen = () => stage === 'trust'
+      ? `Quick safety check\n${cursor === 0 ? '❯' : ' '} No, exit\n${cursor === 1 ? '❯' : ' '} Yes, I trust this folder`
+      : 'WARNING: Claude Code running in Bypass Permissions mode\n❯ No, exit\n  Yes, I accept'
+    const a = {
+      scrollback: () => screen(),
+      sendInput: async (_b: string, t: string) => {
+        inputs.push(t)
+        if (stage === 'trust' && t === DOWN) cursor = 1
+        if (stage === 'trust' && t === ENTER && cursor === 1) stage = 'bypass'
+      },
+    } as unknown as TerminalAdapter
+    expect(await clearStartupDialogs(a, 'b', { trusted: true, ...NO_SLEEP })).toBe(false)
+    expect(stage as string).toBe('bypass')
+    expect(inputs).toEqual([DOWN, ENTER]) // nothing typed at the bypass dialog
   })
 })

@@ -5,7 +5,7 @@ import { consola } from 'consola'
 import { loadConfig } from './config.js'
 import { requireAdapter, type TerminalAdapter } from './adapter.js'
 import { shellQuoteArg, resolveTabShell, tabLaunchArgv, envPrefixFor } from './shell.js'
-import { autoModeDialogVisible, trustDialogState, trustDialogVisible } from './session-status.js'
+import { autoModeDialogVisible, bypassAcceptVisible, trustDialogState, trustDialogVisible } from './session-status.js'
 import { hasPriorSessions } from './session.js'
 import { applyTabColor, supportsTabColor } from './colors.js'
 import { countPayloadLines, judgePaste, readPasteEvidence, type PasteVerdict } from './paste-confirm.js'
@@ -56,6 +56,24 @@ function shellQuoteEnv(env: Record<string, string>): string {
 }
 
 /** Poll scrollback until a pattern is visible, then return. Rejects on timeout. */
+/**
+ * What a tab shows right now: its SCREEN when the plugin can report it, else
+ * the tail of its output stream.
+ *
+ * The stream is a log of every redraw, which the dialog readers below parse by
+ * taking the last occurrence of each line. On Windows that failed: ConPTY
+ * repaints a dialog in fragments, the folder-trust dialog's cursor was never
+ * readable, and the dialog was left unanswered (measured 2026-10-15, Windows
+ * 11 ARM64). The screen is the current render and nothing else.
+ */
+export async function readTab(adapter: TerminalAdapter, blockId: string, lines: number): Promise<string> {
+  if (adapter.screenText) {
+    const screen = await adapter.screenText(blockId)
+    if (screen !== null) return screen
+  }
+  return adapter.scrollback(blockId, lines)
+}
+
 async function waitForScrollbackMatch(
   adapter: TerminalAdapter,
   blockId: string,
@@ -68,7 +86,7 @@ async function waitForScrollbackMatch(
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, pollInterval))
     try {
-      const lines = adapter.scrollback(blockId, 10)
+      const lines = await readTab(adapter, blockId, 10)
       if (!lines) continue
       const match = typeof pattern === 'string'
         ? lines.includes(pattern)
@@ -231,7 +249,15 @@ async function sendInitialPrompt(
   // work — opening a session in a repo that was just created. The
   // prior-session rule belongs to restore, which is re-opening directories
   // rather than choosing them.
-  await clearStartupDialogs(adapter, blockId, { trusted: true })
+  //
+  // And if a dialog is still up, STOP. Pasting the prompt and pressing Enter
+  // would answer it with its default — "No, exit" on both the trust and the
+  // bypass dialogs — and quit the session the prompt was for (which is what
+  // happened on Windows, 2026-10-15).
+  if (!(await clearStartupDialogs(adapter, blockId, { trusted: true }))) {
+    consola.warn(`Not sending the initial prompt: a dialog is still open in the tab, and Enter would answer it. Answer it there, then send the prompt: cctabs send <tab> --path ${initialPromptFile}`)
+    return
+  }
 
   const prompt = readFileSync(initialPromptFile, 'utf-8').trimEnd()
 
@@ -299,12 +325,17 @@ export async function clearStartupDialogs(
   opts: { sleep?: (ms: number) => Promise<void>; trusted?: boolean; dir?: string } = {},
 ): Promise<boolean> {
   const nap = opts.sleep ?? sleep
-  const read = (n: number) => adapter.scrollback(blockId, n)
+  const read = (n: number) => readTab(adapter, blockId, n)
   // The live input footer — proof we are past every dialog. The dialogs draw ❯
   // too, so a bare prompt glyph proves nothing.
-  const pastDialogs = () => /automode|foragents|Try["'“]/i.test(read(14).replace(/\s+/g, ''))
+  const pastDialogs = async () => /automode|foragents|Try["'“]/i.test((await read(14)).replace(/\s+/g, ''))
 
-  if (autoModeDialogVisible(read(40))) {
+  if (bypassAcceptVisible(await read(40))) {
+    consola.warn('Claude is asking, once for this machine, to accept running in Bypass Permissions mode. cctabs does not answer that for you — choose in the tab.')
+    return false
+  }
+
+  if (autoModeDialogVisible(await read(40))) {
     // Let the dialog's key handler attach before the single navigation press —
     // it has the same not-ready window as the resume picker.
     await nap(1200)
@@ -314,23 +345,39 @@ export async function clearStartupDialogs(
     for (let attempt = 0; attempt < 12; attempt++) {
       await adapter.sendInput(blockId, '\r')
       await nap(800)
-      if (pastDialogs()) { cleared = true; break }
+      if (await pastDialogs()) { cleared = true; break }
     }
     if (!cleared) {
       consola.warn('Could not confirm the auto-mode dialog was dismissed — switch to the tab and choose "Not now".')
     }
   }
 
-  if (!trustDialogVisible(read(40))) return true
+  if (!trustDialogVisible(await read(40))) return true
   if (!opts.trusted) {
     consola.warn(
       `Tab is waiting on the folder-trust dialog${opts.dir ? ` for ${opts.dir}` : ''}, and Claude has no earlier session there — leaving it for you to answer.`,
     )
     return false
   }
-  if (await answerTrustDialog(adapter, blockId, { sleep: nap, pastDialogs })) return true
-  consola.warn('Could not confirm the folder-trust dialog was answered — switch to the tab and choose "Yes, I trust this folder" (NOT the first option on newer Claude Code, which is "No, exit").')
-  return false
+  // Answered means the dialog has GONE — the next screen may be the input or
+  // another dialog. Waiting for the input footer alone reported a trust dialog
+  // that had been answered as unanswered whenever the bypass dialog came next.
+  const trustGone = async () => (await pastDialogs()) || (bypassAcceptVisible(await read(40)) || !trustDialogVisible(await read(40)))
+  if (!(await answerTrustDialog(adapter, blockId, { sleep: nap, pastDialogs: trustGone }))) {
+    consola.warn('Could not confirm the folder-trust dialog was answered — switch to the tab and choose "Yes, I trust this folder" (NOT the first option on newer Claude Code, which is "No, exit").')
+    return false
+  }
+  // The bypass acceptance renders AFTER the trust dialog on a machine that has
+  // never accepted it. Give it a moment to appear before calling the tab clear.
+  for (let i = 0; i < 8; i++) {
+    if (await pastDialogs()) return true
+    if (bypassAcceptVisible(await read(40))) {
+      consola.warn('Folder trusted. Claude is now asking, once for this machine, to accept running in Bypass Permissions mode. cctabs does not answer that for you — choose in the tab.')
+      return false
+    }
+    await nap(700)
+  }
+  return true
 }
 
 /**
@@ -349,17 +396,17 @@ export async function clearStartupDialogs(
 export async function answerTrustDialog(
   adapter: TerminalAdapter,
   blockId: string,
-  opts: { sleep?: (ms: number) => Promise<void>; pastDialogs?: () => boolean; attempts?: number } = {},
+  opts: { sleep?: (ms: number) => Promise<void>; pastDialogs?: () => boolean | Promise<boolean>; attempts?: number } = {},
 ): Promise<boolean> {
   const nap = opts.sleep ?? sleep
-  const read = () => adapter.scrollback(blockId, 40)
-  const past = opts.pastDialogs ?? (() => /automode|foragents|Try["'“]/i.test(adapter.scrollback(blockId, 14).replace(/\s+/g, '')))
+  const read = () => readTab(adapter, blockId, 40)
+  const past = opts.pastDialogs ?? (async () => /automode|foragents|Try["'“]/i.test((await readTab(adapter, blockId, 14)).replace(/\s+/g, '')))
 
   // Same not-ready window as every other dialog: let its key handler attach.
   await nap(1200)
   for (let attempt = 0; attempt < (opts.attempts ?? 4); attempt++) {
-    if (past()) return true
-    const state = trustDialogState(read())
+    if (await past()) return true
+    const state = trustDialogState(await read())
     if (state.yes === undefined || state.cursor === undefined) { await nap(600); continue }
 
     const delta = state.yes - state.cursor
@@ -371,16 +418,16 @@ export async function answerTrustDialog(
 
     // Verify before committing. If the cursor isn't visibly on Yes, go round
     // again from whatever the screen now says rather than pressing Enter.
-    const after = trustDialogState(read())
+    const after = trustDialogState(await read())
     if (after.cursor !== after.yes || after.yes === undefined) continue
 
     await adapter.sendInput(blockId, '\r')
     for (let i = 0; i < 12; i++) {
       await nap(700)
-      if (past()) return true
+      if (await past()) return true
     }
   }
-  return past()
+  return await past()
 }
 
 /**
