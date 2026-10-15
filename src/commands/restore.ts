@@ -10,7 +10,7 @@ import { openSession } from '../core/open-session.js'
 import { findSessionsByNameGlobally, locateSessionById, resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { launchEnvFor, resolveBackend } from '../core/backends.js'
 import { listClaudeConfigDirs, type ClaudeConfigDir, type ConfigDirScope } from '../core/config-dirs.js'
-import { locateTranscriptFile, type LocatedTranscript } from '../core/transcript.js'
+import { readLastMessageAt, locateTranscriptFile, type LocatedTranscript } from '../core/transcript.js'
 import { parseManifest } from '../core/manifest.js'
 import {
   planRestore,
@@ -98,7 +98,12 @@ export const restoreCommand = define({
       if (olderThan) {
         let cutoff: number
         try { cutoff = parseAgeCutoff(olderThan) } catch (e) { consola.error((e as Error).message); process.exit(1) }
-        const split = suspendOlderThan(manifest, cutoff, (id) => locateTranscriptFile(id)?.mtime)
+        // By the last message in each transcript, not its mtime: closing a tab
+        // stamps the file (see lastMessageAt).
+        const split = suspendOlderThan(manifest, cutoff, (id) => {
+          const file = locateTranscriptFile(id)?.file
+          return file ? readLastMessageAt(file) : undefined
+        })
         manifest = split.entries
         consola.info(
           `${split.suspended} of ${manifest.length} entr${manifest.length === 1 ? 'y' : 'ies'} last active before ` +

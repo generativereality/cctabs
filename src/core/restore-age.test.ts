@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { parseAgeCutoff, suspendOlderThan } from './restore-age.js'
+import { parseAgeCutoff, suspendOlderThan, lastMessageAt } from './restore-age.js'
 import type { RestoreEntry } from './restore-plan.js'
 
 const NOW = new Date('2026-10-13T12:00:00').getTime()
@@ -46,5 +46,27 @@ describe('suspendOlderThan', () => {
     const r = suspendOlderThan([e('x', 'missing')], NOW - 24 * H, () => undefined)
     expect(r.entries[0].suspended).toBeUndefined()
     expect(r.unknown).toEqual(['x'])
+  })
+})
+
+describe('lastMessageAt', () => {
+  const j = (o: object) => JSON.stringify(o)
+  it('takes the last user/assistant message, not the trailer a close writes after it', () => {
+    const tail = [
+      j({ type: 'user', timestamp: '2026-10-01T09:00:00.000Z' }),
+      j({ type: 'assistant', timestamp: '2026-10-01T09:00:05.000Z' }),
+      j({ type: 'system', subtype: 'away_summary', timestamp: '2026-10-15T13:00:00.000Z' }),
+      j({ type: 'last-prompt' }),
+      j({ type: 'custom-title', customTitle: 'x' }),
+      '',
+    ].join('\n')
+    expect(lastMessageAt(tail)).toBe(Date.parse('2026-10-01T09:00:05.000Z'))
+  })
+  it('skips the torn first line of a tail chunk', () => {
+    expect(lastMessageAt('stamp":"2026-10-15T00:00:00Z"}\n' + j({ type: 'user', timestamp: '2026-10-02T00:00:00.000Z' })))
+      .toBe(Date.parse('2026-10-02T00:00:00.000Z'))
+  })
+  it('is undefined for a transcript with no messages', () => {
+    expect(lastMessageAt(j({ type: 'custom-title', customTitle: 'x' }))).toBeUndefined()
   })
 })
