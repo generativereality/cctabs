@@ -32,10 +32,13 @@ cctabs install-tabby-plugin --yes
 
 What it does, in order:
 1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs@0.1.6`
-2. Captures the current claude session id from `~/.claude/projects/<slug>/`
-3. Spawns a detached background worker that quits Tabby, waits for it to die, reopens it, then opens a new tab running `claude --resume <id> --fork-session` in your current cwd.
+2. The same controlled restart as `cctabs restart-tabby`: saves every open session, closes the
+   other tabs, quits and reopens Tabby, and restores everything in a new tab — this session
+   included. See [restore-and-restart.md](restore-and-restart.md#restarting-tabby-or-the-computer).
 
-**Other Tabby tabs in the same window get killed.** Tabby's session recovery may or may not bring them back. Use `--no-restart` to skip step 3 if the user wants control.
+Before 0.5.12 step 2 resumed "the newest session in this directory" — not necessarily this tab's
+— as a `--fork-session` copy, and left the other tabs to Tabby's own recovery. Use `--no-restart`
+to install only and restart Tabby yourself.
 
 ### Manual install (fallback)
 

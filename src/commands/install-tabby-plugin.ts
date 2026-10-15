@@ -1,20 +1,17 @@
-import { spawn, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'fs'
-import { homedir, platform } from 'os'
+import { spawnSync } from 'child_process'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { platform } from 'os'
 import { join } from 'path'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { detectTerminal } from '../core/terminal.js'
-import { findLatestSessionId } from '../core/session.js'
+import { requireAdapter } from '../core/adapter.js'
+import { saveAndClose, startRestartWorker } from './restart-tabby.js'
 import { TABBY_PLUGIN, tabbyPluginsDir as pluginsDir } from '../core/tabby-plugin-dir.js'
-
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`
-}
 
 export const installTabbyPluginCommand = define({
   name: 'install-tabby-plugin',
-  description: 'Install the tabby-cctabs plugin via npm, then quit + reopen Tabby in the background and resume the current claude session in a new tab. Must be run from inside Tabby.',
+  description: 'Install the tabby-cctabs plugin via npm, then restart Tabby the way `cctabs restart-tabby` does: every session saved, Tabby quit and reopened, everything restored. Must be run from inside Tabby.',
   args: {
     yes: { type: 'boolean', short: 'y', description: 'Skip the "this will restart Tabby" confirmation' },
     'no-restart': { type: 'boolean', description: 'Install the plugin only; do not quit Tabby. You restart it yourself.' },
@@ -36,7 +33,7 @@ export const installTabbyPluginCommand = define({
     // a loop: this said "run the manual snippet from `cctabs doctor`", and
     // doctor said "run `cctabs install-tabby-plugin`" and then printed a macOS
     // path. So on an unsupported platform, install and skip the restart.
-    const canAutoRestart = platform() === 'darwin' || platform() === 'linux'
+    const canAutoRestart = platform() === 'darwin' || platform() === 'linux' || platform() === 'win32'
     if (!canAutoRestart && !noRestart) {
       consola.warn(`Auto-restart isn't implemented for ${platform()} yet - installing the plugin and leaving Tabby alone.`)
       consola.info('Quit and reopen Tabby yourself once this finishes, then run `cctabs doctor`.')
@@ -65,89 +62,17 @@ export const installTabbyPluginCommand = define({
       return
     }
 
-    // Find current claude session so we can resume it after the restart.
-    const cwd = process.cwd()
-    const sessionId = findLatestSessionId(cwd)
-    if (!sessionId) {
-      consola.warn(`No prior Claude session found for ${cwd}. The restart will reopen Tabby with a plain shell tab; you can launch claude yourself.`)
-    } else {
-      consola.info(`Will resume session ${sessionId.slice(0, 8)}… via --fork-session after restart.`)
-    }
-
-    if (!yes) {
-      consola.warn('About to quit Tabby and reopen it. ALL Tabby tabs will close.')
-      consola.warn("Tabby's session recovery may or may not restore other tabs.")
-      consola.info('Re-run with --yes to suppress this prompt.')
-      const ok = await consola.prompt('Proceed?', { type: 'confirm', initial: false })
-      if (!ok) { consola.info('Aborted.'); return }
-    }
-
-    // Locate claude binary
-    const claudeWhich = spawnSync('which', ['claude'], { encoding: 'utf-8' })
-    const claudeBin = (claudeWhich.stdout || '').trim() || 'claude'
-
-    // Build a detached worker that runs after this process exits.
-    const stamp = Date.now()
-    const restartScript = join('/tmp', `cctabs-tabby-restart-${stamp}.sh`)
-    const launcherScript = join('/tmp', `cctabs-tabby-launcher-${stamp}.sh`)
-
-    const launcherBody = sessionId
-      ? `#!/bin/zsh -l
-cd ${shellQuote(cwd)} || exit 1
-exec ${claudeBin} --resume ${sessionId} --fork-session
-`
-      : `#!/bin/zsh -l
-cd ${shellQuote(cwd)} || exit 1
-exec /bin/zsh -l
-`
-    writeFileSync(launcherScript, launcherBody)
-    chmodSync(launcherScript, 0o755)
-
-    const isDarwin = platform() === 'darwin'
-    const quitTabby = isDarwin
-      ? `osascript -e 'tell application "Tabby" to quit' >/dev/null 2>&1 || true`
-      : `pkill -TERM -f Tabby || true`
-    const waitForExit = `for i in $(seq 1 30); do pgrep -f "Tabby" >/dev/null || break; sleep 0.5; done`
-    const reopenTabby = isDarwin
-      ? `open -a Tabby`
-      : `nohup tabby >/dev/null 2>&1 &`
-    const activate = isDarwin
-      ? `osascript -e 'tell application "Tabby" to activate' >/dev/null 2>&1 || true`
-      : `:`
-    const tabbyCli = isDarwin
-      ? `/Applications/Tabby.app/Contents/MacOS/Tabby`
-      : `tabby`
-
-    const restartBody = `#!/usr/bin/env bash
-set -e
-exec >/tmp/cctabs-tabby-restart-${stamp}.log 2>&1
-echo "[$(date)] sleeping 2s before quitting Tabby"
-sleep 2
-echo "[$(date)] quitting Tabby"
-${quitTabby}
-echo "[$(date)] waiting for Tabby to exit"
-${waitForExit}
-echo "[$(date)] reopening Tabby"
-${reopenTabby}
-sleep 5
-echo "[$(date)] activating + launching resume tab"
-${activate}
-sleep 1
-${tabbyCli} run ${shellQuote(launcherScript)}
-echo "[$(date)] done"
-`
-    writeFileSync(restartScript, restartBody)
-    chmodSync(restartScript, 0o755)
-
-    // Detach from this process so the restart survives Tabby (and us) dying.
-    const child = spawn('/bin/bash', [restartScript], {
-      detached: true,
-      stdio: 'ignore',
+    // The same controlled restart as `cctabs restart-tabby`: every session is
+    // saved and comes back, this one included. This used to resume only "the
+    // newest session in this directory" (not necessarily this tab's) as a
+    // --fork-session copy, while Tabby's own recovery could relaunch the
+    // original beside it, and its quit could hang on the "still running" dialog.
+    const adapter = requireAdapter()
+    const selfTab = await saveAndClose(adapter, {
+      reason: 'tabby-restart',
+      yes,
+      then: 'close this tab, quit Tabby, reopen it with the new plugin, and restore everything in a new tab.',
     })
-    child.unref()
-
-    consola.success('Restart worker dispatched.')
-    consola.info(`Logs: /tmp/cctabs-tabby-restart-${stamp}.log`)
-    consola.info('Tabby will quit in ~2 seconds. After it reopens, your session resumes via --fork-session in a new tab.')
+    startRestartWorker(selfTab)
   },
 })

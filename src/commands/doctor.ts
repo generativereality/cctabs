@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process'
+import { readPending } from '../core/fleet-state.js'
 import { define } from 'gunshi'
 import { detectTerminal, resolveTerminal, type KnownTerminal } from '../core/terminal.js'
 import { manualInstallSnippet } from '../core/tabby-plugin-dir.js'
@@ -71,6 +72,18 @@ function probeTabbyPlugin (host: string, port: number): TabbyHealth {
     return { ok: !!parsed.ok, version: parsed.version, raw: r.stdout }
   } catch {
     return { ok: false, error: 'non-JSON response', raw: r.stdout }
+  }
+}
+
+/** A fleet saved by restart-tabby / prepare-reboot that hasn't been restored yet. */
+function checkPendingRestore (): CheckResult | null {
+  const p = readPending()
+  if (!p) return null
+  return {
+    name: 'Saved fleet waiting to be restored',
+    status: 'warn',
+    detail: `${p.sessions} session(s), saved ${new Date(p.savedAt).toLocaleString()} before ${p.reason === 'reboot' ? 'a reboot' : 'a Tabby restart'}`,
+    hint: 'cctabs restore --pending',
   }
 }
 
@@ -282,6 +295,8 @@ export const doctorCommand = define({
     if (terminal === 'tabby') {
       results.push(checkTabbyPlugin())
     }
+    const pending = checkPendingRestore()
+    if (pending) results.push(pending)
 
     for (const r of results) printResult(r)
 

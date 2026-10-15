@@ -1,8 +1,53 @@
 # Restoring, restarting and the resume picker
 
-> Read when bringing tabs back after a reboot, restoring from a manifest, restarting the fleet onto a new Claude Code version, or facing the "Resume from summary" picker.
+> Read when restarting Tabby or the computer, bringing tabs back after a reboot, restoring from a manifest, restarting the fleet onto a new Claude Code version, or facing the "Resume from summary" picker.
 >
 > Reference for the `cctabs` skill — moved out of [SKILL.md](../SKILL.md) to keep it short.
+
+## Restarting Tabby or the computer
+
+Two commands, for when you know a restart is coming:
+
+```bash
+cctabs restart-tabby      # Tabby only: save → close → quit Tabby → reopen → restore, unattended
+cctabs prepare-reboot     # the computer: save → close; after the reboot, `cctabs restore --pending`
+```
+
+Both start the same way, and stop before closing anything if a step doesn't check out:
+
+1. **Save** every tab as a manifest in `~/.config/cctabs/fleet/manifest-<time>.json` (a new file
+   each time; nothing is overwritten). The tab running the command is in it too, since it ends
+   with Tabby. The save is checked against the terminal's own tab list *after* capture: a
+   different set of tabs (one opened or closed meanwhile, or a read that came back short) means
+   nothing gets closed. So does a fleet that wouldn't restore cleanly, e.g. two tabs with one name.
+2. **Confirm.** It prints what it saved, which tabs have no session (and so won't come back), and
+   what comes next. Without a terminal to ask in (an agent), it stops here: confirm with the user,
+   then re-run with `--yes`.
+3. **Mark the save pending** (`pending-restore.json`). `cctabs doctor` reports it, and
+   `cctabs restore --pending` restores it and clears it, once nothing failed.
+4. **Close every other tab by id**, and check the terminal's tab list until they're gone.
+
+Then `prepare-reboot` stops: reboot, open Tabby, run `cctabs restore --pending`.
+
+`restart-tabby` hands over to a detached worker (log in `~/.config/cctabs/fleet/restart-*.log`):
+
+5. Closes the last tab, its own. Tabby asks `"…" is still running. Close?` on quit for any tab
+   with a running process, which would hold a scripted quit until someone clicks.
+6. Waits 3s. Tabby saves the tab list it reopens with 1s (debounced) after a change. Quit sooner
+   and its own recovery relaunches the tabs just closed, racing the restore with Claudes of its own.
+7. Quits Tabby normally (macOS: `osascript … quit`; Windows: `taskkill` without `/F`; Linux:
+   `pkill -TERM`), waits up to 60s for the main process to exit, and does **not** reopen it if it
+   hasn't: a second Tabby on top of a stuck one is worse than a message.
+8. Reopens Tabby, waits up to 120s for the plugin to answer, and opens one tab running
+   `cctabs restore --pending`.
+
+**Big fleets restore partly suspended.** With more than 30 sessions, sessions idle for over 3 days
+come back as placeholders that wake on Enter or `cctabs send` (`--suspend-older-than <age>` to
+choose, `--all-running` for none). 96 Claudes starting at once took this machine to load 575.
+
+**Windows** is supported but has not been run end to end yet: the worker's detachment from
+Tabby's process tree and the reopen from the recorded `Tabby.exe` path are the parts to watch.
+If Tabby doesn't come back, start it and run `cctabs restore --pending`.
 
 ## Workflow: Restoring tabs after a reboot
 

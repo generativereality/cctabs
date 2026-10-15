@@ -2,6 +2,7 @@ import { resolve } from 'path'
 import { homedir } from 'os'
 import { readFileSync, existsSync } from 'fs'
 import { define } from 'gunshi'
+import { readPending, clearPending, fleetDir } from '../core/fleet-state.js'
 import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
@@ -64,14 +65,25 @@ export const restoreCommand = define({
     manifest: { type: 'string', short: 'm', description: 'Path to a JSON manifest of {name, dir, session_id?, suspended?} entries (use "-" for stdin). Accepts `cctabs manifest` and `cctabs sessions --json` output directly. Tabs already in the bar keep their places; tabs it creates are appended after them in manifest order — so order the manifest the way you want the new tabs. An entry with "suspended": true comes back as a placeholder, so one run can mix running and suspended tabs.' },
     'create-missing': { type: 'boolean', short: 'c', description: 'When using --manifest, spawn new tabs for entries that have no existing tab' },
     suspended: { type: 'boolean', short: 's', description: 'Bring tabs back SUSPENDED: named, knowing their session, but running a small placeholder instead of Claude. Takes seconds for a whole fleet. A suspended tab wakes on Enter, on `cctabs resume <tab>`, or when `cctabs send` targets it.' },
+    pending: { type: 'boolean', short: 'p', description: 'Restore the fleet that `cctabs restart-tabby` or `cctabs prepare-reboot` saved. Implies --manifest <that save> --create-missing, and its --suspend-older-than unless you give one. Cleared once the restore has nothing that failed.' },
     'suspend-older-than': { type: 'string', description: 'With --manifest: bring back SUSPENDED only the entries whose session was last active before this — an age (90m, 12h, 3d, 2w) or a date (2026-10-10). The rest come back running, in the same run and in manifest order.' },
   },
   async run(ctx) {
     const dryRun = !!(ctx.values.dry as boolean | undefined)
-    const manifestPath = ctx.values.manifest as string | undefined
-    const createMissing = (ctx.values['create-missing'] as boolean | undefined) ?? false
+    let manifestPath = ctx.values.manifest as string | undefined
+    let createMissing = (ctx.values['create-missing'] as boolean | undefined) ?? false
     const suspended = !!(ctx.values.suspended as boolean | undefined)
-    const olderThan = ctx.values['suspend-older-than'] as string | undefined
+    let olderThan = ctx.values['suspend-older-than'] as string | undefined
+    const usePending = !!(ctx.values.pending as boolean | undefined)
+    const pending = usePending ? readPending() : null
+    if (usePending) {
+      if (manifestPath) { consola.error('--pending restores the saved fleet; it does not combine with --manifest.'); process.exit(1) }
+      if (!pending) { consola.error(`No pending restore in ${fleetDir()}. \`cctabs restart-tabby\` and \`cctabs prepare-reboot\` leave one.`); process.exit(1) }
+      consola.info(`Pending restore: ${pending.sessions} session(s), saved ${new Date(pending.savedAt).toLocaleString()} before ${pending.reason === 'reboot' ? 'a reboot' : 'a Tabby restart'}.`)
+      manifestPath = pending.manifest
+      createMissing = true
+      if (!olderThan && !suspended) olderThan = pending.suspendOlderThan
+    }
     if (olderThan && suspended) {
       consola.error('--suspend-older-than and --suspended contradict each other: the first splits the manifest, the second suspends all of it. Pick one.')
       process.exit(1)
@@ -101,13 +113,22 @@ export const restoreCommand = define({
       if (suspended || manifest.some((e) => e.suspended && e.sessionId)) {
         try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
       }
-      await runRestore({
+      const report = await runRestore({
         manifest,
         scopedDir: null,
         createMissing,
         dryRun,
         suspended,
       })
+      if (pending && !dryRun) {
+        const failed = report ? [...report.outcomes.values()].filter((o) => o === 'failed').length : 0
+        if (report && !failed) {
+          clearPending()
+          consola.success('Pending restore done and cleared.')
+        } else {
+          consola.warn(`The pending restore is kept${failed ? ` (${failed} failed)` : ''}: run \`cctabs restore --pending\` again to retry; tabs already back are left alone.`)
+        }
+      }
       return
     }
 
