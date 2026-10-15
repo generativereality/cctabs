@@ -50,7 +50,11 @@ export async function waitForTabExit(
 
   while (Date.now() < deadline) {
     if (!tabGone) {
-      tabGone = !adapter.blocksList().some((b) => b.tabid === tabId || b.blockid === tabId)
+      // A tab list that couldn't be read is no evidence the tab is gone — keep
+      // waiting. (It used to come back empty, which read as "closed".)
+      try {
+        tabGone = !adapter.blocksList().some((b) => b.tabid === tabId || b.blockid === tabId)
+      } catch { /* unknown this round */ }
     }
     // No pid to watch (backend doesn't report one, or there was no process):
     // the tab vanishing is all the evidence available.
