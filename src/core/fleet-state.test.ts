@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkCapture, clearPending, defaultSuspendAge, pendingPath, readPending, stampedManifestPath,
+  checkCapture, clearPending, restorableEntries, defaultSuspendAge, pendingPath, readPending, stampedManifestPath,
   tabbyLaunchEnv, tabbyLifecycle, tabbyMainPids, tasklistShowsTabby, writePending, type PendingRestore,
 } from './fleet-state.js'
 
@@ -117,5 +117,12 @@ describe('tabbyLaunchEnv', () => {
       expect(env.SystemRoot).toBe('C:\\Windows')
       expect(env.DISPLAY).toBe(':0')
     }
+  })
+})
+
+describe('restorableEntries', () => {
+  it('drops tabs with no session, so a restart never brings a shell back as a fresh Claude', () => {
+    const e = [{ name: 'a', session_id: 's1' }, { name: 'rt-driver' }, { name: 'b', session_id: 's2' }]
+    expect(restorableEntries(e).map((x) => x.name)).toEqual(['a', 'b'])
   })
 })
