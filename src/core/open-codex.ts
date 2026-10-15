@@ -38,19 +38,9 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
   if (!adapter.openTabDirect) throw new Error('Codex tabs need the Tabby plugin.')
 
   const shell = resolveTabShell()
-  if (!shell.posix) {
-    throw new Error('Codex tabs are not supported on Windows yet: the launch line has to quote the prompt for cmd.exe, which is not done. Coming next.')
-  }
 
   const readClaudeMd = existsSync(join(dir, 'CLAUDE.md')) && !existsSync(join(dir, 'AGENTS.md'))
-  const args = codexArgs({
-    prompt: opts.prompt,
-    resumeId: opts.resumeId,
-    model: opts.model,
-    readClaudeMd,
-    extraFlags: loadConfig().codex.flags,
-  })
-  const body = ['codex', ...args.map(shellQuoteArg)].join(' ')
+  const body = codexLaunchBody({ ...opts, readClaudeMd }, shell)
 
   const { blockId, tabId } = await adapter.openTabDirect({
     cwd: dir,
@@ -84,4 +74,17 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
   }
   consola.warn('Could not confirm Codex started within 45s — check the tab. (Signed out? `codex login`.)')
   return tabId
+}
+
+/**
+ * cmd expands %, ! and metacharacters even inside several quoting forms.
+ * Keep all user argv out of its parser: an encoded Node bootstrap invokes the
+ * npm Codex JS entry directly with an argv array and shell:false. The fixed
+ * bootstrap token contains only base64 characters; newlines stay in JSON.
+ */
+export function codexLaunchBody(opts: Parameters<typeof codexArgs>[0] & { cwd?: string }, shell: { posix: boolean }): string {
+  const args = codexArgs({ extraFlags: loadConfig().codex.flags, ...opts })
+  if (shell.posix) return ['codex', ...args.map(shellQuoteArg)].join(' ')
+  const script = `${opts.cwd ? `process.chdir(${JSON.stringify(opts.cwd)});` : ''}const {spawnSync}=require('node:child_process');const {join,dirname}=require('node:path');const {existsSync}=require('node:fs');const r=spawnSync('where.exe',['codex.cmd'],{encoding:'utf8'});const shim=(r.stdout||'').split(/\\r?\\n/).find(p=>p.trim());const entry=shim&&join(dirname(shim.trim()),'node_modules','@openai','codex','bin','codex.js');if(!entry||!existsSync(entry)){console.error('Install Codex with npm i -g @openai/codex');process.exit(1)}const child=spawnSync(process.execPath,[entry,...${JSON.stringify(args)}],{stdio:'inherit',shell:false});process.exit(child.status??1);`
+  return `node -e "eval(Buffer.from('${Buffer.from(script).toString('base64')}','base64').toString())"`
 }

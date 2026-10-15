@@ -1,3 +1,4 @@
+import type { Engine } from './codex.js'
 import { sep } from 'path'
 import type { SessionRow } from './session-rows.js'
 import { WORKTREE_SEGMENT } from './worktree.js'
@@ -34,6 +35,7 @@ import { WORKTREE_SEGMENT } from './worktree.js'
 
 /** One manifest entry — exactly the shape `restore --manifest` reads. */
 export interface ManifestEntry {
+  engine?: Engine
   name: string
   dir: string
   session_id?: string
@@ -97,12 +99,13 @@ export interface ManifestOptions {
   selfSessionId?: string
   /** Pid of the Claude the caller runs under. */
   selfClaudePid?: number
+  selfCodexPid?: number
   /** Keep the calling session in (only for a manifest that won't drive a restart). */
   includeSelf?: boolean
   /** Point entries whose dir is gone here instead of failing. */
   repointMissingDirs?: string
   dirExists(path: string): boolean
-  transcriptExists(sessionId: string): boolean
+  transcriptExists(sessionId: string, engine?: Engine): boolean
   /** Whether the transcript sits under `dir`'s own project slug. Omitted → not checked. */
   transcriptInDir?(sessionId: string, dir: string): boolean
   /** Session id → pids of live Claude processes launched on it. */
@@ -118,7 +121,8 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
   for (const r of rows) {
     const isSelf =
       (!!opts.selfSessionId && r.session_id === opts.selfSessionId) ||
-      (opts.selfClaudePid !== undefined && r.claude_pid === opts.selfClaudePid)
+      (opts.selfClaudePid !== undefined && r.claude_pid === opts.selfClaudePid) ||
+      (opts.selfCodexPid !== undefined && r.codex_pid === opts.selfCodexPid)
     if (isSelf && !opts.includeSelf) {
       excluded.push({ name: r.name, reason: 'the calling session — it cannot restart itself' })
       continue
@@ -143,7 +147,7 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
     // A tab whose own Claude was launched on this id owns it. Anything else
     // that resolved to it is a stale title match (a leftover tab carrying the
     // session's old name) and must not be restored onto a live session.
-    const owners = group.filter((r) => r.claude_pid !== undefined && live.includes(r.claude_pid))
+    const owners = group.filter((r) => (r.codex_pid ?? r.claude_pid) !== undefined && live.includes((r.codex_pid ?? r.claude_pid)!))
     if (owners.length === 1) {
       for (const r of group) {
         if (r === owners[0]) continue
@@ -217,20 +221,21 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
       }
     }
 
-    if (r.session_id && !opts.transcriptExists(r.session_id)) {
+    if (r.session_id && !opts.transcriptExists(r.session_id, r.engine)) {
       problems.push({
         name: r.name,
         severity: 'error',
         code: 'no-transcript',
-        message: `session ${r.session_id.slice(0, 8)}… has no transcript in any Claude config dir — resuming it would open a fresh conversation`,
+        message: `session ${r.session_id.slice(0, 8)}… has no transcript in its engine’s session store — resuming it would open a fresh conversation`,
       })
     }
 
     if (
       r.session_id &&
+      r.engine !== 'codex' &&
       r.session_source === 'argv' &&
       opts.transcriptInDir &&
-      opts.transcriptExists(r.session_id) &&
+      opts.transcriptExists(r.session_id, r.engine) &&
       !opts.transcriptInDir(r.session_id, dir)
     ) {
       problems.push({
@@ -252,6 +257,7 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
 
     entries.push({
       name: r.name,
+      ...(r.engine ? { engine: r.engine } : {}),
       dir,
       ...(r.session_id ? { session_id: r.session_id } : {}),
       ...(r.backend ? { backend: r.backend } : {}),

@@ -1,4 +1,8 @@
-import { statSync } from 'fs'
+import { readTab } from './open-session.js'
+import { codexReady, codexTrustDialog, type Engine } from './codex.js'
+import { codexLiveSessionPids, matchCodexTabs } from './codex-sessions.js'
+import { existsSync, statSync } from 'fs'
+import { join } from 'path'
 import { homedir } from 'os'
 import { consola } from 'consola'
 import type { AllData, PermissionMode } from '../types/index.js'
@@ -75,11 +79,12 @@ export function suspendedTabsIn(
   const claudeByTab = procRows
     ? matchTabsToClaude(tabs.map((t) => ({ tabId: t.tabId, name: t.name, shellPid: t.shellPid })), procRows)
     : new Map()
+  const codexByTab = matchCodexTabs(tabs, procRows ?? [], [])
   const placeholders = procRows ? placeholderSessions(procRows) : null
   const blockOf = new Map(tabs.map((t) => [t.tabId, t.blockId]))
 
   const matched = matchSuspendedTabs(
-    tabs.map((t) => ({ ...t, claudeRunning: claudeByTab.has(t.tabId) })),
+    tabs.map((t) => ({ ...t, claudeRunning: claudeByTab.has(t.tabId) || codexByTab.has(t.tabId) })),
     records,
     placeholders,
     (tabId) => suspendMarkerShowing(adapter.scrollback(blockOf.get(tabId)!, 20)),
@@ -117,13 +122,15 @@ function placeholderDetail(sessionId: string, dir: string): string {
 export function placeholderSpecFor(rec: SuspendRecord): PlaceholderSpec {
   const { env, model } = launchEnvFor(rec.backend, rec.configDir)
   return {
+    engine: rec.engine,
+    readClaudeMd: existsSync(join(rec.dir, 'CLAUDE.md')) && !existsSync(join(rec.dir, 'AGENTS.md')),
     sessionId: rec.sessionId,
     name: rec.name,
     dir: rec.dir,
     env,
     model,
     permissionMode: rec.permissionMode,
-    extraFlags: loadConfig().claude.flags,
+    extraFlags: rec.engine === 'codex' ? loadConfig().codex.flags : loadConfig().claude.flags,
     detail: placeholderDetail(rec.sessionId, rec.dir),
     recordFile: recordPath(rec.sessionId),
   }
@@ -220,6 +227,7 @@ export async function waitForPlaceholder(sessionId: string, timeoutMs = 10_000):
 // suspend
 
 export interface SuspendInput {
+  engine?: Engine
   tabId: string
   blockId: string
   name: string
@@ -246,6 +254,7 @@ export interface SuspendInput {
 export async function suspendTab(adapter: TerminalAdapter, s: SuspendInput): Promise<{ tabId: string; recreated: boolean }> {
   placeholderShellOrThrow()
   const rec = {
+    engine: s.engine,
     sessionId: s.sessionId,
     name: s.name,
     dir: s.dir,
@@ -385,7 +394,7 @@ export async function wakeSuspendedTab(
   const sessionId = t.record.sessionId.toLowerCase()
   const launched = (): boolean | undefined => {
     const rows = readProcessTable()
-    return rows ? liveSessionPids(rows).has(sessionId) : undefined
+    return rows ? (t.record.engine === 'codex' ? codexLiveSessionPids(rows) : liveSessionPids(rows)).has(sessionId) : undefined
   }
 
   const nonce = wakeNonce()
@@ -425,7 +434,11 @@ export async function wakeSuspendedTab(
   let pickerHandled = false
   let dialogPasses = 0
   while (Date.now() < deadline) {
-    const tail = view.scrollback(t.blockId, 60)
+    // Codex redraws its placeholder by diffs, so the PTY log loses it.
+    // Only read the current screen after THIS wake's nonce/process evidence.
+    const tail = t.record.engine === 'codex' && (seen() || launched())
+      ? await readTab(adapter, t.blockId, 60)
+      : view.scrollback(t.blockId, 60)
 
     if (!tail.trim()) {
       // Nothing readable after the wake. Fall back on the process.
@@ -436,6 +449,15 @@ export async function wakeSuspendedTab(
       continue
     }
 
+    if (t.record.engine === 'codex') {
+      const trust = codexTrustDialog(tail)
+      if (trust.visible && trust.onTrust && dialogPasses++ < 1) await adapter.sendInput(t.blockId, '\r')
+      if (codexReady(tail)) {
+        if (++readyStreak >= 2) return { ok: true, ready: 'confirmed', detail: 'Codex is at its prompt' }
+      } else readyStreak = 0
+      await sleep(800)
+      continue
+    }
     if (mcpApprovalDialogVisible(tail)) {
       return { ok: false, detail: `"${t.name}" is waiting on an MCP server approval prompt. cctabs does not answer that one for you — open the tab and choose.` }
     }

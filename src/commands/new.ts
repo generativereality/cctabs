@@ -58,7 +58,6 @@ export const newCommand = define({
     if (!engine) { consola.error(`Unknown --engine "${ctx.values.engine}". Use claude or codex.`); process.exit(1) }
     if (engine === 'codex') {
       if (explicitBackend) { consola.error('--backend picks a Claude backend preset; it does not apply to --engine codex.'); process.exit(1) }
-      if (suspended) { consola.error('--suspended is not supported with --engine codex yet.'); process.exit(1) }
     }
     if (suspended && !resumeId) {
       consola.error('--suspended needs --resume <session-id>: a suspended tab holds an existing session until it is woken. For a fresh session, just `cctabs new`.')
@@ -190,6 +189,25 @@ export const newCommand = define({
       if (clash) consola.warn(clash)
     } catch { /* never block a new tab on the warning */ }
 
+    if (suspended) {
+      const located = engine === 'claude' ? locateTranscriptFile(resolvedSessionId!) : null
+      try {
+        const tabId = await openPlaceholderTab(requireAdapter(), {
+          engine,
+          sessionId: resolvedSessionId!,
+          name: displayName,
+          dir: resolve(sessionDir.replace(/^~/, homedir())),
+          backend: engine === 'claude' ? backendName || located?.backend : undefined,
+          configDir: located?.configDir,
+        }, { afterActive: true, color })
+        consola.success(`⏸ Tab "${displayName}" [${tabId.slice(0, 8)}] suspended on ${resolvedSessionId!.slice(0, 8)}… at ${dir} — wakes on Enter, \`cctabs resume\`, or \`cctabs send\``)
+      } catch (e) {
+        consola.error((e as Error).message)
+        process.exit(1)
+      }
+      return
+    }
+
     if (engine === 'codex') {
       const prompt = initialPromptFile ? readFileSync(initialPromptFile, 'utf-8').trimEnd() : undefined
       try {
@@ -212,23 +230,6 @@ export const newCommand = define({
       return
     }
 
-    if (suspended) {
-      const located = locateTranscriptFile(resolvedSessionId!)
-      try {
-        const tabId = await openPlaceholderTab(requireAdapter(), {
-          sessionId: resolvedSessionId!,
-          name: displayName,
-          dir: resolve(sessionDir.replace(/^~/, homedir())),
-          backend: backendName || located?.backend,
-          configDir: located?.configDir,
-        }, { afterActive: true, color })
-        consola.success(`⏸ Tab "${displayName}" [${tabId.slice(0, 8)}] suspended on ${resolvedSessionId!.slice(0, 8)}… at ${dir} — wakes on Enter, \`cctabs resume\`, or \`cctabs send\``)
-      } catch (e) {
-        consola.error((e as Error).message)
-        process.exit(1)
-      }
-      return
-    }
 
     let claudeCmd: string
     if (resolvedSessionId) {

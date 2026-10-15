@@ -37,9 +37,36 @@ ChatGPT…" and cctabs reports that it could not confirm Codex started.
   sooner.
 - **Extra flags for every launch:** `[codex] flags = [...]` in `~/.config/cctabs/config.toml`.
 
-**Not yet** (planned): Codex session ids in `sessions --json`, so `manifest`, `restore` and
-`restart-tabby` bring Codex tabs back (today they are listed as having no session and are not
-restored); `--suspended`; `--backend` (a Claude concept); Windows (the launch line does not yet
-quote the prompt for cmd.exe). Until then, resume by hand with `--engine codex --resume <id>`: the
-id is in the first line of `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
-(`session_meta.payload.session_id`, with its `cwd`), or use `codex resume --last` in the tab.
+**Session identity and fleet restore:** `sessions --json` reports `engine: "codex"` and the
+Codex session id. With the Tabby plugin's `stable-pid` capability, cctabs finds the Codex process
+under the tab's shell. `codex resume <id>` names the session exactly. For a fresh launch, cctabs
+reads rollout metadata under `$CODEX_HOME/sessions` (default `~/.codex/sessions`) and accepts a
+unique rollout with the process's cwd and a start time within two minutes after process start.
+If multiple rollouts fit, or another tab could own the same rollout, it leaves the id unresolved;
+it never picks the newest conversation by guesswork. Session discovery currently needs a POSIX
+process table; Windows launch support does not add Windows process discovery.
+
+`manifest` carries the engine, id and cwd through `restore`, `restart-tabby` and `prepare-reboot`.
+As with Claude, only tabs with a resolved session are saved for a terminal restart. Restore
+launches `codex resume <id>` through the Codex opener. Use a saved manifest after a terminal
+restart: an empty recovered shell cannot reveal which Codex conversation used to run there.
+A Codex manifest whose rollout is missing is skipped instead of starting a fresh conversation.
+
+```bash
+cctabs new <name> <dir> --engine codex --resume <id> --suspended
+cctabs restore --manifest fleet.json --create-missing --suspended
+cctabs wake <tab-id>     # or Enter in the placeholder, or cctabs send
+```
+
+Suspended Codex tabs retain their engine and wake with `codex resume <id>`. Placeholders need
+a POSIX shell (including Git Bash); cmd.exe placeholders remain unsupported.
+
+**Windows launch:** Git Bash uses POSIX quoting. The cmd.exe fallback uses an encoded Node
+bootstrap that passes an argv array directly to the npm-installed Codex JS entry, keeping
+quotes, `%`, `^`, `&`, `|`, `!` and newlines out of cmd's parser. This fallback requires the
+npm installation of Codex (`codex.cmd` on PATH). Quoting/bootstrap unit tests pass on macOS;
+**this release was not validated live on Windows** because the shared VM was already running
+for another session. No VM or Tabby restart was performed.
+
+**Not yet:** `--backend` (a Claude concept), Windows process discovery, and Claude-specific
+conversation operations such as `fork`. Resume a known id with `--engine codex --resume <id>`.

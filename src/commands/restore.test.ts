@@ -529,3 +529,11 @@ describe('rehomeEntries', () => {
     expect(rehomeEntries([entry], [dflt, other], () => null, noop)[0]).toBe(entry)
   })
 })
+
+it('Codex attach commands use Codex flags and quote the saved cwd', () => {
+  const p: PlannedEntry = { entry: { name: 'cx', engine: 'codex' }, action: 'attach', sessionId: '12345678-1234-1234-1234-123456789abc', dir: '/scratch/with spaces' }
+  const cmd = buildResumeCommand(p, '--claude-only-flag')
+  expect(cmd).toContain("cd '/scratch/with spaces'")
+  expect(cmd).toContain("codex 'resume'")
+  expect(cmd).not.toContain('--claude-only-flag')
+})

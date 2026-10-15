@@ -587,3 +587,13 @@ describe('planRestore — suspended tabs', () => {
     expect(plan[0].action).toBe('already-running')
   })
 })
+
+it('Codex missing rollouts never turn into fresh spawns', async () => {
+  const plan = await planRestore([{ name: 'cx', dir: '/scratch', sessionId: 'missing', engine: 'codex' }], makeDeps([], { createMissing: true, sessionless: ['cx'] }))
+  expect(plan[0].action).toBe('no-session')
+})
+
+it('Codex suspended manifest entries preserve the engine through planning', async () => {
+  const plan = await planRestore([{ name: 'cx', dir: '/scratch', sessionId: 'id', engine: 'codex', suspended: true }], makeDeps([], { createMissing: true }))
+  expect(plan[0]).toMatchObject({ action: 'spawn', suspended: true, entry: { engine: 'codex' } })
+})

@@ -59,7 +59,7 @@ export const suspendCommand = define({
 
       // Which process to stop. Exact ties only, the same rule as `restart`: a
       // Claude under the tab's own shell, or one launched on this session id.
-      let claudePid: number | undefined
+      let claudePid: number | undefined = row.codex_pid
       if (row.claude_pid !== undefined && row.claude_pid_via === 'shell-pid') {
         const launched = procs.find((p) => p.pid === row.claude_pid)
         const launchedId = launched ? launchedSessionOf(launched) : undefined
@@ -68,7 +68,7 @@ export const suspendCommand = define({
           continue
         }
         claudePid = row.claude_pid
-      } else {
+      } else if (row.engine !== 'codex') {
         const byId = live.get(row.session_id) ?? []
         if (byId.length > 1) { fail(`${byId.length} Claude processes are running session ${row.session_id.slice(0, 8)}… — close the extra first`); continue }
         claudePid = byId[0]
@@ -87,6 +87,7 @@ export const suspendCommand = define({
           tabId: row.tab_id,
           blockId: row.block_id,
           name: row.name,
+          engine: row.engine,
           sessionId: row.session_id,
           dir: row.cwd,
           backend: row.backend,

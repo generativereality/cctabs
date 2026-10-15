@@ -70,3 +70,8 @@ describe('lastMessageAt', () => {
     expect(lastMessageAt(j({ type: 'custom-title', customTitle: 'x' }))).toBeUndefined()
   })
 })
+
+it('dates Codex activity by message records rather than close events', () => {
+  const tail = JSON.stringify({ type: 'response_item', timestamp: '2026-10-01T12:00:00Z', payload: { type: 'message', role: 'assistant' } }) + '\n' + JSON.stringify({ type: 'event_msg', timestamp: '2026-10-16T00:00:00Z', payload: { type: 'shutdown' } })
+  expect(lastMessageAt(tail)).toBe(Date.parse('2026-10-01T12:00:00Z'))
+})

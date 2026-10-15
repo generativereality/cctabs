@@ -1,3 +1,5 @@
+import { codexLiveSessionPids, readCodexSessions } from '../core/codex-sessions.js'
+import { ancestorsOf } from '../core/claude-procs.js'
 import { existsSync, writeFileSync } from 'fs'
 import { basename, dirname, resolve } from 'path'
 import { homedir } from 'os'
@@ -26,18 +28,21 @@ export async function gatherManifest(
   const procRows = readProcessTable()
   const workspaces = await collectSessionRows(adapter, procRows)
   const rows = workspaces.flatMap((w) => w.sessions)
+  const codexIds = new Set(readCodexSessions().map((s) => s.id))
+  const ownCodex = rows.find((r) => r.codex_pid && ancestorsOf(process.pid, procRows ?? []).includes(r.codex_pid))
   const result = buildManifest(rows, {
-    selfSessionId: process.env.CLAUDE_CODE_SESSION_ID || undefined,
+    selfSessionId: process.env.CLAUDE_CODE_SESSION_ID || ownCodex?.session_id || undefined,
+    selfCodexPid: ownCodex?.codex_pid,
     selfClaudePid: procRows ? ownClaudeProc(procRows)?.pid : undefined,
     includeSelf: opts.includeSelf,
     repointMissingDirs: opts.repointMissingDirs,
     dirExists: (p) => existsSync(p),
-    transcriptExists: (id) => locateTranscriptFile(id) !== null,
+    transcriptExists: (id, engine) => engine === 'codex' ? codexIds.has(id) : locateTranscriptFile(id) !== null,
     transcriptInDir: (id, dir) => {
       const located = locateTranscriptFile(id)
       return !!located && basename(dirname(located.file)) === pathToProjectSlug(dir)
     },
-    liveSessionPids: procRows ? liveSessionPids(procRows) : new Map(),
+    liveSessionPids: procRows ? new Map([...liveSessionPids(procRows), ...codexLiveSessionPids(procRows)]) : new Map(),
   })
   return { result, procRows, rows }
 }
@@ -86,7 +91,7 @@ export const manifestCommand = define({
     if (!procRows) {
       consola.warn('No process table on this platform — ids come from transcripts only, and the calling session is excluded by session id alone.')
     }
-    if (!process.env.CLAUDE_CODE_SESSION_ID && !ctx.values['include-self']) {
+    if (!process.env.CLAUDE_CODE_SESSION_ID && !result.excluded.length && !ctx.values['include-self']) {
       consola.warn('CLAUDE_CODE_SESSION_ID is not set — not running inside Claude Code, so there is no calling session to exclude.')
     }
 

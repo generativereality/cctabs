@@ -1,3 +1,5 @@
+import { codexResumeId, matchCodexTabs, readCodexSessions } from './codex-sessions.js'
+import type { Engine } from './codex.js'
 import type { TerminalAdapter } from './adapter.js'
 import { resolveTabSession } from './session.js'
 import { classifyTerminalBuffer, parsePermissionMode } from './session-status.js'
@@ -22,6 +24,8 @@ const BUFFER_ROWS = 200
 
 /** One tab, as `cctabs sessions --json` reports it. */
 export interface SessionRow {
+  engine?: Engine
+  codex_pid?: number
   block_id: string
   tab_id: string
   name: string
@@ -112,6 +116,11 @@ export async function collectSessionRows(
         procRows,
       )
     : new Map()
+  const codexSessions = readCodexSessions()
+  const codex = matchCodexTabs([...tabsById].flatMap(([tabId, blocks]) => {
+    const b = blocks.find((b) => b.view === 'term')
+    return b ? [{ tabId, name: tabNames.get(tabId) ?? '', shellPid: b.shellPid }] : []
+  }), procRows ?? [], codexSessions)
   const suspended = suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)
 
   const out: WorkspaceRow[] = []
@@ -132,6 +141,8 @@ export async function collectSessionRows(
       // One read, three answers — see BUFFER_ROWS.
       const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
       const susp = suspended.get(tabId)
+      const cx = codex.get(tabId)
+      const engine: Engine = susp?.record.engine ?? (cx ? 'codex' : 'claude')
       const onScreen = classifyTerminalBuffer(buffer)
       // The registry/process verdict wins. A marker on screen that they
       // contradict is a stale screen: the tab is the shell it now is.
@@ -163,6 +174,10 @@ export async function collectSessionRows(
         backend = susp.record.backend
         configDir = susp.record.configDir
         source = 'suspended'
+      } else if (engine === 'codex') {
+        sessionId = cx?.id ?? null
+        sessionDir = cx?.session?.cwd ?? cx?.proc.cwd ?? cwd
+        if (sessionId) source = cx?.session && !codexResumeId(cx.proc.command) ? 'transcript' : 'argv'
       } else if (cwd) {
         try {
           const resolved = resolveTabSession(cwd, tabName)
@@ -200,10 +215,12 @@ export async function collectSessionRows(
         cwd,
         found: sessionId !== null,
         error: lookupError,
-        countInDir: () => countSessionsInDir(cwd),
+        countInDir: () => engine === 'codex' ? codexSessions.filter((s) => s.cwd === sessionDir).length : countSessionsInDir(cwd),
       })
 
       wsRow.sessions.push({
+        engine,
+        ...(cx ? { codex_pid: cx.proc.pid } : {}),
         block_id: b.blockid,
         tab_id: tabId,
         name: tabName,

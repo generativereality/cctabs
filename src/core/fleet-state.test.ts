@@ -126,3 +126,9 @@ describe('restorableEntries', () => {
     expect(restorableEntries(e).map((x) => x.name)).toEqual(['a', 'b'])
   })
 })
+
+it('restart-tabby and prepare-reboot saves keep resumable Codex entries only', () => {
+  const entries = [{ name: 'cx', engine: 'codex', session_id: 'id', dir: '/scratch' }, { name: 'unresolved-cx', engine: 'codex', dir: '/scratch' }]
+  const saved = restorableEntries(entries)
+  expect(saved).toEqual([entries[0]])
+})

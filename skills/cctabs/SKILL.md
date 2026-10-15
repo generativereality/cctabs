@@ -1,7 +1,7 @@
 ---
 name: cctabs
 description: |
-  cctab / cctabs / terminal tabs — open, list, fork, close, watch and drive Claude Code sessions that each run in their own real Tabby terminal tab. The CLI is `cctabs` (also installed as `cctab`).
+  cctab / cctabs / terminal tabs — open, list, fork, close, watch and drive Claude Code or Codex CLI sessions that each run in their own real Tabby terminal tab. The CLI is `cctabs` (also installed as `cctab`).
 
   The word "tab" is DECISIVE, and a subagent is NOT a tab. If the user says "tab" / "cctab" / "cctabs" — even paired with a task, and even when that task sounds like background or parallel work (e.g. "open a tab and fix Y asap") — they mean a real terminal tab running its own Claude Code session: CALL THIS SKILL, never the Agent tool. Most common use: "open a tab with prompt <task>" maps directly to `cctabs new <name> [dir] --prompt "<task>"`. A subagent's output is invisible in the terminal and it cannot be attached to, resumed, watched or driven. Use the Agent tool ONLY when the user explicitly says "subagent", "background agent", or "in parallel without a new tab".
 
@@ -10,7 +10,7 @@ description: |
   NOT for: browser tabs (use browser-automation), tmux panes, or screen sessions.
 ---
 
-You are managing Claude Code sessions using the `cctabs` CLI.
+You are managing Claude Code and Codex CLI sessions using the `cctabs` CLI.
 
 **Important:** "tabs" here means **terminal tabs** (Tabby), NOT browser tabs. Each terminal tab runs its own Claude Code session. This skill is for managing those terminal-based Claude Code sessions — not for browser automation.
 
@@ -202,7 +202,7 @@ cctabs sort [--dry] [--reverse]          # reorder the tab bar by session activi
 cctabs sort --first a,b,c [--dry]        # PIN these tabs to the front, in this order; everything else keeps its relative order
 cctabs scrollback <tab-or-block> [n]    # read terminal output — the last PAINTED FRAME (default: 50 lines)
 cctabs transcript <tab> [n] [--json]    # read what a tab has SAID: its last n assistant messages, from the transcript (alias: `findings`)
-cctabs new <name> [dir] --engine codex [--prompt …]   # OpenAI Codex CLI instead of Claude — see references/codex.md
+cctabs new <name> [dir] --engine codex [--prompt …]   # Codex; session discovery, manifest restore and --suspended work — see references/codex.md
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
 cctabs send <tab> --path <file>          # hand the tab a file PATH to read — the safe way to deliver anything large
 cctabs send <tab> --file <f> --verify    # check the target's transcript for what it actually RECEIVED
@@ -244,7 +244,7 @@ This file holds what every invocation needs. The rest is in `references/`, and e
 - [references/tabs.md](references/tabs.md) — `sort --first`, tab colours, the tab title vs. the live session (RC) name, the `prefix` setting, naming conventions.
 - [references/worktrees.md](references/worktrees.md) — worktrees on an existing branch, why not to create them by hand, recovering a session whose worktree is gone.
 - [references/remote-control.md](references/remote-control.md) — auditing and repairing Remote Control (`/rc`) across the fleet.
-- [references/codex.md](references/codex.md) — tabs running OpenAI's Codex CLI (`--engine codex`): what works, what differs, what's not done yet.
+- [references/codex.md](references/codex.md) — tabs running OpenAI's Codex CLI (`--engine codex`): session identity, mixed-fleet restore, suspended tabs and Windows limits.
 - [references/troubleshooting.md](references/troubleshooting.md) — `cctabs new` timeouts, and "the Tabby plugin did not answer within Ns" (an overloaded Tabby).
 
 ## Which tab am I in? — `cctabs whoami`

@@ -1,4 +1,7 @@
-import { resolve } from 'path'
+import { collectSessionRows } from '../core/session-rows.js'
+import { codexLiveSessionPids, readCodexSessions } from '../core/codex-sessions.js'
+import { openCodexSession, codexLaunchBody } from '../core/open-codex.js'
+import { join, resolve } from 'path'
 import { homedir } from 'os'
 import { readFileSync, existsSync } from 'fs'
 import { define } from 'gunshi'
@@ -21,7 +24,7 @@ import {
   type ResolvedSession,
 } from '../core/restore-plan.js'
 import type { Block, Config } from '../types/index.js'
-import { shellQuoteArg } from '../core/shell.js'
+import { shellQuoteArg, resolveTabShell } from '../core/shell.js'
 import { applyTabColor, resolveColorPreference } from '../core/colors.js'
 import { liveSessionPids, readProcessTable, type ProcRow } from '../core/claude-procs.js'
 import { pidAlive } from '../core/tab-exit.js'
@@ -100,8 +103,9 @@ export const restoreCommand = define({
         try { cutoff = parseAgeCutoff(olderThan) } catch (e) { consola.error((e as Error).message); process.exit(1) }
         // By the last message in each transcript, not its mtime: closing a tab
         // stamps the file (see lastMessageAt).
+        const codexFiles = new Map(readCodexSessions().map((s) => [s.id, s.file]))
         const split = suspendOlderThan(manifest, cutoff, (id) => {
-          const file = locateTranscriptFile(id)?.file
+          const file = codexFiles.get(id) ?? locateTranscriptFile(id)?.file
           return file ? readLastMessageAt(file) : undefined
         })
         manifest = split.entries
@@ -251,6 +255,7 @@ export async function runRestore(
     entries = rehomeEntries(req.manifest, listClaudeConfigDirs(), locateTranscriptFile, (m) => consola.warn(m))
     if (req.suspended) entries = entries.map((e) => ({ ...e, suspended: true }))
   } else {
+    const codexRows = (await collectSessionRows(adapter, readProcessTable())).flatMap((w) => w.sessions).filter((r) => r.engine === 'codex')
     // Scan: one entry per terminal tab, in bar order, each bound to its tab.
     // Live tabs are included so they're reported and so they claim their name
     // against a same-named empty tab elsewhere in the bar.
@@ -268,9 +273,11 @@ export async function runRestore(
         // and restore replaces a dead tab rather than reviving it — so without
         // this the recreated tab comes back uncoloured.
         const termBlock = (tabsById.get(tabId) ?? []).find((b) => b.view === 'term')
+        const cx = codexRows.find((r) => r.tab_id === tabId)
         entries.push({
+          ...(cx ? { engine: cx.engine, sessionId: cx.session_id ?? undefined } : {}),
           name: tabNames.get(tabId) ?? tabId.slice(0, 8),
-          dir: req.scopedDir ?? undefined,
+          dir: req.scopedDir ?? cx?.cwd ?? undefined,
           tabId,
           color: termBlock?.color,
           ...(req.suspended ? { suspended: true } : {}),
@@ -311,7 +318,7 @@ export async function runRestore(
   // Falling back to the configured flags is the right default, but it must not
   // be silent: a tab that was deliberately in plan mode coming back able to
   // bypass permissions is exactly the surprise this reports.
-  const withoutMode = actionable.filter((p) => !p.permissionMode)
+  const withoutMode = actionable.filter((p) => p.entry.engine !== 'codex' && !p.permissionMode)
   if (withoutMode.length) {
     const flags = loadConfig().claude.flags
     consola.warn(
@@ -392,6 +399,7 @@ export function rehomeEntries(
   warn: (message: string) => void,
 ): RestoreEntry[] {
   return entries.map((e) => {
+    if (e.engine === 'codex') return { ...e, backend: undefined, configDir: undefined }
     if (!e.sessionId || (!e.backend && !e.configDir)) return e
     const claimed = dirs.find((d) => (e.configDir && d.root === e.configDir) || (e.backend && d.backend === e.backend))
     if (!claimed) return e
@@ -429,7 +437,8 @@ export function buildPlanDeps(
     procRows?: ProcRow[] | null
   },
 ): PlanDeps {
-  const live = opts.procRows ? liveSessionPids(opts.procRows) : undefined
+  const codexSessions = readCodexSessions()
+  const live = opts.procRows ? new Map([...liveSessionPids(opts.procRows), ...codexLiveSessionPids(opts.procRows)]) : undefined
   // A placeholder waiting on a session holds it as surely as a running Claude
   // does: restoring that session again elsewhere would put two tabs on it, and
   // waking either would start a second Claude on one transcript.
@@ -481,7 +490,7 @@ export function buildPlanDeps(
       return status === 'suspended' && opts.procRows ? 'terminal' : status
     },
     confirmEmpty: (blockId) => adapter.confirmScrollbackEmpty(blockId),
-    resolveSession: (entry) => resolveEntrySession(entry, opts.sessionScope),
+    resolveSession: (entry) => resolveEntrySession(entry, opts.sessionScope, codexSessions),
     ...(live ? { liveSessionPids: (id: string) => live.get(id) ?? [] } : {}),
     createMissing: opts.createMissing,
     registeredSuspended: (id) => registered.has(id.toLowerCase()),
@@ -503,7 +512,11 @@ export function buildPlanDeps(
  *   - name only, which searches every project in every config dir and takes the
  *     newest match.
  */
-function resolveEntrySession(entry: RestoreEntry, scope?: ConfigDirScope): ResolvedSession | null {
+function resolveEntrySession(entry: RestoreEntry, scope?: ConfigDirScope, codexSessions = readCodexSessions()): ResolvedSession | null {
+  if (entry.engine === 'codex') {
+    const hit = codexSessions.find((s) => s.id === entry.sessionId)
+    return hit ? { id: hit.id, dir: entry.dir ?? hit.cwd } : null
+  }
   if (entry.sessionId) {
     const located =
       locateSessionById(entry.sessionId, entry.dir, scope) ?? locateSessionById(entry.sessionId, undefined, scope)
@@ -958,7 +971,7 @@ async function executePlan(
           // for this tab, and the mode is part of what it asked for.
           : `claude${permissionModeFlag(p)}`
         const { env, model } = launchEnvFor(p.backend, p.configDir)
-        const newTabId = await ctx.spawnSession({
+        const newTabId = p.entry.engine === 'codex' ? await openCodexSession({ tabName: p.entry.name, dir: p.dir!, resumeId: p.sessionId, color: colorForEntry(p, config) }) : await ctx.spawnSession({
           tabName: p.entry.name,
           dir: p.dir!,
           claudeCmd,
@@ -1094,7 +1107,7 @@ async function verifySpawns(
     const term = blocks.find((b) => b.view === 'term')
 
     let resolvedSessionId: string | undefined
-    if (p.dir && nameCount.get(p.entry.name) === 1) {
+    if (p.entry.engine !== 'codex' && p.dir && nameCount.get(p.entry.name) === 1) {
       try {
         resolvedSessionId = resolveTabSession(p.dir, p.entry.name)?.id
       } catch {
@@ -1130,6 +1143,7 @@ async function verifySpawns(
 /** The registry record a suspended restore entry becomes. */
 function placeholderRecordOf(p: PlannedEntry) {
   return {
+    engine: p.entry.engine,
     sessionId: p.sessionId!,
     name: p.entry.name,
     dir: p.dir!,
@@ -1203,7 +1217,7 @@ let launchedCache: { at: number; ids: Map<string, number[]> | null } | undefined
 function sessionLaunched(sessionId: string): boolean | undefined {
   if (!launchedCache || Date.now() - launchedCache.at > 1000) {
     const rows = readProcessTable()
-    launchedCache = { at: Date.now(), ids: rows ? liveSessionPids(rows) : null }
+    launchedCache = { at: Date.now(), ids: rows ? new Map([...liveSessionPids(rows), ...codexLiveSessionPids(rows)]) : null }
   }
   return launchedCache.ids ? launchedCache.ids.has(sessionId) : undefined
 }
@@ -1270,6 +1284,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  * fresh conversation in the tab, which looks like a successful restore.
  */
 export function buildResumeCommand(p: PlannedEntry, extraFlags: string): string {
+  if (p.entry.engine === 'codex') {
+    const shell = resolveTabShell()
+    const body = codexLaunchBody({ resumeId: p.sessionId, cwd: p.dir, readClaudeMd: existsSync(join(p.dir!, 'CLAUDE.md')) && !existsSync(join(p.dir!, 'AGENTS.md')) }, shell)
+    return shell.posix ? `cd ${shellQuoteArg(p.dir!)} && ${body}` : body
+  }
   const { env, model } = launchEnvFor(p.backend, p.configDir)
   const envPrefix = env ? shellQuoteEnv(env) : ''
   const modelPart = model ? ` --model ${JSON.stringify(model)}` : ''
