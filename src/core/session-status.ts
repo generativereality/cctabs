@@ -1,4 +1,5 @@
 import type { PermissionMode, SessionStatus } from '../types/index.js'
+import { codexStatus } from './codex.js'
 
 /**
  * What a terminal tab's captured output says about the Claude session in it.
@@ -411,6 +412,10 @@ export function classifyTerminalBuffer(buffer: string): SessionStatus {
   if (/[$%>]\s*$/.test(lastLine) && !lastLine.includes('claude')) {
     return 'terminal'
   }
+
+  // A Codex tab (`cctabs new … --engine codex`): its own busy/idle lines.
+  const codex = codexStatus(buffer)
+  if (codex) return codex
 
   // Tabby's buffer endpoint can drop the spaces between adjacent characters
   // depending on how Claude rendered them, so compare whitespace-stripped

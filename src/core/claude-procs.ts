@@ -1,4 +1,6 @@
 import { spawnSync } from 'child_process'
+import { readlinkSync } from 'fs'
+import { isCodexCommand } from './codex.js'
 import { basename } from 'path'
 
 /**
@@ -27,6 +29,8 @@ export interface ProcRow {
   pid: number
   ppid: number
   command: string
+  cwd?: string
+  startedAt?: number
 }
 
 /** A process that is Claude Code itself, with what its argv says. */
@@ -190,7 +194,20 @@ export function readProcessTable(): ProcRow[] | null {
     maxBuffer: 64 * 1024 * 1024,
   })
   if (r.status !== 0 || !r.stdout) return null
-  return parseProcessTable(r.stdout)
+  const rows = parseProcessTable(r.stdout)
+  for (const row of rows.filter((p) => isCodexCommand(p.command))) {
+    const start = spawnSync('ps', ['-p', String(row.pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 2000 })
+    const date = Date.parse(start.stdout?.trim() ?? '')
+    if (Number.isFinite(date)) row.startedAt = date
+    try {
+      if (process.platform === 'linux') row.cwd = readlinkSync(`/proc/${row.pid}/cwd`)
+      else {
+        const cwd = spawnSync('lsof', ['-a', '-p', String(row.pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8', timeout: 2000 })
+        row.cwd = cwd.stdout?.split('\n').find((l) => l.startsWith('n'))?.slice(1)
+      }
+    } catch { /* process exited */ }
+  }
+  return rows
 }
 
 /** A tab reduced to what process matching needs. */

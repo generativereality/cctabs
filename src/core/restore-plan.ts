@@ -1,3 +1,4 @@
+import type { Engine } from './codex.js'
 import type { PermissionMode, SessionStatus } from '../types/index.js'
 import type { SessionOrigin } from './config-dirs.js'
 
@@ -17,6 +18,7 @@ import type { SessionOrigin } from './config-dirs.js'
  */
 
 export interface RestoreEntry extends SessionOrigin {
+  engine?: Engine
   /** Tab title / Claude session `--name`. */
   name: string
   /**
@@ -359,6 +361,10 @@ export async function planRestore(
 
     if (session === undefined) session = deps.resolveSession(entry)
 
+    if (entry.engine === 'codex' && !session) {
+      planned.push({ entry, action: 'no-session', tabId: p.tabId, blockId: p.blockId })
+      continue
+    }
     if (session && claimedSessions.has(session.id)) {
       planned.push({ entry, action: 'duplicate-session', tabId: p.tabId, blockId: p.blockId, sessionId: session.id })
       continue

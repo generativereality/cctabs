@@ -1,0 +1,70 @@
+import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { codexResumeId, matchCodexTabs, readCodexSessions } from './codex-sessions.js'
+import { codexLaunchBody } from './open-codex.js'
+import { parseManifest } from './manifest.js'
+import { placeholderClaudeLine } from './suspend.js'
+
+const id = '12345678-1234-1234-1234-123456789abc'
+const session = { id, cwd: '/scratch', startedAt: 1100, file: '/rollout.jsonl' }
+const tabs = [{ tabId: 'a', name: 'renamed', shellPid: 10 }]
+const rows = [{ pid: 10, ppid: 1, command: 'zsh' }, { pid: 11, ppid: 10, command: '/bin/codex hello', cwd: '/scratch', startedAt: 1000 }]
+
+describe('Codex session identity', () => {
+  test('reads id and session_id metadata, ignoring malformed files', () => {
+    const root = mkdtempSync(join(tmpdir(), 'cctabs-codex-'))
+    try {
+      mkdirSync(join(root, '2026'))
+      writeFileSync(join(root, '2026', 'rollout-one.jsonl'), JSON.stringify({ type: 'session_meta', timestamp: '2026-10-16T10:00:00Z', payload: { id, cwd: '/scratch' } }) + '\n' + 'large conversation')
+      writeFileSync(join(root, 'rollout-bad.jsonl'), '{')
+      expect(readCodexSessions(root).map((s) => s.id)).toEqual([id])
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
+  test('matches shell descendants, independently of tab name', () => {
+    expect(matchCodexTabs(tabs, rows, [session]).get('a')?.id).toBe(id)
+    expect(matchCodexTabs([{ ...tabs[0], shellPid: 99 }], rows, [session]).size).toBe(0)
+  })
+  test('resume argv is exact even without rollout or cwd', () => {
+    expect(codexResumeId(`codex resume -m gpt ${id}`)).toBe(id)
+    expect(codexResumeId(`codex ${id}`)).toBeUndefined()
+    expect(codexResumeId(`zsh -c codex resume ${id}`)).toBeUndefined()
+    expect(matchCodexTabs(tabs, [rows[0], { ...rows[1], command: `codex resume ${id}` }], []).get('a')?.id).toBe(id)
+  })
+  test('refuses old, multiple, wrong-directory and shared candidates', () => {
+    expect(matchCodexTabs(tabs, rows, [{ ...session, startedAt: 999 }]).get('a')?.id).toBeUndefined()
+    expect(matchCodexTabs(tabs, rows, [session, { ...session, id: 'other' }]).get('a')?.id).toBeUndefined()
+    expect(matchCodexTabs(tabs, rows, [{ ...session, cwd: '/other' }]).get('a')?.id).toBeUndefined()
+    const two = [...tabs, { tabId: 'b', name: 'b', shellPid: 20 }]
+    const procs = [...rows, { ...rows[1], pid: 21, ppid: 20 }]
+    expect([...matchCodexTabs(two, procs, [session]).values()].every((m) => !m.id)).toBe(true)
+  })
+  test('manifest and placeholder preserve engine', () => {
+    const entry = parseManifest(JSON.stringify([{ name: 'cx', cwd: '/scratch', engine: 'codex', session_id: id, suspended: true }]))[0]
+    expect(entry.engine).toBe('codex')
+    expect(entry.suspended).toBe(true)
+    expect(placeholderClaudeLine({ engine: entry.engine, sessionId: id, name: 'cx', dir: '/scratch', extraFlags: [], recordFile: '/record' })).toBe(`codex 'resume' '${id}'`)
+  })
+})
+
+test('Windows launch keeps hostile argv out of cmd and round-trips through encoded bootstrap', () => {
+  const prompt = 'quotes " and \' %PATH% ^ & | ! bang\nsecond\r\nline \\ trailing\\'
+  const body = codexLaunchBody({ prompt, extraFlags: [] }, { posix: false })
+  expect(body).not.toContain(prompt)
+  const encoded = /Buffer.from\('([A-Za-z0-9+/=]+)'/.exec(body)![1]
+  const script = Buffer.from(encoded, 'base64').toString()
+  let childArgs: string[] = []
+  const fakeRequire = (mod: string) => mod === 'node:child_process' ? { spawnSync: (cmd: string, args: string[]) => {
+    if (cmd === 'where.exe') return { stdout: 'C:\\npm\\codex.cmd\r\n' }
+    childArgs = args
+    return { status: 0 }
+  } } : mod === 'node:fs' ? { existsSync: () => true } : { dirname: () => 'C:\\npm', join: (...s: string[]) => s.join('\\') }
+  new Function('require', 'process', script)(fakeRequire, { execPath: 'node.exe', exit: () => {} })
+  expect(childArgs.at(-1)).toBe(prompt)
+})
+
+test('a Codex child tool under Claude does not become the terminal engine', () => {
+  const nested = [rows[0], { pid: 12, ppid: 10, command: 'claude' }, { ...rows[1], ppid: 12 }]
+  expect(matchCodexTabs(tabs, nested, [session]).size).toBe(0)
+})

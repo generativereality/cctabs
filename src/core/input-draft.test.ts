@@ -78,3 +78,29 @@ describe('draftBackoff', () => {
     expect(draftBackoff(0)).toEqual([])
   })
 })
+
+describe('readInputDraft — Codex', () => {
+  const FOOT = '  ← for agents · ? for shortcuts'
+  it('reads an empty Codex box (dim placeholder) as empty', () => {
+    expect(readInputDraft(screen('› {reply with just: ready}', '• ready', '› {Ask Codex to do anything}', '  GPT default · /tmp', FOOT)))
+      .toEqual({ state: 'empty' })
+  })
+  it('finds a draft in the Codex box, not the submitted prompt above it', () => {
+    expect(readInputDraft(screen('› {reply with just: ready}', '• ready', '› half a thought', '  GPT default · /tmp', FOOT)))
+      .toEqual({ state: 'draft', text: 'half a thought' })
+  })
+})
+
+describe('readInputDraft — Codex while typing', () => {
+  it('finds the draft though Codex hides its footer while you type', () => {
+    // Real screen, Codex 0.162.1: the "? for shortcuts" line goes blank.
+    const rows = screen(
+      '{› }reply with just: ok', '{• }ok', '{  Worked for 2s • 20:12}',
+      '› half written thought', '', '  GPT-6.1-Sol default · /tmp/x', '                    ',
+    )
+    expect(readInputDraft(rows)).toEqual({ state: 'draft', text: 'half written thought' })
+  })
+  it('does not read a shell prompt drawn with › as a Codex box', () => {
+    expect(readInputDraft(screen('motin › ls', 'a b c', 'motin › ')).state).toBe('unknown')
+  })
+})

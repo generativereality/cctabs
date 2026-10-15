@@ -88,8 +88,8 @@ export function lastMessageAt(jsonlTail: string): number | undefined {
     const line = lines[i]
     if (!line.includes('"timestamp"')) continue
     try {
-      const e = JSON.parse(line) as { type?: string; timestamp?: string }
-      if ((e.type === 'user' || e.type === 'assistant') && e.timestamp) {
+      const e = JSON.parse(line) as { type?: string; timestamp?: string; payload?: { type?: string; role?: string } }
+      if ((e.type === 'user' || e.type === 'assistant' || (e.type === 'response_item' && e.payload?.type === 'message' && ['user', 'assistant'].includes(e.payload.role ?? ''))) && e.timestamp) {
         const t = Date.parse(e.timestamp)
         if (Number.isFinite(t)) return t
       }

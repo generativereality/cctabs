@@ -7,6 +7,7 @@ export const CONFIG_PATH = join(homedir(), '.config', 'cctabs', 'config.toml')
 
 const DEFAULT_CONFIG: Config = {
   claude: { flags: ['--allow-dangerously-skip-permissions'] },
+  codex: { flags: [] },
   defaults: { workspace: '', prefix: '', color: '' },
 }
 
@@ -16,6 +17,10 @@ const DEFAULT_CONFIG_FILE = `# cctabs configuration
 [claude]
 # Extra flags passed to every \`claude\` invocation.
 flags = ["--allow-dangerously-skip-permissions"]
+
+[codex]
+# Extra flags passed to every \`codex\` launch (\`cctabs new … --engine codex\`).
+flags = []
 
 [defaults]
 # Default workspace to open new sessions in. Inert on Tabby, which has no
@@ -71,6 +76,7 @@ function parseToml(text: string): Partial<Record<string, Record<string, unknown>
 export function loadConfig(): Config {
   const config: Config = {
     claude: { ...DEFAULT_CONFIG.claude },
+    codex: { ...DEFAULT_CONFIG.codex },
     defaults: { ...DEFAULT_CONFIG.defaults },
   }
 
@@ -79,6 +85,7 @@ export function loadConfig(): Config {
   try {
     const parsed = parseToml(readFileSync(CONFIG_PATH, 'utf-8'))
     if (parsed.claude) Object.assign(config.claude, parsed.claude)
+    if (parsed.codex) Object.assign(config.codex, parsed.codex)
     if (parsed.defaults) Object.assign(config.defaults, parsed.defaults)
   } catch {
     // silently return defaults on parse error

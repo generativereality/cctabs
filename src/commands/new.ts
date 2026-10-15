@@ -1,6 +1,6 @@
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { writeFileSync, existsSync } from 'fs'
+import { writeFileSync, existsSync, readFileSync } from 'fs'
 import { tmpdir, homedir } from 'os'
 import { join, resolve } from 'path'
 import { openSession } from '../core/open-session.js'
@@ -14,10 +14,12 @@ import { requireAdapter } from '../core/adapter.js'
 import { tabsNamed, nameClashWarning } from '../core/tab-match.js'
 import { openPlaceholderTab } from '../core/suspend-ops.js'
 import { locateTranscriptFile } from '../core/transcript.js'
+import { parseEngine } from '../core/codex.js'
+import { openCodexSession } from '../core/open-codex.js'
 
 export const newCommand = define({
   name: 'new',
-  description: 'Open a new tab and launch claude. Usage: cctabs new <name> [dir] (dir defaults to cwd)',
+  description: 'Open a new tab and launch claude (or codex, with --engine codex). Usage: cctabs new <name> [dir] (dir defaults to cwd)',
   args: {
     name: { type: 'positional', description: 'Tab name' },
     // `dir` is read from ctx.positionals, deliberately NOT declared: this gunshi
@@ -33,6 +35,7 @@ export const newCommand = define({
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
+    engine: { type: 'string', short: 'e', description: 'What runs in the tab: claude (default) or codex (OpenAI Codex CLI). With codex the prompt is passed to codex at launch; --resume takes a Codex session id; --model passes -m. Not yet with --backend or --suspended, and not yet on Windows.' },
     suspended: { type: 'boolean', short: 's', description: 'Open the tab SUSPENDED (needs --resume): named and holding the session, but running a placeholder instead of Claude until woken by Enter, `cctabs resume`/`wake`, or `cctabs send`.' },
   },
   async run(ctx) {
@@ -51,6 +54,11 @@ export const newCommand = define({
     const colorInput = ctx.values.color as string | undefined
     const suspended = !!ctx.values.suspended
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
+    const engine = parseEngine(ctx.values.engine as string | undefined)
+    if (!engine) { consola.error(`Unknown --engine "${ctx.values.engine}". Use claude or codex.`); process.exit(1) }
+    if (engine === 'codex') {
+      if (explicitBackend) { consola.error('--backend picks a Claude backend preset; it does not apply to --engine codex.'); process.exit(1) }
+    }
     if (suspended && !resumeId) {
       consola.error('--suspended needs --resume <session-id>: a suspended tab holds an existing session until it is woken. For a fresh session, just `cctabs new`.')
       process.exit(1)
@@ -81,7 +89,9 @@ export const newCommand = define({
     }
 
     let resolvedSessionId: string | undefined
-    if (resumeId) {
+    if (resumeId && engine === 'codex') {
+      resolvedSessionId = resumeId
+    } else if (resumeId) {
       const absDir = resolve(dir.replace(/^~/, homedir()))
       const expanded = expandSessionId(resumeId, absDir) ?? expandSessionId(resumeId)
       if (expanded) {
@@ -101,7 +111,7 @@ export const newCommand = define({
     let envVars: Record<string, string> | undefined
     let resolvedModel = modelOverride
     let backendColor: string | undefined
-    if (backendName) {
+    if (backendName && engine === 'claude') {
       const backend = resolveBackend(backendName)
       if (!backend) {
         consola.error(`Unknown backend "${backendName}". Available:`)
@@ -180,13 +190,14 @@ export const newCommand = define({
     } catch { /* never block a new tab on the warning */ }
 
     if (suspended) {
-      const located = locateTranscriptFile(resolvedSessionId!)
+      const located = engine === 'claude' ? locateTranscriptFile(resolvedSessionId!) : null
       try {
         const tabId = await openPlaceholderTab(requireAdapter(), {
+          engine,
           sessionId: resolvedSessionId!,
           name: displayName,
           dir: resolve(sessionDir.replace(/^~/, homedir())),
-          backend: backendName || located?.backend,
+          backend: engine === 'claude' ? backendName || located?.backend : undefined,
           configDir: located?.configDir,
         }, { afterActive: true, color })
         consola.success(`⏸ Tab "${displayName}" [${tabId.slice(0, 8)}] suspended on ${resolvedSessionId!.slice(0, 8)}… at ${dir} — wakes on Enter, \`cctabs resume\`, or \`cctabs send\``)
@@ -196,6 +207,29 @@ export const newCommand = define({
       }
       return
     }
+
+    if (engine === 'codex') {
+      const prompt = initialPromptFile ? readFileSync(initialPromptFile, 'utf-8').trimEnd() : undefined
+      try {
+        const tabId = await openCodexSession({
+          tabName: displayName,
+          dir: sessionDir,
+          prompt,
+          resumeId: resolvedSessionId,
+          model: modelOverride,
+          afterActive: true,
+          color,
+        })
+        const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
+        const rs = resolvedSessionId ? ` resume ${resolvedSessionId.slice(0, 8)}…` : ''
+        consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → codex${rs} at ${dir}${wt}`)
+      } catch (e) {
+        consola.error((e as Error).message)
+        process.exit(1)
+      }
+      return
+    }
+
 
     let claudeCmd: string
     if (resolvedSessionId) {

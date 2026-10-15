@@ -206,3 +206,20 @@ describe('buildManifest — suspended tabs', () => {
     expect(r.problems).toEqual([])
   })
 })
+
+it('validates Codex rollouts with the engine and preserves it in a reboot save', () => {
+  const seen: unknown[] = []
+  const result = buildManifest([row('codex', { engine: 'codex', session_id: S1, session_source: 'argv', status: 'suspended' })], opts({
+    transcriptExists: (id, engine) => { seen.push([id, engine]); return engine === 'codex' },
+    transcriptInDir: () => false,
+  }))
+  expect(seen).toEqual([[S1, 'codex']])
+  expect(result.problems).toEqual([])
+  expect(result.entries[0]).toMatchObject({ engine: 'codex', session_id: S1, suspended: true })
+})
+
+it('excludes its own Codex process even before a rollout id is known', () => {
+  const result = buildManifest([row('self-codex', { engine: 'codex', codex_pid: 123 })], opts({ selfCodexPid: 123 }))
+  expect(result.entries).toEqual([])
+  expect(result.excluded.map((e) => e.name)).toEqual(['self-codex'])
+})

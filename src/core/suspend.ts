@@ -1,3 +1,4 @@
+import { codexArgs, isCodexCommand, type Engine } from './codex.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -43,6 +44,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Everything needed to relaunch a suspended session, and to find its tab. */
 export interface SuspendRecord {
+  engine?: Engine
   sessionId: string
   /** Tab title and `claude --name`. */
   name: string
@@ -120,6 +122,8 @@ export function shellCanHostPlaceholder(shell: TabShell): boolean {
 }
 
 export interface PlaceholderSpec {
+  engine?: Engine
+  readClaudeMd?: boolean
   sessionId: string
   name: string
   dir: string
@@ -143,6 +147,7 @@ export interface PlaceholderSpec {
  */
 export function placeholderClaudeLine(spec: PlaceholderSpec): string {
   const q = shellQuoteArg
+  if (spec.engine === 'codex') return ['codex', ...codexArgs({ resumeId: spec.sessionId, readClaudeMd: spec.readClaudeMd, extraFlags: spec.extraFlags }).map(q)].join(' ')
   const env = Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${q(v)}`)
   const argv = [
     'claude',
@@ -219,7 +224,7 @@ export function placeholderSessions(rows: ProcRow[]): Map<string, PlaceholderPro
     if (isClaudeCommand(r.command)) continue
     const m = PLACEHOLDER_RE.exec(r.command)
     if (!m || !UUID.test(m[1])) continue
-    const woken = descendantsOf(r.pid, rows).some((d) => isClaudeCommand(d.command))
+    const woken = descendantsOf(r.pid, rows).some((d) => (isClaudeCommand(d.command) || isCodexCommand(d.command)))
     const id = m[1].toLowerCase()
     const prior = out.get(id)
     // Two placeholders on one session: prefer the one still waiting, since

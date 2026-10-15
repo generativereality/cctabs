@@ -80,6 +80,7 @@ export function parseManifest(raw: string): RestoreEntry[] {
     }
     entries.push({
       name,
+      ...(it.engine === 'codex' ? { engine: 'codex' as const } : {}),
       dir: resolve(dir.replace(/^~/, homedir())),
       sessionId,
       backend,

@@ -1,6 +1,10 @@
 # cctabs
 
-**Run a fleet of Claude Code sessions. From the CLI — or from Claude itself.**
+**Run a fleet of Claude Code and Codex CLI sessions in terminal tabs.**
+
+New in 0.6.0: `cctabs new review ~/Dev/myapp --engine codex --prompt "review the changes"`.
+Discover Codex session ids, save and restore mixed fleets, and keep Codex tabs suspended until
+you need them. [Codex setup and platform limits](skills/cctabs/references/codex.md).
 
 CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https://cctabs.com)
 
@@ -8,6 +12,7 @@ CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https
 cctabs new auth ~/Dev/myapp       # new tab, claude starts
 cctabs new api ~/Dev/myapp
 cctabs new infra ~/Dev/myapp
+cctabs new review ~/Dev/myapp --engine codex
 
 cctabs sessions                   # what's running across all tabs
 cctabs scrollback auth            # read what auth is doing without switching tabs
@@ -108,6 +113,7 @@ cctabs sessions                 # check what's already running first
 cctabs new auth ~/Dev/myapp
 cctabs new payments ~/Dev/myapp
 cctabs new infra ~/Dev/myapp
+cctabs new review ~/Dev/myapp --engine codex
 ```
 
 Each tab gets named, Claude's session name syncs to the tab title via `--name`.
