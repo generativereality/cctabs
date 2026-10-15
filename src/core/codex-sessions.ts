@@ -1,7 +1,7 @@
 import { closeSync, openSync, readSync, readdirSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import { descendantsOf, type ProcRow, type ProcTab } from './claude-procs.js'
+import { ancestorsOf, descendantsOf, isClaudeCommand, type ProcRow, type ProcTab } from './claude-procs.js'
 import { isCodexCommand } from './codex.js'
 
 export interface CodexSession { id: string; cwd: string; startedAt: number; file: string }
@@ -57,6 +57,10 @@ export function matchCodexTabs(tabs: ProcTab[], rows: ProcRow[], sessions: Codex
     const under = [...(root ? [root] : []), ...descendantsOf(tab.shellPid, rows)].filter((r) => isCodexCommand(r.command))
     const proc = under.find((r) => !/^(?:\S*[\\/])?node(?:\.exe)?\s/i.test(r.command)) ?? under[0]
     if (!proc) continue
+    // A Codex tool started by Claude does not own Claude's terminal tab.
+    const chain = ancestorsOf(proc.pid, rows)
+    const tabAt = chain.indexOf(tab.shellPid)
+    if (chain.slice(1, tabAt < 0 ? undefined : tabAt).some((pid) => rows.some((r) => r.pid === pid && isClaudeCommand(r.command)))) continue
     const id = codexResumeId(proc.command)
     if (id) { out.set(tab.tabId, { proc, id, session: sessions.find((s) => s.id === id) }); continue }
     const candidates = sessions.filter((s) => proc.cwd === s.cwd && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000)

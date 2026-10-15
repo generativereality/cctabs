@@ -63,3 +63,8 @@ test('Windows launch keeps hostile argv out of cmd and round-trips through encod
   new Function('require', 'process', script)(fakeRequire, { execPath: 'node.exe', exit: () => {} })
   expect(childArgs.at(-1)).toBe(prompt)
 })
+
+test('a Codex child tool under Claude does not become the terminal engine', () => {
+  const nested = [rows[0], { pid: 12, ppid: 10, command: 'claude' }, { ...rows[1], ppid: 12 }]
+  expect(matchCodexTabs(tabs, nested, [session]).size).toBe(0)
+})
