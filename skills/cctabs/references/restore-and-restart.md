@@ -45,9 +45,12 @@ Then `prepare-reboot` stops: reboot, open Tabby, run `cctabs restore --pending`.
 come back as placeholders that wake on Enter or `cctabs send` (`--suspend-older-than <age>` to
 choose, `--all-running` for none). 96 Claudes starting at once took this machine to load 575.
 
-**Windows** is supported but has not been run end to end yet: the worker's detachment from
-Tabby's process tree and the reopen from the recorded `Tabby.exe` path are the parts to watch.
-If Tabby doesn't come back, start it and run `cctabs restore --pending`.
+**Windows** has been run end to end (Windows 11 ARM64, Tabby 1.0.238, 2026-10-15): the worker
+survives its own tab closing, quits Tabby with `taskkill` (no `/F`), and reopens it from the
+recorded `Tabby.exe` path. One Windows-specific behaviour: the first tab the restore spawns into
+the freshly started Tabby can come up with **no process**; the automatic second pass recreates
+it. If Tabby doesn't come back at all, start it and run `cctabs restore --pending`.
+(This paragraph said "not run end to end yet" in the 0.5.12 release.)
 
 ## Workflow: Restoring tabs after a reboot
 
