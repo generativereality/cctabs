@@ -72,11 +72,9 @@ Install + restart Tabby in one shot from inside a Tabby tab:
 
 When you see that error, ask the user once:
 
-> *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin --yes` — that npm-installs the plugin AND restarts Tabby in the background, dropping you back into a forked session. Caveat: any other Tabby tabs you have open will be killed. OK?"*
+> *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin --yes`: it installs the plugin, saves every open session, closes the tabs, restarts Tabby and restores them all in a new tab. OK?"*
 
-On approval, run `cctabs install-tabby-plugin --yes`. Tabby quits ~2s after the command returns, reopens automatically, and spawns a new tab with your forked claude session. **Your current turn ends when Tabby quits**; the resumed claude in the new tab is where the user will continue.
-
-If the user wants to keep their other Tabby tabs intact, run `cctabs install-tabby-plugin --no-restart` instead and tell them to quit + reopen Tabby themselves.
+On approval, run `cctabs install-tabby-plugin --yes`. **Your current turn ends when Tabby quits**; this session comes back with the rest. `--no-restart` installs only, for a user who will restart Tabby themselves.
 
 `cctabs doctor` is also available for a deliberate environment check: it reports the detected terminal (and how it was detected), whether a login+interactive shell can find `node`, and — on Tabby — whether the cctabs plugin answers its localhost health endpoint. Useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
 
@@ -187,6 +185,8 @@ cctabs restore [dir] [--dry]             # resume every empty tab by name search
 cctabs restore --manifest <file|-> [-c] [--dry]  # resume from an explicit {name,dir,session_id,backend?} list — accepts `cctabs sessions --json` directly
 cctabs manifest [-o file] [--repoint-missing-dirs <dir>]  # snapshot the fleet as a VALIDATED manifest: one entry per session id, this session left out, dirs + transcripts checked
 cctabs restart [--all | --only a,b] [--dry]      # restart Claude in every tab (new Claude Code version): snapshot → stop → restore → audit. Bare = plan only
+cctabs restart-tabby [--yes]              # restart TABBY without losing tabs: save all → close → quit+reopen → restore in a new tab
+cctabs prepare-reboot [--yes]             # before restarting the computer: save all + close; afterwards `cctabs restore --pending`
 cctabs suspend <tab> [<tab>…] [-c <colour>]  # stop Claude, leave a placeholder that knows its session (NOT on remote control until woken)
 cctabs wake <tab>                        # wake a suspended tab, wait for a READY prompt (so do `resume <name>`, Enter, or just `send`)
 cctabs restore --manifest <file> -c --suspended   # bring a whole fleet back as placeholders, in seconds
@@ -221,6 +221,10 @@ session but runs a placeholder instead of Claude. **`cctabs send` to one just
 works**: it wakes it, waits for a ready prompt, delivers, and verifies against
 the transcript — the sender doesn't need to know. ⚠️ A suspended tab is **not on
 remote control** until woken. Details: [references/suspended-tabs.md](references/suspended-tabs.md).
+
+## "Restart Tabby" / "I'm restarting my computer"
+
+Use the command, never a hand-run save-and-close: the steps have traps a script handles and an agent doesn't (a capture that silently came back empty, closing by name). Run it once **without** `--yes` to show the user what it will save and close; it stops at the confirmation when there's no terminal to ask in. Ask the user, then run with `--yes`. Your turn ends with the tab. After a reboot, the first `cctabs` command in a new Tabby tab is `cctabs restore --pending`; `cctabs doctor` reports a fleet waiting. Details: [references/restore-and-restart.md](references/restore-and-restart.md#restarting-tabby-or-the-computer).
 
 ## Reference files — read the one that fits, when it fits
 

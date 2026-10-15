@@ -1,8 +1,9 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'fs'
 import { extname, join } from 'path'
 import { originOf, scopeToDirs, type ConfigDirScope, type SessionOrigin } from './config-dirs.js'
 import { pathToProjectSlug } from './session.js'
 import { isTrailerFile } from './transcript-kind.js'
+import { lastMessageAt } from './restore-age.js'
 
 /** A session's transcript file, and which Claude account it was found under. */
 export interface LocatedTranscript extends SessionOrigin {
@@ -205,4 +206,29 @@ export function readUserMessages(file: string): string[] {
   }
 
   return messages
+}
+
+/**
+ * When this session last had a real message, read from the END of its
+ * transcript (see lastMessageAt for why not mtime). Reads a growing tail
+ * — 256 KB, then 4 MB, then the whole file — so a long session costs a
+ * small read, and one whose last messages sit behind a big tool result
+ * still gets an answer.
+ */
+export function readLastMessageAt(file: string): number | undefined {
+  let size: number
+  try { size = statSync(file).size } catch { return undefined }
+  for (const want of [256 * 1024, 4 * 1024 * 1024, size]) {
+    const n = Math.min(want, size)
+    const fd = openSync(file, 'r')
+    try {
+      const buf = Buffer.alloc(n)
+      readSync(fd, buf, 0, n, size - n)
+      const t = lastMessageAt(buf.toString('utf-8'))
+      if (t !== undefined || n === size) return t
+    } finally {
+      closeSync(fd)
+    }
+  }
+  return undefined
 }

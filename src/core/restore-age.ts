@@ -71,3 +71,29 @@ export function suspendOlderThan(
   })
   return { entries: out, suspended, unknown }
 }
+
+/**
+ * When a transcript last had a real message: the timestamp of its last `user`
+ * or `assistant` entry, in epoch ms. Pure — given the tail of the file.
+ *
+ * Not the file's mtime. A closing Claude appends a metadata trailer
+ * (`custom-title`, `agent-name`, `last-prompt`…) on its way out, so closing a
+ * fleet stamps every transcript with the time of the close. Measured
+ * 2026-10-15: after a fleet close, `--suspend-older-than 3d` by mtime found
+ * 0 of 96 sessions idle — and would have started all 96 at once.
+ */
+export function lastMessageAt(jsonlTail: string): number | undefined {
+  const lines = jsonlTail.split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]
+    if (!line.includes('"timestamp"')) continue
+    try {
+      const e = JSON.parse(line) as { type?: string; timestamp?: string }
+      if ((e.type === 'user' || e.type === 'assistant') && e.timestamp) {
+        const t = Date.parse(e.timestamp)
+        if (Number.isFinite(t)) return t
+      }
+    } catch { /* a torn line — the first one of a tail chunk, usually */ }
+  }
+  return undefined
+}

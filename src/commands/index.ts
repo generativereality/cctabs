@@ -25,6 +25,7 @@ import { exportCommand } from './export-cmd.js'
 import { importCommand } from './import-cmd.js'
 import { profileCopyCommand } from './profile-copy.js'
 import { sortCommand } from './sort.js'
+import { restartTabbyCommand, prepareRebootCommand, restartTabbyWorkerCommand } from './restart-tabby.js'
 import { suspendCommand, wakeCommand } from './suspend.js'
 
 // Default command: show sessions (most common use)
@@ -86,6 +87,9 @@ const subCommands = new Map([
   ['restore', restoreCommand],
   ['manifest', manifestCommand],
   ['restart', restartCommand],
+  ['restart-tabby', restartTabbyCommand],
+  ['prepare-reboot', prepareRebootCommand],
+  ['restart-tabby-worker', restartTabbyWorkerCommand],
   ['backends', backendsCommand],
   ['doctor', doctorCommand],
   ['install-tabby-plugin', installTabbyPluginCommand],
