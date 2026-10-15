@@ -118,13 +118,18 @@ export const restoreCommand = define({
       if (suspended || manifest.some((e) => e.suspended && e.sessionId)) {
         try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
       }
-      const report = await runRestore({
-        manifest,
-        scopedDir: null,
-        createMissing,
-        dryRun,
-        suspended,
-      })
+      const req = { manifest, scopedDir: null, createMissing, dryRun, suspended }
+      let report = await runRestore(req)
+      const notUp = (r: typeof report) => (r ? [...r.outcomes.values()].filter((o) => o === 'failed' || o === 'unverified').length : 0)
+      // A pending restore gets one more pass on its own. It runs into a Tabby
+      // that has only just started, and there the first tab it spawned can miss
+      // the focus it needs to start at all: measured on Windows, 2026-10-15, one
+      // of two tabs came up with no process. The next pass sees exactly that
+      // (a tab with no process) and recreates it; tabs already up are left alone.
+      if (pending && !dryRun && notUp(report)) {
+        consola.info(`${notUp(report)} entr${notUp(report) === 1 ? 'y' : 'ies'} did not come up — one more pass…`)
+        report = await runRestore(req)
+      }
       if (pending && !dryRun) {
         const failed = report ? [...report.outcomes.values()].filter((o) => o === 'failed').length : 0
         if (report && !failed) {

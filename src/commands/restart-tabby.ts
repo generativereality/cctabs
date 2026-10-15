@@ -11,7 +11,7 @@ import { resolveTabShell, tabLaunchArgv, shellQuoteArg } from '../core/shell.js'
 import { gatherManifest, manifestJson, reportManifest } from './manifest.js'
 import { withoutInvalid } from '../core/fleet-manifest.js'
 import {
-  checkCapture, defaultSuspendAge, fleetDir, readPending, stampedManifestPath, tabbyLifecycle,
+  checkCapture, defaultSuspendAge, restorableEntries, fleetDir, readPending, stampedManifestPath, tabbyLifecycle,
   tabbyLaunchEnv, tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
 } from '../core/fleet-state.js'
 
@@ -50,16 +50,16 @@ export async function saveAndClose(
     consola.error(check.message)
     process.exit(1)
   }
-  const entries = withoutInvalid(result)
+  const entries = restorableEntries(withoutInvalid(result))
   const noSession = result.problems.filter((p) => p.code === 'no-session').map((p) => p.name)
   const manifestPath = stampedManifestPath(new Date())
   mkdirSync(fleetDir(), { recursive: true })
   writeFileSync(manifestPath, manifestJson(entries))
-  const withSession = entries.filter((e) => e.session_id).length
+  const withSession = entries.length
   const suspendAge = opts.allRunning ? undefined : (opts.suspendOlderThan ?? defaultSuspendAge(withSession))
 
   const others = [...new Set(liveTabIds)].filter((t) => t !== selfTab)
-  consola.success(`Saved ${entries.length} tab(s), ${withSession} with a session → ${manifestPath}`)
+  consola.success(`Saved ${withSession} session(s) → ${manifestPath}`)
   if (noSession.length) consola.warn(`${noSession.length} tab(s) have no Claude session and won't come back: ${noSession.join(', ')}`)
   consola.info(
     `Then: close the ${others.length} other tab(s) by id, ${opts.then}` +

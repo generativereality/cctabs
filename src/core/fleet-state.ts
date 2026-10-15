@@ -107,6 +107,19 @@ export function checkCapture(o: {
 }
 
 /**
+ * The entries a restart brings back: only those with a session. Pure.
+ *
+ * In a manifest, an entry with no session means "start a fresh Claude here".
+ * Right for a hand-written manifest, wrong for a restart: a plain shell tab, or
+ * the tab that ran the restart, came back as a NEW Claude sitting at the
+ * folder-trust dialog, right after the save had said it "won't come back"
+ * (measured on Windows, 2026-10-15).
+ */
+export function restorableEntries<E extends { session_id?: string }>(entries: E[]): E[] {
+  return entries.filter((e) => !!e.session_id)
+}
+
+/**
  * The suspend age to restore with when the user gave none. Restoring a large
  * fleet all at once is what pushed this machine to load 575 with 96 Claudes;
  * above 30 sessions, sessions idle for 3 days come back suspended (they wake on
