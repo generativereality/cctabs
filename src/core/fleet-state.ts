@@ -157,3 +157,37 @@ export function tabbyLifecycle(platform: Platform, exePath?: string): { quit: st
   }
   return { quit: ['pkill', '-TERM', '-x', 'tabby'], open: [exePath ?? 'tabby'] }
 }
+
+/**
+ * The environment to start Tabby with. Pure.
+ *
+ * Never the caller's own. `restart-tabby` runs inside a Claude, and Claude
+ * Code gives the processes its tools run CLAUDECODE, CLAUDE_CODE_SESSION_ID,
+ * its Remote Control session, a messaging socket and CLAUDE_CODE_CHILD_SESSION=1.
+ * `open -a Tabby` passed all of that to the new Tabby (measured 2026-10-15,
+ * macOS), and Tabby passes its environment to every tab: each Claude started
+ * there believed it was a sub-session and **saved no transcript**
+ * ("Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker"),
+ * and carried another session's id. A backend preset's ANTHROPIC_BASE_URL would
+ * have pointed every tab at that backend.
+ *
+ * macOS gets what the Dock would give it: a short allowlist. Elsewhere,
+ * where an allowlist would drop what the platform needs (SystemRoot on
+ * Windows, DISPLAY and friends on Linux), Claude's and cctabs' own variables
+ * are removed instead.
+ */
+export function tabbyLaunchEnv(env: Record<string, string | undefined>, platform: Platform): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (platform === 'darwin') {
+    for (const k of ['HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'SSH_AUTH_SOCK', '__CF_USER_TEXT_ENCODING']) {
+      const v = env[k]
+      if (v !== undefined) out[k] = v
+    }
+    return out
+  }
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined || /^(CLAUDE|ANTHROPIC_|CCTABS_)/i.test(k)) continue
+    out[k] = v
+  }
+  return out
+}

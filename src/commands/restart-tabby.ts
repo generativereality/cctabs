@@ -12,7 +12,7 @@ import { gatherManifest, manifestJson, reportManifest } from './manifest.js'
 import { withoutInvalid } from '../core/fleet-manifest.js'
 import {
   checkCapture, defaultSuspendAge, fleetDir, readPending, stampedManifestPath, tabbyLifecycle,
-  tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
+  tabbyLaunchEnv, tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
 } from '../core/fleet-state.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -259,7 +259,8 @@ export const restartTabbyWorkerCommand = define({
 
     await sleep(1000)
     log(`Starting Tabby: ${open.join(' ')}`)
-    spawn(open[0], open.slice(1), { detached: true, stdio: 'ignore', windowsHide: false }).unref()
+    // Tabby gets a clean environment, never this one — see tabbyLaunchEnv.
+    spawn(open[0], open.slice(1), { detached: true, stdio: 'ignore', windowsHide: false, env: tabbyLaunchEnv(process.env, platform) }).unref()
     const upBy = Date.now() + 120_000
     let up = false
     while (Date.now() < upBy && !(up = await pluginAnswers(port))) await sleep(1000)

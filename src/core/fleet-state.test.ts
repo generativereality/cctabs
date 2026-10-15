@@ -4,7 +4,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   checkCapture, clearPending, defaultSuspendAge, pendingPath, readPending, stampedManifestPath,
-  tabbyLifecycle, tabbyMainPids, tasklistShowsTabby, writePending, type PendingRestore,
+  tabbyLaunchEnv, tabbyLifecycle, tabbyMainPids, tasklistShowsTabby, writePending, type PendingRestore,
 } from './fleet-state.js'
 
 describe('checkCapture', () => {
@@ -90,5 +90,32 @@ describe('tabbyLifecycle', () => {
   it('reopens Windows and Linux from the path the running Tabby had', () => {
     expect(tabbyLifecycle('win32', 'C:\\\\Users\\\\x\\\\AppData\\\\Local\\\\Programs\\\\Tabby\\\\Tabby.exe').open[0]).toContain('Tabby.exe')
     expect(tabbyLifecycle('darwin').open).toEqual(['open', '-a', 'Tabby'])
+  })
+})
+
+describe('tabbyLaunchEnv', () => {
+  // What the worker had on 2026-10-15, inherited from the Claude that ran restart-tabby.
+  const leaked = {
+    HOME: '/Users/x', USER: 'x', SHELL: '/bin/zsh', PATH: '/usr/bin:/bin', TMPDIR: '/tmp/',
+    CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1', CLAUDE_CODE_SESSION_ID: 'a7829faa-9bda-4f95-b42c-0a7e004936ef',
+    CLAUDE_CODE_BRIDGE_SESSION_ID: 'session_x', CLAUDE_CODE_MESSAGING_SOCKET: '/tmp/cc-socks/1.sock', CLAUDE_PID: '30125',
+    CLAUDE_CONFIG_DIR: '/Users/x/.claude-other', ANTHROPIC_BASE_URL: 'https://backend.example', CCTABS_TABBY_PORT: '3397',
+    SystemRoot: 'C:\\Windows', DISPLAY: ':0',
+  }
+  const claudeish = (env: Record<string, string>) => Object.keys(env).filter((k) => /^(CLAUDE|ANTHROPIC_|CCTABS_)/i.test(k))
+
+  it('gives macOS Tabby a Dock-like environment, nothing of the Claude it came from', () => {
+    const env = tabbyLaunchEnv(leaked, 'darwin')
+    expect(claudeish(env)).toEqual([])
+    expect(env).toMatchObject({ HOME: '/Users/x', SHELL: '/bin/zsh', PATH: '/usr/bin:/bin' })
+    expect(env.DISPLAY).toBeUndefined()
+  })
+  it('strips Claude, backend and cctabs variables elsewhere, and keeps what the platform needs', () => {
+    for (const p of ['win32', 'linux'] as const) {
+      const env = tabbyLaunchEnv(leaked, p)
+      expect(claudeish(env)).toEqual([])
+      expect(env.SystemRoot).toBe('C:\\Windows')
+      expect(env.DISPLAY).toBe(':0')
+    }
   })
 })
