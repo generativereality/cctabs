@@ -136,7 +136,9 @@ bare Enter. It now finds "Yes, I trust this folder", moves the cursor there and
 confirms the move before pressing Enter, and presses nothing when it can't read
 the cursor. It does so on `cctabs new … --prompt/--file/--path` (an explicitly
 named directory) and when waking or restoring a session in a directory that
-already has Claude sessions; everywhere else the dialog is left for a human. By
+already has Claude sessions; everywhere else the dialog is left for a human. Since 0.5.12 it
+never sends a `--prompt` while any dialog is still open (it warns and names the prompt file), and
+it never answers Claude's one-time "Bypass Permissions mode" acceptance — that one is the user's. By
 hand, the working keystroke is Down-then-Enter — and `cctabs send` appends the Enter itself
 (it logs `sent "\u001b[B" ⏎`), so this is **one** call, never two:
 

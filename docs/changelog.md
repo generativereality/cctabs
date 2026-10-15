@@ -23,6 +23,8 @@ npm i -g @generativereality/cctabs
 
 ## Unreleased
 
+## 0.5.12 — 2026-10-15
+
 - **Fix: `cctabs new --prompt` could quit the Claude it had just opened.** When a startup dialog was still open, cctabs pasted the prompt and pressed Enter anyway, and Enter picked the dialog's default: "No, exit". It now never sends a prompt while a dialog is open. It says so, and gives the path to send the prompt from once the dialog is answered.
 - **Fix: on Windows, `cctabs new` left the folder-trust dialog unanswered.** It read the dialog from the terminal's output stream, and on Windows that never showed which option was selected. With the plugin's `screen` capability (tabby-cctabs 0.1.6) it now reads dialogs, and whether Claude is ready, off the tab's screen. Checked on a fresh Windows 11 machine: the dialog was answered and the prompt went through.
 - **Claude's one-time "Bypass Permissions mode" acceptance is recognised and left to you.** On a machine that has never accepted it, Claude asks once. cctabs stops there and tells you, rather than answering a security question for you or typing into it.
