@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { parseSendArgv } from './send-argv.js'
+import { enterDisabledByValue, parseSendArgv } from './send-argv.js'
 
 const parse = (...tokens: string[]) => parseSendArgv(tokens)
 
@@ -85,5 +85,16 @@ describe('parseSendArgv', () => {
 
   it('reports no target for an empty command line', () => {
     expect(parse()).toMatchObject({ target: undefined, text: undefined, explicitText: false })
+  })
+})
+
+describe('enterDisabledByValue', () => {
+  it('reads --enter=false and friends as "do not press Enter"', () => {
+    for (const v of ['false', '0', 'no', 'OFF']) expect(enterDisabledByValue(['tab', 'x', `--enter=${v}`])).toBe(true)
+  })
+  it('leaves everything else alone, including text that mentions it', () => {
+    expect(enterDisabledByValue(['tab', 'x'])).toBe(false)
+    expect(enterDisabledByValue(['tab', '--enter=true'])).toBe(false)
+    expect(enterDisabledByValue(['tab', 'use --enter=false to park text'])).toBe(false)
   })
 })

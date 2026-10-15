@@ -90,3 +90,15 @@ export function parseSendArgv(
     explicitText,
   }
 }
+
+/**
+ * Did the caller say `--enter=false` (or `0`, `no`, `off`)? Pure.
+ *
+ * The option parser reads ANY `--enter=<value>` as true, so `--enter=false`
+ * pressed Enter — which is how a draft meant to be parked got submitted
+ * (2026-10-14). `--no-enter` is the documented form; this makes the other
+ * spelling mean what it says instead of its opposite.
+ */
+export function enterDisabledByValue(argv: string[]): boolean {
+  return argv.some((a) => /^--enter=(false|0|no|off)$/i.test(a))
+}

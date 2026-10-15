@@ -10,7 +10,7 @@ import { classifyTerminalBuffer, promptIsReady } from '../core/session-status.js
 import { judgeDelivery } from '../core/paste-confirm.js'
 import { resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { locateTranscriptFile, readUserMessages } from '../core/transcript.js'
-import { parseSendArgv } from '../core/send-argv.js'
+import { parseSendArgv, enterDisabledByValue } from '../core/send-argv.js'
 import { waitOutDraft, draftPreview, DRAFT_WAIT_SECONDS } from '../core/draft-guard.js'
 import { readProcessTable } from '../core/claude-procs.js'
 import { reviveDormant, suspendedTabsIn, wakeSuspendedTab, reportWake, type WakeTarget } from '../core/suspend-ops.js'
@@ -71,7 +71,7 @@ export const sendCommand = define({
     const filePath = ctx.values.file as string | undefined
     const handoffPath = ctx.values.path as string | undefined
     const submitOnly = (ctx.values.submit as boolean | undefined) ?? false
-    const appendEnter = (ctx.values.enter as boolean | undefined) ?? true
+    const appendEnter = enterDisabledByValue(rawArgv) ? false : ((ctx.values.enter as boolean | undefined) ?? true)
     const force = (ctx.values.force as boolean | undefined) ?? false
     const skipConfirm = (ctx.values['no-confirm'] as boolean | undefined) ?? false
     let verify = (ctx.values.verify as boolean | undefined) ?? false

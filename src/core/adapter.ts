@@ -107,6 +107,13 @@ export interface TerminalAdapter {
    */
   inputDraft?(blockId: string): Promise<DraftState>
 
+  /**
+   * The block's visible screen as text, one line per row — the CURRENT render
+   * only. `null` when the backend can't show it (no `screen` capability, or a
+   * tab whose frontend never attached); callers then fall back to scrollback.
+   */
+  screenText?(blockId: string): Promise<string | null>
+
   // -- query helpers (pure data manipulation) --
   resolveTab(
     query: string,
