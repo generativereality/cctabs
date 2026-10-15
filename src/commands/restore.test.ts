@@ -324,7 +324,7 @@ describe('buildResumeCommand', () => {
 })
 
 describe('colorForEntry', () => {
-  const cfg = (color: string) => ({ claude: { flags: [] }, defaults: { workspace: '', prefix: '', color } })
+  const cfg = (color: string) => ({ claude: { flags: [] }, codex: { flags: [] }, defaults: { workspace: '', prefix: '', color } })
   const entry = (over: Partial<PlannedEntry>) =>
     ({ entry: { name: 'a' }, action: 'spawn', ...over }) as PlannedEntry
 

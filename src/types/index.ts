@@ -46,6 +46,10 @@ export interface Config {
   claude: {
     flags: string[]
   }
+  /** `--engine codex` tabs: extra flags passed to every `codex` launch. */
+  codex: {
+    flags: string[]
+  }
   defaults: {
     workspace: string
     /**

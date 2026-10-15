@@ -61,7 +61,7 @@ export function readInputDraft(rows: ScreenRow[]): DraftState {
   for (let i = rows.length - 1; i > 0; i--) {
     if (/^\s*❯/.test(rows[i].text) && RULE.test(rows[i - 1].text)) { at = i; break }
   }
-  if (at < 0) return { state: 'unknown', why: 'no Claude input box on screen' }
+  if (at < 0) return readCodexDraft(rows)
   if (PICKER.test(rows[at].text)) return { state: 'unknown', why: 'a picker is open, not the input box' }
 
   const lines: string[] = []
@@ -90,4 +90,28 @@ export function draftBackoff(totalMs: number, firstMs = 1000, maxStepMs = 16000)
     spent += s
   }
   return steps
+}
+
+/**
+ * Codex's input box (`cctabs new … --engine codex`). Codex always draws its
+ * input as the LAST `›` row on screen; submitted prompts sit above it. Its
+ * placeholder (`Ask Codex to do anything`) is dim, like Claude's.
+ *
+ * Not anchored on the `? for shortcuts` footer: Codex hides that line while
+ * something is typed in the box — exactly when a draft is there (measured
+ * 2026-10-15; the first version keyed on it and let `send` type into a draft).
+ * Only taken on a screen that is recognisably Codex, so a shell prompt drawn
+ * with `›` is not read as one.
+ */
+function readCodexDraft(rows: ScreenRow[]): DraftState {
+  const all = rows.map((r) => r.text).join('\n')
+  if (!/OpenAI Codex|Ask Codex to do anything|Worked for \d|• Working \(|for shortcuts/.test(all)) {
+    return { state: 'unknown', why: 'no Claude or Codex input box on screen' }
+  }
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (!/^\s*›/.test(rows[i].text)) continue
+    const text = brightText(rows[i]).replace(/^\s*›/, '').replace(/^[\s\u00a0]+|[\s\u00a0]+$/g, '')
+    return text ? { state: 'draft', text } : { state: 'empty' }
+  }
+  return { state: 'unknown', why: 'no Codex input row on screen' }
 }

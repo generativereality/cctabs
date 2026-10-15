@@ -295,7 +295,9 @@ export const sendCommand = define({
 
     let resp: unknown
     if (sendEnter) {
-      if (rawText.length > 0) await new Promise((r) => setTimeout(r, 200))
+      // 350ms, not 200: Codex swallows an Enter that follows the text by less
+      // than ~300ms (measured by codex-support, 2026-10-15). Claude is unaffected.
+      if (rawText.length > 0) await new Promise((r) => setTimeout(r, 350))
       resp = await adapter.sendInput(blockId, '\r')
     }
     adapter.closeSocket()

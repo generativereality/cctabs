@@ -23,6 +23,8 @@ npm i -g @generativereality/cctabs
 
 ## Unreleased
 
+- **Codex tabs: `cctabs new <name> [dir] --engine codex`.** A tab can run OpenAI's Codex CLI instead of Claude Code. The prompt (`--prompt`, `--file` or `--path`) is passed to `codex` at launch, so Codex runs it as its first turn and nothing is typed. cctabs answers Codex's folder-trust question for the folder you named. In a folder with a CLAUDE.md and no AGENTS.md, Codex is told to read the CLAUDE.md. `--resume` takes a Codex session id and `--model` passes `-m`. `cctabs list`/`sessions` show Codex's busy and idle states, and `cctabs send` works, draft protection included. Extra launch flags go in `[codex] flags`. Not yet: restoring Codex tabs (`manifest`/`restore`/`restart-tabby`), `--suspended`, and Windows. See `references/codex.md`.
+- **`send` waits 350 ms between the text and Enter** (was 200 ms). Codex drops an Enter that comes sooner; Claude is unaffected.
 ## 0.5.12 — 2026-10-15
 
 - **Fix: `cctabs new --prompt` could quit the Claude it had just opened.** When a startup dialog was still open, cctabs pasted the prompt and pressed Enter anyway, and Enter picked the dialog's default: "No, exit". It now never sends a prompt while a dialog is open. It says so, and gives the path to send the prompt from once the dialog is answered.
