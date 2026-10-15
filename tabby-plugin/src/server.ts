@@ -8,10 +8,11 @@ import { PidIndex } from './pid-index'
 import { OutputBufferStore } from './output-buffer'
 import { CctabsLogger } from './logger'
 import { bufferLines } from './buffer'
+import { readScreen } from './screen'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
-const PLUGIN_VERSION = '0.1.5'
+const PLUGIN_VERSION = '0.1.6'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
@@ -39,7 +40,12 @@ const PLUGIN_VERSION = '0.1.5'
  * that no longer existed, and identify matched none of them. `pid` is kept for
  * older CLIs; nothing new should read it.
  */
-const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid']
+/*
+ * `screen` — `GET /api/tabs/:uuid/screen` returns the tab's visible rows from
+ * its xterm, with dim ranges marked. Lets the CLI see what is in a Claude input
+ * box before typing into it; `/buffer` is a diff stream and cannot (screen.ts).
+ */
+const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid', 'screen']
 
 function sleep (ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -275,6 +281,13 @@ export class CctabsServer {
       const text = this.output.read(tab)
       const lines = bufferLines(text, lastN ? Number(lastN) : undefined)
       return sendJson(res, 200, { lines, totalLines: lines.length })
+    }
+
+    if (method === 'GET' && sub === 'screen') {
+      if (!(tab instanceof BaseTerminalTabComponent)) {
+        return sendJson(res, 400, { error: 'tab is not a terminal' })
+      }
+      return sendJson(res, 200, readScreen((tab as any).frontend?.xterm))
     }
 
     if (method === 'GET' && sub === 'cwd') {

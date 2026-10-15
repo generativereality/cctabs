@@ -1,4 +1,5 @@
 import type { AllData, Block, SessionStatus, Workspace } from '../types/index.js'
+import type { DraftState } from './input-draft.js'
 import {
   resolveTerminal,
   printUnsupportedTerminalError,
@@ -96,6 +97,15 @@ export interface TerminalAdapter {
    *     spawn-time snapshot that is usually dead (see Block.shellPid).
    */
   backendCapabilities?(): Promise<string[]>
+
+  /**
+   * What is in a Claude input box in this block right now, read from the
+   * screen (see core/input-draft.ts). `unknown` when the backend can't see the
+   * screen — an older plugin without the `screen` capability, or a tab whose
+   * frontend never attached — which callers must treat as "no evidence", not
+   * as "empty".
+   */
+  inputDraft?(blockId: string): Promise<DraftState>
 
   // -- query helpers (pure data manipulation) --
   resolveTab(

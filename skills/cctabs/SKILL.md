@@ -204,6 +204,7 @@ cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin 
 cctabs send <tab> --path <file>          # hand the tab a file PATH to read — the safe way to deliver anything large
 cctabs send <tab> --file <f> --verify    # check the target's transcript for what it actually RECEIVED
 cctabs send <tab> --submit               # press Enter only, submitting a prompt already parked in the box
+cctabs send <tab> "…" --allow-draft      # type even though the box holds an unsent draft (default: wait ≤60s, then refuse)
 cctabs send <tab> -- <free text>         # REQUIRED when your text contains `--` (e.g. names a flag)
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball
 cctabs export --all [-w workspace]       # bundle every tab in a workspace

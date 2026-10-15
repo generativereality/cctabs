@@ -31,6 +31,21 @@ See [suspended-tabs.md](suspended-tabs.md).
   the input box instead, and the command exits non-zero.
 - `--verify` **compares what the session received** against what was sent, via
   the target's transcript — the only reliable completeness check there is.
+- It **won't type into someone's unsent draft.** If the input box already holds
+  text — a person half-way through writing, or a prompt parked there — `send`
+  would add its text to the end and submit both, and a retry's Ctrl-U would wipe
+  the draft. So it waits for the box to clear, re-checking at 1s, 2s, 4s … (capped
+  at 16s), for up to `--draft-wait` seconds (default 60), then refuses with exit 1
+  and quotes the draft. Treat that refusal as "a human is using this tab": try
+  later rather than forcing. `--allow-draft` types into it anyway; `--submit` is
+  exempt, since submitting what's parked is its job. `cctabs rename` waits the
+  same way before typing `/rename`. Needs the Tabby plugin's `screen` capability
+  (tabby-cctabs ≥ 0.1.6): it reads the tab's screen, because the output stream
+  can't show what's in the box. With an older plugin, or a tab that has never
+  been shown, `send` can't see the box and types as before.
+- `--no-enter` leaves the text in the input box unsent. (Before 0.5.11 there
+  was no way to turn the Enter off: `--enter=false` and `--no-enter` both read
+  as "on".)
 - It **refuses payloads over 1 KB into a tab with a turn in flight** (`--force`
   overrides). Short replies into a busy tab still work — that's what they're
   for.

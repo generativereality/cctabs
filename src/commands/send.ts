@@ -11,6 +11,7 @@ import { judgeDelivery } from '../core/paste-confirm.js'
 import { resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { locateTranscriptFile, readUserMessages } from '../core/transcript.js'
 import { parseSendArgv } from '../core/send-argv.js'
+import { waitOutDraft, draftPreview, DRAFT_WAIT_SECONDS } from '../core/draft-guard.js'
 import { readProcessTable } from '../core/claude-procs.js'
 import { reviveDormant, suspendedTabsIn, wakeSuspendedTab, reportWake, type WakeTarget } from '../core/suspend-ops.js'
 
@@ -48,11 +49,13 @@ export const sendCommand = define({
     file: { type: 'string', short: 'f', description: 'Read the text to send from a file' },
     path: { type: 'string', short: 'p', description: "Hand the tab this file PATH and let the receiving session read it, instead of pasting the contents. The robust way to deliver anything large: only the path crosses the prompt line, so there is no truncation surface. Note the receiving session then READS the file, so its transcript will contain the contents as a tool result — that is the handoff working, not a paste." },
     submit: { type: 'boolean', description: 'Send Enter only, submitting whatever is already parked in the tab\'s input box. Explicit alternative to guessing at an empty send.' },
-    enter: { type: 'boolean', short: 'e', description: 'Append newline after text (default: true)' },
+    enter: { type: 'boolean', short: 'e', negatable: true, description: 'Press Enter after the text (default). --no-enter leaves it in the input box unsent.' },
     force: { type: 'boolean', description: `Send even when the target has a turn in flight. Without this, payloads over ${CLIP_RISK_BYTES} bytes are refused for a busy tab, because that is when text gets silently clipped.` },
     'no-confirm': { type: 'boolean', description: 'Skip the did-it-land check and report only that the bytes were handed over. Faster, and honest about knowing less.' },
     verify: { type: 'boolean', description: "After submitting, read the target session's own transcript and check that what it RECEIVED matches what was sent, front and tail. The only reliable completeness check: a collapsed paste chip cannot be read for it. Fails loudly on a mismatch." },
     'verify-timeout': { type: 'number', description: 'Seconds to wait for the target to record the message when using --verify (default: 30)' },
+    'allow-draft': { type: 'boolean', description: 'Type even when the input box already holds an unsent draft (someone half-way through writing). Without this, send waits for the box to clear, then refuses — because the text would be appended to the draft and submitted with it.' },
+    'draft-wait': { type: 'number', description: `Seconds to wait for an unsent draft to clear, re-checking on a backoff, before refusing (default: ${DRAFT_WAIT_SECONDS}). 0 refuses at once.` },
     'wait-for-prompt': { type: 'boolean', short: 'w', description: 'Poll the buffer until a ready prompt is visible before sending — a shell prompt ($, %, >) or a ready Claude TUI (❯ input line / "auto mode" footer). Useful for freshly-spawned tabs.' },
     'wait-timeout': { type: 'number', description: 'Timeout in seconds for --wait-for-prompt (default: 10)' },
   },
@@ -75,6 +78,8 @@ export const sendCommand = define({
     const verifyTimeoutSec = (ctx.values['verify-timeout'] as number | undefined) ?? 30
     const waitForPrompt = (ctx.values['wait-for-prompt'] as boolean | undefined) ?? false
     const waitTimeoutSec = (ctx.values['wait-timeout'] as number | undefined) ?? 10
+    const allowDraft = (ctx.values['allow-draft'] as boolean | undefined) ?? false
+    const draftWaitSec = (ctx.values['draft-wait'] as number | undefined) ?? DRAFT_WAIT_SECONDS
 
     if (!query) { consola.error('Usage: cctabs send <tab-or-block> [text]'); process.exit(1) }
 
@@ -208,6 +213,26 @@ export const sendCommand = define({
       if (!ready) {
         adapter.closeSocket()
         consola.error(`Timed out after ${waitTimeoutSec}s waiting for a ready prompt in ${blockId.slice(0, 8)}`)
+        process.exit(1)
+      }
+    }
+
+    // Don't type into someone's unsent draft. The text would land at the end of
+    // it and Enter would submit both — and a retry's Ctrl-U would wipe the
+    // draft. `--submit` is exempt: submitting what is parked is its job.
+    if (rawText.length > 0 && !allowDraft) {
+      const guard = await waitOutDraft(adapter, blockId, {
+        totalMs: draftWaitSec * 1000,
+        onWaiting: (text, totalMs) => consola.info(
+          `${blockId.slice(0, 8)} has an unsent draft in its input box (${draftPreview(text)}) — waiting up to ${Math.round(totalMs / 1000)}s for it to clear…`,
+        ),
+      })
+      if (!guard.ok) {
+        adapter.closeSocket()
+        consola.error(
+          `Not sent: ${blockId.slice(0, 8)} still has an unsent draft in its input box (${draftPreview(guard.text)}), and typing now would append to it and submit both. ` +
+          `Try again once it is sent or cleared, wait longer with --draft-wait <sec>, or pass --allow-draft to type into it anyway.`,
+        )
         process.exit(1)
       }
     }

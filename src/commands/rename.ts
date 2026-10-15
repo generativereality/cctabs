@@ -9,6 +9,7 @@ import { sendTextWithConfirmation } from '../core/open-session.js'
 import { suspendedTabsIn } from '../core/suspend-ops.js'
 import { renameRoute, invalidNameReason, lastCustomTitle } from '../core/rename-plan.js'
 import { tabsNamed, nameClashWarning } from '../core/tab-match.js'
+import { waitOutDraft, draftPreview } from '../core/draft-guard.js'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -69,6 +70,20 @@ export const renameCommand = define({
         }
       }
     } catch { /* best-effort — the tab still gets relabelled */ }
+
+    // `/rename` is typed into the input box like any send, so it must not land
+    // on the end of someone's unsent draft (see core/draft-guard.ts). Checked
+    // before anything changes, so a refusal leaves the tab exactly as it was.
+    if (claude && term) {
+      const guard = await waitOutDraft(adapter, term.blockid, {
+        onWaiting: (text, totalMs) => consola.info(`"${oldName}" has an unsent draft (${draftPreview(text)}) — waiting up to ${Math.round(totalMs / 1000)}s for it to clear…`),
+      })
+      if (!guard.ok) {
+        adapter.closeSocket()
+        consola.error(`Not renamed: "${oldName}" still has an unsent draft in its input box (${draftPreview(guard.text)}), and \`/rename\` would be appended to it. Try again once it is sent or cleared.`)
+        process.exit(1)
+      }
+    }
 
     const clash = nameClashWarning(newName, tabsNamed(newName, tabNames, tabId), tabNames)
     if (clash) consola.warn(clash)

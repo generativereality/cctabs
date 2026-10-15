@@ -31,7 +31,7 @@ export function tabbyPluginsDir(): string {
  * inside Tabby with the user's full rights, so a new release is taken on deliberately,
  * by changing this line.
  */
-export const TABBY_PLUGIN = 'tabby-cctabs@0.1.5'
+export const TABBY_PLUGIN = 'tabby-cctabs@0.1.6'
 
 /**
  * The by-hand install line for this platform, for when the automated path is
