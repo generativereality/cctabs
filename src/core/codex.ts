@@ -39,6 +39,7 @@ const strip = (s: string) => s.replace(/\s+/g, '')
 export function codexArgs(o: {
   prompt?: string
   resumeId?: string
+  forkId?: string
   model?: string
   readClaudeMd?: boolean
   extraFlags?: string[]
@@ -46,6 +47,8 @@ export function codexArgs(o: {
   const out: string[] = [...(o.extraFlags ?? [])]
   if (o.readClaudeMd) out.push('-c', 'project_doc_fallback_filenames=["CLAUDE.md"]')
   if (o.model) out.push('-m', o.model)
+  if (o.resumeId && o.forkId) throw new Error('Choose resume or fork, not both')
+  if (o.forkId) return ['fork', ...out, o.forkId]
   if (o.resumeId) return ['resume', ...out, o.resumeId]
   if (o.prompt !== undefined) out.push(o.prompt)
   return out

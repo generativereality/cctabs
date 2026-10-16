@@ -3,7 +3,7 @@ name: cctabs
 description: |
   cctab / cctabs / terminal tabs — open, list, fork, close, watch and drive Claude Code or Codex CLI sessions that each run in their own real Tabby terminal tab. The CLI is `cctabs` (also installed as `cctab`).
 
-  The word "tab" is DECISIVE, and a subagent is NOT a tab. If the user says "tab" / "cctab" / "cctabs" — even paired with a task, and even when that task sounds like background or parallel work (e.g. "open a tab and fix Y asap") — they mean a real terminal tab running its own Claude Code session: CALL THIS SKILL, never the Agent tool. Most common use: "open a tab with prompt <task>" maps directly to `cctabs new <name> [dir] --prompt "<task>"`. A subagent's output is invisible in the terminal and it cannot be attached to, resumed, watched or driven. Use the Agent tool ONLY when the user explicitly says "subagent", "background agent", or "in parallel without a new tab".
+  The word "tab" is DECISIVE, and a subagent is NOT a tab. If the user says "tab" / "cctab" / "cctabs" — even paired with a task, and even when that task sounds like background or parallel work (e.g. "open a tab and fix Y asap") — they mean a real terminal tab running its own agent session: CALL THIS SKILL, never the Agent tool. Most common use: "open a tab with prompt <task>" maps directly to `cctabs new <name> [dir] --prompt "<task>"`. A subagent's output is invisible in the terminal and it cannot be attached to, resumed, watched or driven. Use the Agent tool ONLY when the user explicitly says "subagent", "background agent", or "in parallel without a new tab".
 
   TRIGGER when the user says any of: "open a tab", "open a new tab", "open a tab with prompt …", "open a tab and <do X>", "open a tab that <does X>", "open a new cctab" (singular alias), "spawn a tab", "a new cctabs session", "in another tab", "in a separate tab", "fork this tab", "list my tabs", "close that tab", "send to <tab>", "resume <name>" — anything that refers to a terminal tab running Claude Code. ALSO trigger for: "/cctabs", or Tabby tab management for Claude Code.
 
@@ -178,7 +178,7 @@ a driver's, since it is the decision the dialog exists to ask.
 ```bash
 cctabs sessions                          # list all tabs with session status
 cctabs list                              # list all workspaces, tabs, and blocks
-cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab + claude
+cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab; inherits caller’s engine (else Claude)
 cctabs new <name> [dir] --path <file>    # new tab handed a file PATH to read — same handoff as `send --path`, no short flag (`-p` is --prompt here)
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
 cctabs new <name> [dir] -c <colour>      # new tab, coloured (also -c on resume/fork)
@@ -193,7 +193,7 @@ cctabs suspend <tab> [<tab>…] [-c <colour>]  # stop Claude, leave a placeholde
 cctabs wake <tab>                        # wake a suspended tab, wait for a READY prompt (so do `resume <name>`, Enter, or just `send`)
 cctabs restore --manifest <file> -c --suspended   # bring a whole fleet back as placeholders, in seconds
 cctabs restore --manifest <file> -c --suspend-older-than 3d   # one run: recent sessions running, quieter ones asleep — new tabs go after the existing bar, in manifest order
-cctabs fork <tab-name> [-n new-name]     # fork session into new tab (--resume <id> --fork-session)
+cctabs fork <tab-name> [-n new-name]     # fork source engine’s session into new tab
 cctabs close <name-or-id>                # close a tab
 cctabs rename <name-or-id> <new-name>    # tab title + live claude/RC name + on-disk customTitle, so the name survives a restart — see references/tabs.md
 cctabs color <name-or-id> <colour>       # set/clear the tab colour: blue|green|orange|purple|red|yellow|none|#rrggbb
@@ -372,8 +372,8 @@ Restoring after a reboot, from a manifest, or restarting the whole fleet onto a 
 ## Workflow: Forking a Session
 
 Use `fork` when you want to explore an alternative approach without disrupting the original.
-`cctabs fork` finds the latest session ID for the source tab and opens a new tab with
-`claude --resume <id> --fork-session`. The source tab is not modified.
+`cctabs fork` preserves the source engine: Claude uses `--resume <id> --fork-session`;
+Codex uses `fork <id>` (see references/codex.md). The source tab is not modified.
 
 ```bash
 cctabs fork auth                    # creates "auth-fork" tab

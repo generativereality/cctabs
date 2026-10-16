@@ -17,9 +17,10 @@ describe('Codex session identity', () => {
     const root = mkdtempSync(join(tmpdir(), 'cctabs-codex-'))
     try {
       mkdirSync(join(root, '2026'))
-      writeFileSync(join(root, '2026', 'rollout-one.jsonl'), JSON.stringify({ type: 'session_meta', timestamp: '2026-10-16T10:00:00Z', payload: { id, cwd: '/scratch' } }) + '\n' + 'large conversation')
+      writeFileSync(join(root, '2026', 'rollout-one.jsonl'), JSON.stringify({ type: 'session_meta', timestamp: '2026-10-16T10:00:00Z', payload: { id, cwd: '/scratch', forked_from_id: 'parent-id' } }) + '\n' + 'large conversation')
       writeFileSync(join(root, 'rollout-bad.jsonl'), '{')
       expect(readCodexSessions(root).map((s) => s.id)).toEqual([id])
+      expect(readCodexSessions(root)[0].forkedFromId).toBe('parent-id')
     } finally { rmSync(root, { recursive: true, force: true }) }
   })
   test('matches shell descendants, independently of tab name', () => {
@@ -94,4 +95,17 @@ test('Windows Git Bash keeps prompt data out of its script and supports a native
 
 test('macOS POSIX launches keep using the installed codex command directly', () => {
   expect(codexLaunchBody({ prompt: 'hello', extraFlags: [] }, { posix: true }, 'darwin')).toBe("codex 'hello'")
+})
+
+test('a fork is matched to its new rollout without making its fresh source ambiguous', () => {
+  const source = { id: '11111111-1111-1111-1111-111111111111', cwd: '/tmp', startedAt: 1100, file: 'source' }
+  const fork = { id: '22222222-2222-2222-2222-222222222222', cwd: '/tmp', startedAt: 2100, file: 'fork', forkedFromId: source.id }
+  const rows = [
+    { pid: 10, ppid: 1, command: 'codex hello', cwd: '/tmp', startedAt: 1000 },
+    { pid: 20, ppid: 1, command: `codex fork -m test ${source.id}`, cwd: '/tmp', startedAt: 2000 },
+  ]
+  const matches = matchCodexTabs([{ tabId: 'source', name: '', shellPid: 10 }, { tabId: 'fork', name: '', shellPid: 20 }], rows, [source, fork])
+  expect(matches.get('source')?.id).toBe(source.id)
+  expect(matches.get('fork')?.id).toBe(fork.id)
+  expect(matches.get('fork')?.id).not.toBe(source.id)
 })

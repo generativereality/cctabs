@@ -4,7 +4,7 @@ import { join } from 'path'
 import { ancestorsOf, descendantsOf, isClaudeCommand, type ProcRow, type ProcTab } from './claude-procs.js'
 import { isCodexCommand } from './codex.js'
 
-export interface CodexSession { id: string; cwd: string; startedAt: number; file: string }
+export interface CodexSession { id: string; cwd: string; startedAt: number; file: string; forkedFromId?: string }
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 
 /** Read only the metadata line, never the potentially huge conversation. */
@@ -27,7 +27,7 @@ export function readCodexSessions(root = join(process.env.CODEX_HOME || join(hom
         const id = p?.session_id ?? p?.id
         const startedAt = Date.parse(p?.timestamp ?? row.timestamp)
         if (row.type === 'session_meta' && uuid.test(id) && typeof p.cwd === 'string' && Number.isFinite(startedAt)) {
-          out.push({ id, cwd: p.cwd, startedAt, file })
+          out.push({ id, cwd: p.cwd, startedAt, file, ...(typeof p.forked_from_id === 'string' ? { forkedFromId: p.forked_from_id } : {}) })
         }
       } catch { /* partially written or inaccessible rollout */ }
       finally { if (fd !== undefined) closeSync(fd) }
@@ -39,10 +39,18 @@ export function readCodexSessions(root = join(process.env.CODEX_HOME || join(hom
 
 /** Only a UUID immediately following the resume subcommand is accepted. */
 export function codexResumeId(command: string): string | undefined {
+  return codexSubcommandId(command, 'resume')
+}
+
+export function codexForkId(command: string): string | undefined {
+  return codexSubcommandId(command, 'fork')
+}
+
+function codexSubcommandId(command: string, subcommand: string): string | undefined {
   if (!isCodexCommand(command)) return undefined
   const words = command.split(/\s+/)
   const at = /(?:^|[\\/])node(?:\.exe)?$/i.test(words[0]) ? 2 : 1
-  if (words[at] !== 'resume') return undefined
+  if (words[at] !== subcommand) return undefined
   // Flags may precede the id; UUID-shaped prompts aren't resume ids on fresh launches.
   return words.slice(at + 1).find((w) => uuid.test(w))?.toLowerCase()
 }
@@ -63,7 +71,8 @@ export function matchCodexTabs(tabs: ProcTab[], rows: ProcRow[], sessions: Codex
     if (chain.slice(1, tabAt < 0 ? undefined : tabAt).some((pid) => rows.some((r) => r.pid === pid && isClaudeCommand(r.command)))) continue
     const id = codexResumeId(proc.command)
     if (id) { out.set(tab.tabId, { proc, id, session: sessions.find((s) => s.id === id) }); continue }
-    const candidates = sessions.filter((s) => proc.cwd === s.cwd && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000)
+    const forkedFromId = codexForkId(proc.command)
+    const candidates = sessions.filter((s) => s.forkedFromId === forkedFromId && proc.cwd === s.cwd && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000)
     possibilities.set(tab.tabId, candidates)
     out.set(tab.tabId, { proc, ...(candidates.length === 1 ? { id: candidates[0].id, session: candidates[0] } : {}) })
   }

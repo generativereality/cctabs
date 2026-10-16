@@ -1,3 +1,8 @@
+import { codexStatus } from '../core/codex.js'
+import { launchEngine } from '../core/engine.js'
+import { readCodexSessions } from '../core/codex-sessions.js'
+import { collectSessionRows } from '../core/session-rows.js'
+import { openCodexSession } from '../core/open-codex.js'
 import { resolve } from 'path'
 import { homedir } from 'os'
 import { define } from 'gunshi'
@@ -36,16 +41,17 @@ function formatSize(bytes: number): string {
 
 export const resumeCommand = define({
   name: 'resume',
-  description: 'Resume a claude session by name — wakes it if suspended, else reuses its tab or creates one. Usage: cctabs resume <name> [dir] (dir defaults to cwd)',
+  description: 'Resume a Claude or Codex session by name — wakes it if suspended, else reuses its tab or creates one. Usage: cctabs resume <name> [dir] (dir defaults to cwd)',
   args: {
     name: { type: 'positional', description: 'Tab / session name' },
     // `dir` is read from ctx.positionals, deliberately NOT declared: this gunshi
     // treats every declared positional as required, so declaring it made
     // `cctabs resume <name>` fail with "Positional argument 'dir' is required"
     // despite the documented cwd default.
+    engine: { type: 'string', short: 'e', description: 'claude or codex; defaults to the target tab/session, then calling engine. Closed Codex sessions need --session <id>.' },
     session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the backend whose Claude config dir the session was found in, else the CURRENT session\'s backend (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
-    model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude).' },
+    model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to Claude or -m to Codex).' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Applied whether the tab is reused or created. Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
   },
   async run(ctx) {
@@ -63,6 +69,9 @@ export const resumeCommand = define({
     const explicitSession = ctx.values.session as string | undefined
     const explicitBackend = ctx.values.backend as string | undefined
 
+    const requestedEngine = launchEngine(ctx.values.engine as string | undefined, explicitBackend)
+    if (!requestedEngine) { consola.error(`Unknown --engine "${ctx.values.engine}". Use claude or codex.`); process.exit(1) }
+
     // A suspended tab of this name already knows its session, directory and
     // backend, so resuming it is waking it — regardless of the cwd this was run
     // from, which the by-name session search below would otherwise depend on.
@@ -72,6 +81,10 @@ export const resumeCommand = define({
       const hits = adapter.resolveTab(displayName, data.tabsById, data.tabNames, { exact: true })
       const susp = hits.length === 1 ? suspendedTabsIn(adapter, data, readProcessTable()).get(hits[0]) : undefined
       if (susp) {
+        if ((ctx.values.engine !== undefined && requestedEngine !== (susp.record.engine ?? 'claude')) || (explicitBackend && susp.record.engine === 'codex')) {
+          consola.error('The suspended tab has a different engine; wake it without an engine/backend override.')
+          process.exit(1)
+        }
         const block = (data.tabsById.get(hits[0]) ?? []).find((b) => b.view === 'term')
         const code = block
           ? await wakeInPlace(adapter, { blockId: block.blockid, tabId: hits[0], name: displayName, record: susp.record }, !!susp.dormant, data)
@@ -82,6 +95,41 @@ export const resumeCommand = define({
       }
       adapter.closeSocket()
     }
+    const engineAdapter = requireAdapter()
+    const engineData = await engineAdapter.getAllData()
+    const targets = engineAdapter.resolveTab(displayName, engineData.tabsById, engineData.tabNames, { exact: true })
+    if (targets.length > 1) { consola.error(`Multiple tabs match '${displayName}'`); process.exit(1) }
+    const target = targets.length ? (await collectSessionRows(engineAdapter, readProcessTable())).flatMap((w) => w.sessions).find((r) => r.tab_id === targets[0]) : undefined
+    const codexMatches = explicitSession ? readCodexSessions().filter((s) => s.id.startsWith(explicitSession)) : []
+    const targetBlock = targets.length ? engineData.tabsById.get(targets[0])?.find((b) => b.view === 'term') : undefined
+    const codexOnScreen = !target?.claude_pid && targetBlock && codexStatus(engineAdapter.scrollback(targetBlock.blockid, 80)) !== undefined
+    const knownClaudeId = explicitSession && !codexMatches.length && locateSessionById(explicitSession)
+    const sourceEngine = explicitSession ? (codexMatches.length ? 'codex' : knownClaudeId ? 'claude' : undefined)
+      : codexOnScreen ? 'codex' : target?.engine
+    const engine = launchEngine(ctx.values.engine as string | undefined, explicitBackend, sourceEngine ?? requestedEngine)
+    if (engine === 'codex') {
+      if (explicitBackend) { consola.error('--backend applies to Claude, not Codex.'); process.exit(1) }
+      const sessionId = explicitSession ? (codexMatches.length === 1 ? codexMatches[0].id : undefined) : target?.engine === 'codex' ? target.session_id : undefined
+      if (!sessionId) { consola.error('Cannot identify the Codex session unambiguously. Use --engine codex --session <full-id>; no Claude session was opened.'); process.exit(1) }
+      if (targets.length) {
+        if (target?.engine !== 'codex' || target.session_id !== sessionId) {
+          consola.error(`Tab "${displayName}" already exists with a different or unknown session; use another name.`); process.exit(1)
+        }
+        const color = resolveColorPreference(ctx.values.color as string | undefined, undefined, config.defaults.color)
+        if (color !== undefined) await applyTabColor(engineAdapter, targets[0], color)
+        consola.info(`Codex is already running in tab "${displayName}" — skipping resume`)
+        engineAdapter.closeSocket()
+        return
+      }
+      const session = codexMatches[0]
+      const color = resolveColorPreference(ctx.values.color as string | undefined, undefined, config.defaults.color)
+      const tabId = await openCodexSession({ tabName: displayName, dir: ctx.positionals[2] ? dir : session.cwd, resumeId: sessionId, model: ctx.values.model as string | undefined, afterActive: true, color })
+      consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → codex resume ${sessionId}`)
+      return
+    }
+    if (target?.engine === 'codex' || codexOnScreen) { consola.error('The target tab runs Codex; use --engine codex or a different tab name.'); process.exit(1) }
+    engineAdapter.closeSocket()
+
     const modelOverride = ctx.values.model as string | undefined
 
     let sessionId: string | undefined

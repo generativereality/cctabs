@@ -16,6 +16,7 @@ export interface OpenCodexOptions {
   /** The first turn. Passed on argv: Codex runs it at once, nothing is typed. */
   prompt?: string
   resumeId?: string
+  forkId?: string
   model?: string
   afterActive?: boolean
   color?: string | null

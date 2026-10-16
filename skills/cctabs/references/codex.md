@@ -76,5 +76,14 @@ step for the operator. cctabs rechecks folder trust before pressing Enter and wa
 input frames, because Windows can briefly render an input box before a startup dialog.
 See `scripts/windows-guest/README.md` in the repo for the harness and VM cleanup rules.
 
-**Not yet:** `--backend` (a Claude concept), Windows process discovery, and Claude-specific
-conversation operations such as `fork`. Resume a known id with `--engine codex --resume <id>`.
+**Engine defaults (unreleased):** `new` inherits the nearest calling agent (Codex or Claude),
+falling back to Claude in a plain shell. `--engine claude|codex` overrides this; an explicit
+`--backend` selects Claude unless you explicitly request Codex (that combination errors).
+`fork <tab>` follows the source tab, not the caller: Codex uses `codex fork <session-id>`,
+creating an independent conversation with shared history. Unknown or ambiguous Codex IDs fail
+instead of selecting a Claude transcript from the same directory. `resume <name>` recognizes
+an existing Codex tab; after closing it use `resume <name> --engine codex --session <id>`.
+Codex rollouts do not provide cctabs tab-name history, so closed-session lookup needs the ID.
+
+**Not yet:** `--backend` for Codex (a Claude concept) and Windows process discovery.
+Resume a known id with `--engine codex --resume <id>` on `new` as well.

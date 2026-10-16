@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- New tabs inherit the calling agent's engine: Codex callers get Codex, Claude callers and plain shells get Claude. Explicit `--engine` overrides this; an explicit Claude backend selects Claude. Forks preserve the source tab's engine and Codex forks use `codex fork <id>` instead of opening an unrelated Claude conversation. Resume recognizes Codex tabs and saved IDs; ambiguous Codex identities fail without launching Claude. Fork-parent metadata keeps a new fork distinct from its source during session discovery.
+
 ## 0.6.1 — 2026-10-16
 
 - **Fix: Codex did not start with the Windows cmd.exe fallback.** The tab opened at a shell prompt because nested quotes made Node evaluate the bootstrap as a string instead of running it. The fixed launch keeps the cmd bootstrap unquoted and user arguments encoded for both Windows shells. Git Bash had also changed CRLF and trailing backslashes in prompts. Startup now waits past transient input frames and rechecks folder trust before pressing Enter. Found by post-release Windows 11 ARM64 testing; the original macOS unit test had not exercised the real Tabby/cmd.exe boundary.

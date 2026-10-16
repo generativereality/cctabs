@@ -14,12 +14,12 @@ import { requireAdapter } from '../core/adapter.js'
 import { tabsNamed, nameClashWarning } from '../core/tab-match.js'
 import { openPlaceholderTab } from '../core/suspend-ops.js'
 import { locateTranscriptFile } from '../core/transcript.js'
-import { parseEngine } from '../core/codex.js'
+import { launchEngine } from '../core/engine.js'
 import { openCodexSession } from '../core/open-codex.js'
 
 export const newCommand = define({
   name: 'new',
-  description: 'Open a new tab and launch claude (or codex, with --engine codex). Usage: cctabs new <name> [dir] (dir defaults to cwd)',
+  description: 'Open a new tab with the calling session’s engine (Claude outside an agent session). Usage: cctabs new <name> [dir] (dir defaults to cwd)',
   args: {
     name: { type: 'positional', description: 'Tab name' },
     // `dir` is read from ctx.positionals, deliberately NOT declared: this gunshi
@@ -33,10 +33,10 @@ export const newCommand = define({
     path: { type: 'string', description: "Hand the new session this file PATH as its opening instruction and let it read the file itself, instead of pasting the contents through the prompt line. Same handoff as `cctabs send --path`, and the right choice for anything large. NOTE: no short flag — `-p` is `--prompt` here, while on `send` it is `--path`." },
     resume: { type: 'string', short: 'r', description: 'Resume an existing Claude session ID (passes --resume <id> to claude). Mutually exclusive with --prompt/--file.' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
-    model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to claude). Useful with --backend ollama-local.' },
+    model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to Claude or -m to Codex). Useful with --backend ollama-local.' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
-    engine: { type: 'string', short: 'e', description: 'What runs in the tab: claude (default) or codex (OpenAI Codex CLI). With codex the prompt is passed to codex at launch; --resume takes a Codex session id; --model passes -m. Not yet with --backend or --suspended, and not yet on Windows.' },
-    suspended: { type: 'boolean', short: 's', description: 'Open the tab SUSPENDED (needs --resume): named and holding the session, but running a placeholder instead of Claude until woken by Enter, `cctabs resume`/`wake`, or `cctabs send`.' },
+    engine: { type: 'string', short: 'e', description: 'Engine: claude or codex. Defaults to the calling agent, else Claude; an explicit --backend selects Claude. --resume uses that engine’s session ID; Codex --model passes -m.' },
+    suspended: { type: 'boolean', short: 's', description: 'Open the tab SUSPENDED (needs --resume): named and holding the session, but running a placeholder instead of its agent until woken by Enter, `cctabs resume`/`wake`, or `cctabs send`.' },
   },
   async run(ctx) {
     const name = ctx.positionals[1]
@@ -54,7 +54,7 @@ export const newCommand = define({
     const colorInput = ctx.values.color as string | undefined
     const suspended = !!ctx.values.suspended
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
-    const engine = parseEngine(ctx.values.engine as string | undefined)
+    const engine = launchEngine(ctx.values.engine as string | undefined, explicitBackend)
     if (!engine) { consola.error(`Unknown --engine "${ctx.values.engine}". Use claude or codex.`); process.exit(1) }
     if (engine === 'codex') {
       if (explicitBackend) { consola.error('--backend picks a Claude backend preset; it does not apply to --engine codex.'); process.exit(1) }
