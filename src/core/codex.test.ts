@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { codexArgs, codexReady, codexStatus, codexTrustDialog, isCodexCommand, parseEngine } from './codex.js'
+import { codexArgs, codexStartupSettled, codexReady, codexStatus, codexTrustDialog, isCodexCommand, parseEngine } from './codex.js'
 
 // Real screens, Codex CLI 0.162.1 on macOS via the plugin's `screen` endpoint.
 const TRUST = `  Folder access
@@ -66,4 +66,12 @@ describe('isCodexCommand', () => {
     expect(isCodexCommand("/bin/zsh -l -i -c codex 'reply'")).toBe(false)
     expect(isCodexCommand('C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.exe resume abc')).toBe(true)
   })
+})
+
+it('waits past transient startup input frames before confirming Codex is ready', () => {
+  expect(codexStartupSettled([DONE])).toBe(false)
+  expect(codexStartupSettled([DONE, TRUST, DONE])).toBe(false)
+  expect(codexStartupSettled([TRUST, DONE, DONE])).toBe(false)
+  expect(codexStartupSettled([DONE, DONE, DONE])).toBe(true)
+  expect(codexStartupSettled([BUSY, BUSY, BUSY])).toBe(true)
 })

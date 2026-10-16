@@ -91,3 +91,10 @@ export function isCodexCommand(command: string): boolean {
   if (codexAt < 0) return false
   return words[codexAt + 1] !== 'app-server'
 }
+
+/** A transient input frame can precede folder trust on Windows startup. */
+export function codexStartupSettled(frames: string[]): boolean {
+  return frames.length >= 3 && frames.slice(-3).every((screen) =>
+    !codexTrustDialog(screen).visible && (codexReady(screen) || codexStatus(screen) === 'active'),
+  )
+}

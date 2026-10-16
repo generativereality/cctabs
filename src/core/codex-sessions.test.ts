@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, win32 } from 'path'
 import { codexResumeId, matchCodexTabs, readCodexSessions } from './codex-sessions.js'
 import { codexLaunchBody } from './open-codex.js'
 import { parseManifest } from './manifest.js'
@@ -52,14 +52,17 @@ test('Windows launch keeps hostile argv out of cmd and round-trips through encod
   const prompt = 'quotes " and \' %PATH% ^ & | ! bang\nsecond\r\nline \\ trailing\\'
   const body = codexLaunchBody({ prompt, extraFlags: [] }, { posix: false })
   expect(body).not.toContain(prompt)
+  // Real Tabby on Windows preserves embedded double quotes in Node -e.
+  // A quoted bootstrap then evaluates a string literal and silently exits.
+  expect(body).not.toContain('"')
   const encoded = /Buffer.from\('([A-Za-z0-9+/=]+)'/.exec(body)![1]
   const script = Buffer.from(encoded, 'base64').toString()
   let childArgs: string[] = []
   const fakeRequire = (mod: string) => mod === 'node:child_process' ? { spawnSync: (cmd: string, args: string[]) => {
-    if (cmd === 'where.exe') return { stdout: 'C:\\npm\\codex.cmd\r\n' }
+    if (cmd === 'where.exe') return { stdout: 'C:\\npm\\codex.cmd\r\nC:\\other\\codex.cmd\r\n' }
     childArgs = args
     return { status: 0 }
-  } } : mod === 'node:fs' ? { existsSync: () => true } : { dirname: () => 'C:\\npm', join: (...s: string[]) => s.join('\\') }
+  } } : mod === 'node:fs' ? { existsSync: (file: string) => { expect(file).toBe('C:\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'); return true } } : win32
   new Function('require', 'process', script)(fakeRequire, { execPath: 'node.exe', exit: () => {} })
   expect(childArgs.at(-1)).toBe(prompt)
 })
@@ -67,4 +70,28 @@ test('Windows launch keeps hostile argv out of cmd and round-trips through encod
 test('a Codex child tool under Claude does not become the terminal engine', () => {
   const nested = [rows[0], { pid: 12, ppid: 10, command: 'claude' }, { ...rows[1], ppid: 12 }]
   expect(matchCodexTabs(tabs, nested, [session]).size).toBe(0)
+})
+
+test('Windows Git Bash keeps prompt data out of its script and supports a native Codex exe', () => {
+  const prompt = 'quotes " and \' %PATH% ^ & | !\r\ntrailing \\\\'
+  const body = codexLaunchBody({ prompt, extraFlags: [] }, { posix: true }, 'win32')
+  expect(body).not.toContain(prompt)
+  expect(body).not.toContain('"')
+  expect(body).toStartWith("node -e 'eval(Buffer.from(`")
+  const encoded = /[A-Za-z0-9+/]{80,}={0,2}/.exec(body)![0]
+  let command: string | undefined
+  let argv: string[] = []
+  const fakeRequire = (mod: string) => mod === 'node:child_process' ? { spawnSync: (cmd: string, args: string[]) => {
+    if (cmd === 'where.exe') return { stdout: args[0] === 'codex.exe' ? 'C:\\native path\\codex.exe\r\n' : '' }
+    command = cmd
+    argv = args
+    return { status: 0 }
+  } } : mod === 'node:fs' ? { existsSync: () => false } : win32
+  new Function('require', 'process', Buffer.from(encoded, 'base64').toString())(fakeRequire, { execPath: 'node.exe', exit: () => {} })
+  expect(command).toBe('C:\\native path\\codex.exe')
+  expect(argv).toEqual([prompt])
+})
+
+test('macOS POSIX launches keep using the installed codex command directly', () => {
+  expect(codexLaunchBody({ prompt: 'hello', extraFlags: [] }, { posix: true }, 'darwin')).toBe("codex 'hello'")
 })
