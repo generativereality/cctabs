@@ -67,7 +67,7 @@ never appear literally in a Windows shell script. It runs the npm-installed Code
 
 **The published 0.6.0 Windows launch paths have bugs:** cmd.exe's nested bootstrap quotes can
 open an empty shell, while Git Bash can change CRLF and trailing backslashes in the prompt.
-These are fixed in unreleased source. The post-release Windows 11 ARM64 harness checks the
+These are fixed in 0.6.1. The post-release Windows 11 ARM64 harness checks the
 real Tabby/shell boundary, with exact argv checks for quotes, `%`, `^`, `&`, `|`, `!`, Unicode,
 mixed newlines and trailing backslashes. The patched build passed all 14 cases, real fresh
 prompts in both shells, cmd resume/context, and Git Bash suspended wake/context. The live run

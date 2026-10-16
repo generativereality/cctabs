@@ -21,7 +21,7 @@ npm i -g @generativereality/cctabs
 
 <!-- releases -->
 
-## Unreleased
+## 0.6.1 — 2026-10-16
 
 - **Fix: Codex did not start with the Windows cmd.exe fallback.** The tab opened at a shell prompt because nested quotes made Node evaluate the bootstrap as a string instead of running it. The fixed launch keeps the cmd bootstrap unquoted and user arguments encoded for both Windows shells. Git Bash had also changed CRLF and trailing backslashes in prompts. Startup now waits past transient input frames and rechecks folder trust before pressing Enter. Found by post-release Windows 11 ARM64 testing; the original macOS unit test had not exercised the real Tabby/cmd.exe boundary.
 
