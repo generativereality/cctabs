@@ -61,12 +61,20 @@ cctabs wake <tab-id>     # or Enter in the placeholder, or cctabs send
 Suspended Codex tabs retain their engine and wake with `codex resume <id>`. Placeholders need
 a POSIX shell (including Git Bash); cmd.exe placeholders remain unsupported.
 
-**Windows launch:** Git Bash uses POSIX quoting. The cmd.exe fallback uses an encoded Node
-bootstrap that passes an argv array directly to the npm-installed Codex JS entry, keeping
-quotes, `%`, `^`, `&`, `|`, `!` and newlines out of cmd's parser. This fallback requires the
-npm installation of Codex (`codex.cmd` on PATH). Quoting/bootstrap unit tests pass on macOS;
-**this release was not validated live on Windows** because the shared VM was already running
-for another session. No VM or Tabby restart was performed.
+**Windows launch:** both Git Bash and cmd.exe use an encoded Node bootstrap so user arguments
+never appear literally in a Windows shell script. It runs the npm-installed Codex JS entry
+(`codex.cmd` on PATH), or a native `codex.exe` when there is no usable npm entry.
+
+**The published 0.6.0 Windows launch paths have bugs:** cmd.exe's nested bootstrap quotes can
+open an empty shell, while Git Bash can change CRLF and trailing backslashes in the prompt.
+These are fixed in unreleased source. The post-release Windows 11 ARM64 harness checks the
+real Tabby/shell boundary, with exact argv checks for quotes, `%`, `^`, `&`, `|`, `!`, Unicode,
+mixed newlines and trailing backslashes. The patched build passed all 14 cases, real fresh
+prompts in both shells, cmd resume/context, and Git Bash suspended wake/context. The live run
+used npm-installed Codex; native fallback has unit coverage. Codex's Windows sandbox setup is a separate first-run
+step for the operator. cctabs rechecks folder trust before pressing Enter and waits for stable
+input frames, because Windows can briefly render an input box before a startup dialog.
+See `scripts/windows-guest/README.md` in the repo for the harness and VM cleanup rules.
 
 **Not yet:** `--backend` (a Claude concept), Windows process discovery, and Claude-specific
 conversation operations such as `fork`. Resume a known id with `--engine codex --resume <id>`.

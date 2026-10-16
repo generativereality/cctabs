@@ -21,6 +21,10 @@ npm i -g @generativereality/cctabs
 
 <!-- releases -->
 
+## Unreleased
+
+- **Fix: Codex did not start with the Windows cmd.exe fallback.** The tab opened at a shell prompt because nested quotes made Node evaluate the bootstrap as a string instead of running it. The fixed launch keeps the cmd bootstrap unquoted and user arguments encoded for both Windows shells. Git Bash had also changed CRLF and trailing backslashes in prompts. Startup now waits past transient input frames and rechecks folder trust before pressing Enter. Found by post-release Windows 11 ARM64 testing; the original macOS unit test had not exercised the real Tabby/cmd.exe boundary.
+
 ## 0.6.0 — 2026-10-16
 
 - **Codex tabs: `cctabs new <name> [dir] --engine codex`.** A tab can run OpenAI's Codex CLI instead of Claude Code. The prompt (`--prompt`, `--file` or `--path`) is passed to `codex` at launch, so Codex runs it as its first turn and nothing is typed. cctabs answers Codex's folder-trust question for the folder you named. In a folder with a CLAUDE.md and no AGENTS.md, Codex is told to read the CLAUDE.md. `--resume` takes a Codex session id and `--model` passes `-m`. `cctabs list`/`sessions` show Codex's busy and idle states, and `cctabs send` works, draft protection included. Extra launch flags go in `[codex] flags`. Codex session ids and `engine: "codex"` now appear in `sessions --json`; `manifest`, `restore`, `restart-tabby` and `prepare-reboot` preserve their engine and resume the saved conversation. `--suspended` placeholders wake into Codex. Fresh session discovery refuses ambiguous rollout matches. The Windows cmd.exe launch fallback preserves prompt argv through an encoded Node bootstrap (npm-installed Codex required); quoting has unit coverage but was not validated live on Windows because the shared guest was in use. Windows process discovery remains unsupported. See `references/codex.md`.

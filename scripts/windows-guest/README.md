@@ -61,3 +61,60 @@ tar czf $W/plugin-stage.tgz -C $W/stage-plugin node_modules package.json
    has to be inside Tabby: that is how it finds its own tab). `rt-check.ps1` prints its output,
    the worker log, the tabs and whether the pending restore cleared.
 5. Revert (above).
+
+## Codex launch, argv, resume and suspended wake
+
+Post-release Windows testing of 0.6.0 found two bugs the macOS unit tests did not catch:
+cmd.exe's nested `node -e` quotes evaluated a string instead of running the launcher, and Git
+Bash changed literal CRLF and trailing backslashes in its `-c` script. The fixed Windows paths
+keep argv encoded until a Node process passes it directly to Codex. Startup also waits for
+stable input frames and rechecks folder trust before Enter.
+
+The repeatable harness is specific to this disposable guest and refuses to run on macOS:
+
+- `codex-argv.mjs` runs seven fixtures through each real Tabby shell, including mixed CRLF/LF,
+  quotes, `%`, `^`, `&`, `|`, `!`, Unicode and trailing backslashes. It requires exact argv and cwd.
+  It temporarily replaces the npm Codex JS entry with `codex-argv-probe.mjs`, restoring the
+  original in `finally`. **Run it separately from live Codex tests.**
+- `codex-live.mjs` checks an actual signed-in Codex: the exact initial prompt in its rollout,
+  resume with a remembered conversation marker, Git Bash suspended restore/wake, and refusal
+  to create a cmd.exe placeholder. It closes its own test tabs by UUID and writes JSON reports.
+
+Follow the snapshot/staging/desktop-session instructions above. Install or transplant Codex
+0.162.1 as well. A host-side stage for its native ARM64 Windows dependency is:
+
+```sh
+mkdir -p "$W/stage-codex"
+(cd "$W/stage-codex" && npm i --ignore-scripts --os=win32 --cpu=arm64 @openai/codex@0.162.1)
+tar czf "$W/codex-stage.tgz" -C "$W/stage-codex" node_modules
+```
+
+Unpack it in the guest with an npm-style `codex.cmd` shim and a Git Bash `codex` shim beside
+`node_modules`, and put that directory plus Node on the **desktop Tabby process's** PATH.
+The SSH session's PATH alone does not change what Tabby launches. Complete Codex's separate
+Windows sandbox setup once; the harness does not choose permissions for the operator.
+
+Copy all three scripts into `C:\Users\dev\cctabs-cx-validation`. In a `.ps1` run with
+`-ExecutionPolicy Bypass` (not an inline nested PowerShell command), set:
+
+```powershell
+$env:CCTABS_TEST_CLI = 'C:\tools\cctabs\node_modules\@generativereality\cctabs\dist\index.js'
+$env:CCTABS_VALIDATION_BUILD = 'describe the published or candidate build here'
+& C:\tools\node\node.exe C:\Users\dev\cctabs-cx-validation\codex-argv.mjs
+& C:\tools\node\node.exe C:\Users\dev\cctabs-cx-validation\codex-live.mjs
+```
+
+For the test sessions, `[codex] flags = ["-m", "gpt-6-luna"]` in the guest's temporary cctabs
+config avoids spending the primary model's remaining credits and its model-choice reminder.
+Restore that configuration with the snapshot. The harness never answers model-choice prompts.
+
+Read reports and logs back with `scp` so PowerShell 5.1's console encoding cannot corrupt the
+assertion evidence. An `unreleased` build must be labelled as such even if its version string
+still says 0.6.0. Then shut down, revert the matching disk snapshot and EFI backup, and leave
+the guest off. These tests do not establish Windows process discovery or cmd.exe placeholders;
+those remain unsupported. Never point the harness at the Mac's running Tabby fleet.
+
+Validated 2026-10-16 on Windows 11 ARM64, Tabby 1.0.238/plugin 0.1.6, Node 24.22.0 and
+Codex 0.162.1: all 14 exact-argv cases passed on the unreleased fix, plus fresh prompts in
+both shells, cmd resume/context, Git Bash suspended wake/context, and cmd placeholder refusal.
+The native `codex.exe` fallback has unit coverage; the live run used npm-installed Codex.
