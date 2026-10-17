@@ -1,3 +1,5 @@
+import { tabAgent } from '../core/tab-agent.js'
+import { codexAssistantTurns } from '../core/codex-history.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
@@ -16,7 +18,7 @@ const DEFAULT_TURNS = 3
 
 export const transcriptCommand = define({
   name: 'transcript',
-  description: "Print what a tab's Claude session has actually SAID — its last assistant messages, read from the transcript rather than the screen. Unlike `scrollback` this works on a tab that is mid-turn (whose screen is just a spinner).",
+  description: "Print what a tab's Claude or Codex session has actually SAID — its last assistant messages, read from the transcript rather than the screen. Unlike `scrollback` this works on a tab that is mid-turn (whose screen is just a spinner).",
   args: {
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     turns: { type: 'number', short: 'n', description: `How many trailing assistant messages to print (default: ${DEFAULT_TURNS})` },
@@ -37,7 +39,8 @@ export const transcriptCommand = define({
     if (!query) { consola.error('Usage: cctabs transcript <tab-or-block> [n]'); process.exit(1) }
 
     const adapter = requireAdapter()
-    const { tabsById, tabNames } = await adapter.getAllData()
+    const data = await adapter.getAllData()
+    const { tabsById, tabNames } = data
     const resolved = resolveTabTarget(adapter, query, tabsById, tabNames)
     if (!resolved.ok) {
       adapter.closeSocket()
@@ -46,6 +49,19 @@ export const transcriptCommand = define({
       process.exit(1)
     }
     const { name, cwd, blockId } = resolved.target
+    const owner = [...tabsById].find(([, blocks]) => blocks.some((b) => b.blockid === blockId))?.[0]
+    const agent = owner ? tabAgent(adapter, data, owner) : undefined
+    if (agent?.engine === 'unknown') fail(asJson, blockId, 'unknown-engine', 'Cannot identify the tab’s engine; no transcript was selected by name.')
+    if (agent?.engine === 'codex') {
+      adapter.closeSocket()
+      if (!agent.id) fail(asJson, blockId, 'unresolved-codex', 'Codex session identity is unresolved; no Claude transcript was read.')
+      let turns: AssistantTurn[]
+      try { turns = codexAssistantTurns(agent.id!) } catch (e) { fail(asJson, blockId, 'unreadable', (e as Error).message) }
+      const shown = turns!.slice(-turnCount).map((t) => ({ ...t, text: truncateTurn(t.text, maxChars) }))
+      if (asJson) console.log(JSON.stringify({ engine: 'codex', tab: name, block_id: blockId, session_id: agent.id, cwd: agent.cwd, assistant_messages: turns!.length, turns: shown }, null, 2))
+      else { console.log(`# ${name} engine=codex session=${agent.id}`); for (const t of shown) console.log(`\n--- ${t.timestamp ?? 'no timestamp'} ---\n${t.text}`) }
+      return
+    }
     adapter.closeSocket()
 
     // A block that isn't in a nameable tab has no session we can resolve —

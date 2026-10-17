@@ -1,3 +1,8 @@
+import { readProcessTable } from '../core/claude-procs.js'
+import { importCodexHistory, codexHistoryFiles } from '../core/codex-history.js'
+import { readCodexSessions, codexLiveSessionPids } from '../core/codex-sessions.js'
+import { rememberCodex } from '../core/codex-state.js'
+import { openCodexSession } from '../core/open-codex.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, copyFileSync, rmSync, readdirSync, statSync } from 'fs'
@@ -16,6 +21,7 @@ import { copyDirRecursive, sidecarDirFor } from '../core/session-copy.js'
 const STAGED_SIDECAR = 'sidecar'
 
 interface ExportedTab {
+  engine?: 'claude' | 'codex'
   name: string
   cwd: string
   sessionId: string
@@ -84,9 +90,9 @@ export const importCommand = define({
       process.exit(1)
     }
 
-    if (meta.cctabsExportVersion !== 1) {
+    if (![1, 2].includes(meta.cctabsExportVersion)) {
       rmSync(stageRoot, { recursive: true, force: true })
-      consola.error(`Unsupported cctabsExportVersion: ${meta.cctabsExportVersion} (this build understands version 1).`)
+      consola.error(`Unsupported cctabsExportVersion: ${meta.cctabsExportVersion} (this build understands versions 1 and 2).`)
       process.exit(1)
     }
 
@@ -128,6 +134,24 @@ export const importCommand = define({
       )
       if (!existsSync(targetCwd)) {
         results.push({ name: entry.name, status: `cwd missing on this machine: ${targetCwd} (clone the repo, then re-run)` })
+        continue
+      }
+
+      if (entry.engine && !['claude', 'codex'].includes(entry.engine)) throw new Error(`Unsupported engine: ${entry.engine}`)
+      if (entry.engine === 'codex') {
+        try {
+          const historyDir = join(stagedDir, 'codex')
+          // Validate complete ancestry even for a dry run; no partial-history success.
+          const staged = readCodexSessions(historyDir)
+          const files = codexHistoryFiles(entry.sessionId, staged).map((s) => s.file)
+          if (dryRun) { results.push({ name: entry.name, status: `dry-run: would import ${files.length} Codex rollout(s) and resume ${entry.sessionId}` }); continue }
+          if (codexLiveSessionPids(readProcessTable() ?? []).has(entry.sessionId)) throw new Error('This Codex conversation is already running; close its tab before importing')
+          if (workspaceQuery) throw new Error('Codex import cannot select a workspace in Tabby')
+          importCodexHistory(files, join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'sessions'), force)
+          rememberCodex({ id: entry.sessionId, name: entry.name, cwd: targetCwd })
+          await openCodexSession({ tabName: entry.name, dir: targetCwd, resumeId: entry.sessionId })
+          results.push({ name: entry.name, status: `imported ${files.length} Codex rollout(s), tab opened` })
+        } catch (e) { results.push({ name: entry.name, status: `Codex import failed: ${(e as Error).message}` }); process.exitCode = 1 }
         continue
       }
 

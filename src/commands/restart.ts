@@ -1,3 +1,6 @@
+import { callerEngine } from '../core/engine.js'
+import { isCodexCommand } from '../core/codex.js'
+import { codexLiveSessionPids } from '../core/codex-sessions.js'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -26,7 +29,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export const restartCommand = define({
   name: 'restart',
-  description: 'Restart Claude in every tab (e.g. to pick up a new Claude Code): snapshot, stop, restore with --resume, then check every session came back. Never stops its own session.',
+  description: 'Restart the agent in every tab (e.g. to pick up a new Claude Code): snapshot, stop, restore with --resume, then check every session came back. Never stops its own session.',
   args: {
     all: { type: 'boolean', description: 'Restart every tab in the manifest (except this session). Without --all or --only, restart only prints its plan.' },
     only: { type: 'string', description: 'Comma-separated tab names to restart, instead of all of them' },
@@ -47,18 +50,19 @@ export const restartCommand = define({
     }
 
     // -- preflight: refuse unless we know exactly which process is us --
-    const selfSessionId = process.env.CLAUDE_CODE_SESSION_ID
+    const engine = callerEngine()
+    const selfSessionId = engine === 'codex' ? process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID : process.env.CLAUDE_CODE_SESSION_ID
     const procRows = readProcessTable()
     if (!procRows) {
-      consola.error('restart needs a process table (`ps`) to tell which Claude is which, and there is none on this platform.')
+      consola.error('restart needs a process table (`ps`) to tell which agent is which, and there is none on this platform.')
       process.exit(1)
     }
-    const own = ownClaudeProc(procRows)
+    const own = engine === 'codex' ? procRows.filter((r) => ancestorsOf(process.pid, procRows).includes(r.pid) && isCodexCommand(r.command)).map((r) => ({ ...r, name: 'codex' }))[0] : ownClaudeProc(procRows)
     if (!selfSessionId || !own) {
       consola.error(
         'restart refuses to run without identifying its own session: ' +
-        (!selfSessionId ? 'CLAUDE_CODE_SESSION_ID is not set' : 'no `claude` process among this process\'s ancestors') +
-        '. Run it from inside a Claude Code tab.',
+        (!selfSessionId ? 'the calling agent session ID is not set' : 'no calling agent process among this process\'s ancestors') +
+        '. Run it from inside a Claude or Codex tab.',
       )
       process.exit(1)
     }
@@ -146,6 +150,8 @@ export const restartCommand = define({
     const live = liveSessionPids(procRows)
     const plan = planRestart(entries, {
       liveSessionPids: live,
+      codexLiveSessionPids: codexLiveSessionPids(procRows),
+      codexShellPid: new Map(gathered.rows.filter((r) => r.engine === 'codex' && r.codex_pid && r.session_id).map((r) => [r.session_id!, r.codex_pid!])),
       shellPidClaude: new Map(rows.filter((r) => r.via === 'shell-pid' && r.sessionId).map((r) => [r.sessionId!, r.pid])),
       nameOnly: new Set(rows.filter((r) => r.via === 'argv-name' && r.sessionId).map((r) => r.sessionId!)),
       selfPids,
@@ -160,7 +166,7 @@ export const restartCommand = define({
     consola.info(`This session: ${own.name ?? '(unnamed)'} [pid ${own.pid}] — excluded.`)
     for (const t of plan.targets) consola.log(`  ${t.entry.name}: stop pid ${t.pids.join(', ')} (${t.via}), then resume ${shortId(t.entry.sessionId)}`)
     for (const e of plan.notRunning) consola.log(`  ${e.name}: not running — restore brings up ${shortId(e.sessionId)}`)
-    for (const e of plan.handOnly) consola.warn(`  ${e.name}: its Claude can't be tied to ${shortId(e.sessionId)} (matched only by name, or its argv resumes a different session) — restart it by hand`)
+    for (const e of plan.handOnly) consola.warn(`  ${e.name}: its agent can't be tied to ${shortId(e.sessionId)} (matched only by name, or its argv resumes a different session) — restart it by hand`)
     for (const e of plan.noSession) consola.warn(`  ${e.name}: no session id — left alone, since restarting would lose its context`)
     for (const e of plan.protected) consola.warn(`  ${e.name}: would mean stopping this session's own process tree — left alone`)
 
@@ -184,7 +190,7 @@ export const restartCommand = define({
       if (selfPids.has(pid)) continue // belt and braces: planRestart already refused these
       try { process.kill(pid, 'SIGTERM') } catch { /* already gone */ }
     }
-    consola.info(`Sent SIGTERM to ${allPids.length} Claude process(es); waiting for them to exit…`)
+    consola.info(`Sent SIGTERM to ${allPids.length} agent process(es); waiting for them to exit…`)
     const deadline = Date.now() + killTimeoutMs
     while (Date.now() < deadline && allPids.some(pidAlive)) await sleep(250)
     const stuck = new Set(plan.targets.filter((t) => t.pids.some(pidAlive)).map((t) => t.entry))
@@ -211,21 +217,21 @@ export const restartCommand = define({
     // -- audit: every restored session has a Claude launched on its id --
     consola.info('Checking every restored tab is running its own session…')
     const auditDeadline = Date.now() + AUDIT_TIMEOUT_MS
-    let audit = auditRestart(audited, liveSessionPids(readProcessTable() ?? []))
+    let audit = auditRestart(audited, liveSessionPids(readProcessTable() ?? []), codexLiveSessionPids(readProcessTable() ?? []))
     while (audit.missing.length && Date.now() < auditDeadline) {
       await sleep(3000)
-      audit = auditRestart(audited, liveSessionPids(readProcessTable() ?? []))
+      audit = auditRestart(audited, liveSessionPids(readProcessTable() ?? []), codexLiveSessionPids(readProcessTable() ?? []))
     }
     console.log(`\nRestart audit: ${audit.ok.length} running their session, ${audit.missing.length} missing, ${audit.doubled.length} doubled`)
     if (audit.missing.length) {
       consola.error(
-        `No Claude is running these sessions — a tab may look alive but be EMPTY: ${audit.missing.map((e) => `${e.name} (${shortId(e.sessionId)})`).join(', ')}. ` +
+        `No agent is running these sessions — a tab may look alive but be EMPTY: ${audit.missing.map((e) => `${e.name} (${shortId(e.sessionId)})`).join(', ')}. ` +
         `Re-run: cctabs restore --manifest ${saved} -c`,
       )
       process.exitCode = 1
     }
     if (audit.doubled.length) {
-      consola.error(`More than one Claude on one transcript: ${audit.doubled.map((e) => e.name).join(', ')} — close the extra tab.`)
+      consola.error(`More than one agent on one transcript: ${audit.doubled.map((e) => e.name).join(', ')} — close the extra tab.`)
       process.exitCode = 1
     }
   },
@@ -234,6 +240,7 @@ export const restartCommand = define({
 function toManifestShape(e: RestoreEntry) {
   return {
     name: e.name,
+    engine: e.engine ?? 'claude',
     dir: e.dir,
     ...(e.sessionId ? { session_id: e.sessionId } : {}),
     ...(e.backend ? { backend: e.backend } : {}),

@@ -1,3 +1,5 @@
+import { tabAgent } from '../core/tab-agent.js'
+import { rememberCodex } from '../core/codex-state.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { readFileSync } from 'fs'
@@ -15,7 +17,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export const renameCommand = define({
   name: 'rename',
-  description: 'Rename a tab, and the Claude session in it',
+  description: 'Rename a tab and its saved session identity',
   args: {
     tab: { type: 'positional', description: 'Tab name or ID prefix' },
     newName: { type: 'positional', description: 'New name' },
@@ -27,7 +29,8 @@ export const renameCommand = define({
     const bad = invalidNameReason(newName)
     if (bad) { consola.error(`Can't rename to ${JSON.stringify(newName)}: ${bad}.`); process.exit(1) }
     const adapter = requireAdapter()
-    const { tabsById, tabNames } = await adapter.getAllData()
+    const data = await adapter.getAllData()
+    const { tabsById, tabNames } = data
     const matches = adapter.resolveTab(query, tabsById, tabNames)
     if (!matches.length) { consola.error(`No tab matching '${query}'`); process.exit(1) }
     if (matches.length > 1) {
@@ -39,6 +42,21 @@ export const renameCommand = define({
     const oldName = tabNames.get(tabId) ?? tabId.slice(0, 8)
     const term = (tabsById.get(tabId) ?? []).find((b) => b.view === 'term')
     const procRows = readProcessTable()
+
+    const agent = tabAgent(adapter, data, tabId)
+    if (agent.engine === 'unknown') {
+      await adapter.renameTab(tabId, newName); adapter.closeSocket(); consola.info('Tab renamed; engine unknown, so no conversation metadata was changed.'); return
+    }
+    if (agent.engine === 'codex') {
+      if (!agent.id) { consola.error('Codex session identity is unresolved; nothing renamed.'); process.exit(1) }
+      const asleep = suspendedTabsIn(adapter, data, procRows).get(tabId)
+      if (asleep) { consola.error('Wake the suspended tab before renaming it.'); process.exit(1) }
+      await adapter.renameTab(tabId, newName)
+      rememberCodex({ id: agent.id, name: newName, cwd: agent.cwd, tabId })
+      adapter.closeSocket()
+      consola.success(`Renamed Codex tab "${oldName}" → "${newName}" (saved for resume and restore)`)
+      return
+    }
 
     // A suspended tab's placeholder already holds `claude --resume <id> --name
     // <old>`, and `--name` writes the old title back the moment it wakes. Any

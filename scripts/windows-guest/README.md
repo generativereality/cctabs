@@ -118,3 +118,19 @@ Validated 2026-10-16 on Windows 11 ARM64, Tabby 1.0.238/plugin 0.1.6, Node 24.22
 Codex 0.162.1: all 14 exact-argv cases passed on the unreleased fix, plus fresh prompts in
 both shells, cmd resume/context, Git Bash suspended wake/context, and cmd placeholder refusal.
 The native `codex.exe` fallback has unit coverage; the live run used npm-installed Codex.
+
+
+## Codex command parity (unreleased)
+
+`codex-parity.mjs` checks Windows CIM session discovery, rename/transcript, saved-name resume,
+and cmd.exe suspended wake using the real Codex CLI. Complete the separate first-run Codex
+sandbox setup first. Copy the harness and the candidate CLI into the guest, then run it with
+Node and the same PATH/build-label setup above. It writes `parity-result.json` plus per-step
+logs in the scratch directory. If `mac-codex-v2.tar.gz` is present there, it also imports that
+Mac fork archive into a Windows cwd and checks inherited messages. Use Codex 0.163.0 on both
+sides for that archive fixture. No authentication is copied with the archive.
+
+The guest may apply pending Windows updates and reboot before console login. A "100%" update
+screen still needs to finish; wait for it, then log in and provision. Shut down and restore the
+disk snapshot plus matching EFI even after a failed harness run. Do not infer a pass from CLI
+exit status alone: require the JSON session ID, assistant messages, and final result report.

@@ -1,3 +1,4 @@
+import { cmdCodexPlaceholder } from './codex-placeholder.js'
 import { readTab } from './open-session.js'
 import { codexReady, codexTrustDialog, type Engine } from './codex.js'
 import { codexLiveSessionPids, matchCodexTabs } from './codex-sessions.js'
@@ -169,7 +170,7 @@ export async function openPlaceholderTab(
       cwd: rec.dir,
       title: rec.name,
       command: shell.command,
-      args: tabLaunchArgv(shell, placeholderBody(placeholderSpecFor(record))),
+      args: tabLaunchArgv(shell, shell.posix ? placeholderBody(placeholderSpecFor(record)) : cmdCodexPlaceholder(placeholderSpecFor(record))),
       afterActive: opts.afterActive,
       color,
     })
@@ -199,10 +200,11 @@ export async function installPlaceholderInShell(
   const shell = placeholderShellOrThrow()
   const record: SuspendRecord = { ...rec, tabId, suspendedAt: new Date().toISOString() }
   writeRecord(record)
-  const argv = [shell.command, ...tabLaunchArgv(shell, placeholderBody(placeholderSpecFor(record)))]
-  await adapter.sendInput(blockId, '\x15')
+  const argv = [shell.command, ...tabLaunchArgv(shell, shell.posix ? placeholderBody(placeholderSpecFor(record)) : cmdCodexPlaceholder(placeholderSpecFor(record)))]
+  // cmd's line editor clears with Escape; Ctrl-U becomes part of the command.
+  await adapter.sendInput(blockId, shell.posix ? '\x15' : '\x1b')
   await sleep(100)
-  await adapter.sendInput(blockId, ` exec ${argv.map(shellQuoteArg).join(' ')}`)
+  await adapter.sendInput(blockId, shell.posix ? ` exec ${argv.map(shellQuoteArg).join(' ')}` : cmdCodexPlaceholder(placeholderSpecFor(record)))
   await sleep(200)
   await adapter.sendInput(blockId, '\r')
 }
@@ -252,7 +254,8 @@ export interface SuspendInput {
  * that `restore` and `sessions` can still act on, not a tab nobody can name.
  */
 export async function suspendTab(adapter: TerminalAdapter, s: SuspendInput): Promise<{ tabId: string; recreated: boolean }> {
-  placeholderShellOrThrow()
+  const shell = placeholderShellOrThrow()
+  if (!shell.posix && s.engine !== 'codex') throw new Error('cmd.exe placeholders support Codex; use Git Bash for Claude')
   const rec = {
     engine: s.engine,
     sessionId: s.sessionId,
@@ -451,9 +454,13 @@ export async function wakeSuspendedTab(
 
     if (t.record.engine === 'codex') {
       const trust = codexTrustDialog(tail)
-      if (trust.visible && trust.onTrust && dialogPasses++ < 1) await adapter.sendInput(t.blockId, '\r')
+      if (trust.visible && trust.onTrust && dialogPasses < 1) {
+        await sleep(400)
+        const current = codexTrustDialog(await readTab(adapter, t.blockId, 60))
+        if (current.visible && current.onTrust) { await adapter.sendInput(t.blockId, '\r'); dialogPasses++ }
+      }
       if (codexReady(tail)) {
-        if (++readyStreak >= 2) return { ok: true, ready: 'confirmed', detail: 'Codex is at its prompt' }
+        if (++readyStreak >= 3) return { ok: true, ready: 'confirmed', detail: 'Codex is at its prompt' }
       } else readyStreak = 0
       await sleep(800)
       continue

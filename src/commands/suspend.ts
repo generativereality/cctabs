@@ -11,7 +11,7 @@ import { placeholderShellOrThrow, reportWake, reviveDormant, suspendedTabsIn, su
 
 export const suspendCommand = define({
   name: 'suspend',
-  description: 'Stop Claude in a tab and leave a placeholder that knows its session. The tab keeps its name and place; it wakes on Enter, on `cctabs resume`/`wake`, or when `cctabs send` targets it. A suspended tab is NOT on remote control (claude.ai / the phone) until woken.',
+  description: 'Stop the agent in a tab and leave a placeholder that knows its session. The tab keeps its name and place; it wakes on Enter, on `cctabs resume`/`wake`, or when `cctabs send` targets it. A suspended tab is NOT on remote control (claude.ai / the phone) until woken.',
   args: {
     force: { type: 'boolean', description: 'Suspend even if a turn is in flight (the turn is lost)' },
     color: { type: 'string', short: 'c', description: `Recolour the tab while it is suspended: ${TAB_COLOR_NAMES.join(', ')} or a hex value. Its own colour comes back when cctabs wakes it.` },
@@ -52,7 +52,7 @@ export const suspendCommand = define({
       if (!row) { fail('not a terminal tab cctabs can see'); continue }
 
       if (row.status === 'suspended') { consola.info(`"${row.name}" is already suspended.`); continue }
-      if (row.current || (self && row.claude_pid === self.pid)) { fail('that is this session — a Claude cannot suspend itself'); continue }
+      if (row.current || (self && row.claude_pid === self.pid)) { fail('that is this session — an agent cannot suspend itself'); continue }
       if (!row.session_id) { fail(`no session resolved for "${row.name}" (${row.session_lookup}), so there would be nothing to wake into`); continue }
       if (row.status === 'active' && !force) { fail('a turn is in flight — suspending would lose it. Wait for it to finish, or pass --force'); continue }
       if (!row.cwd || !existsSync(row.cwd)) { fail(`its directory ${row.cwd || '(none)'} is gone — a woken Claude could not start there`); continue }

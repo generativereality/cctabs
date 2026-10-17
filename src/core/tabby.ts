@@ -371,7 +371,7 @@ export class TabbyAdapter implements TerminalAdapter {
     // blocksList(); refetch with title so we don't re-derive.
     const tabNames = new Map<string, string>()
     try {
-      const res = await fetch(this.url('/api/tabs'))
+      const res = await fetch(this.url('/api/tabs'), { headers: { connection: 'close' } })
       if (res.ok) {
         const data = (await res.json()) as {
           tabs: Array<{ uuid: string; title: string; customTitle?: string }>

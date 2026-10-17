@@ -4,7 +4,7 @@
 
 New in 0.6.0: `cctabs new review ~/Dev/myapp --engine codex --prompt "review the changes"`.
 Discover Codex session ids, save and restore mixed fleets, and keep Codex tabs suspended until
-you need them. [Codex setup and platform limits](skills/cctabs/references/codex.md).
+you need them. [Codex setup and command support](skills/cctabs/references/codex.md).
 
 CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https://cctabs.com)
 
@@ -76,7 +76,7 @@ That fetches the whole skill directory: `SKILL.md` plus the `references/` files 
 ```
 cctabs sessions [--json]                 what's running (busy/waiting status + permission mode)
 cctabs list                              all workspaces, tabs, and blocks
-cctabs new <name> [dir] [-w workspace]   open tab, start claude
+cctabs new <name> [dir] [-w workspace]   open tab, inherit calling engine (else Claude)
 cctabs new <name> [dir] -c <colour>      ...and colour its tab (also on resume/fork)
 cctabs new <name> [dir] --path <file>    ...or hand it a file to read (no truncation surface)
 cctabs new <name> [dir] -r <session-id>  open tab, resume an existing session by ID
@@ -212,7 +212,7 @@ of a directory that no longer exists.
 cctabs fork auth -n auth-v2
 ```
 
-Runs `claude --resume <id> --fork-session` — new independent session, full shared context from the original.
+Preserves the source engine: `claude --resume <id> --fork-session` or `codex fork <id>` — a new independent session with shared context. `new` inherits the calling engine; use `--engine claude` or `--engine codex` to override.
 
 ### Target a workspace
 
