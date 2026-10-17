@@ -40,12 +40,20 @@ export function codexArgs(o: {
   prompt?: string
   resumeId?: string
   forkId?: string
+  cwd?: string
   model?: string
   readClaudeMd?: boolean
   extraFlags?: string[]
 }): string[] {
-  const out: string[] = [...(o.extraFlags ?? [])]
+  let out: string[] = [...(o.extraFlags ?? [])]
+  const without = (flags: string[], short: string, long: string) => flags.filter((flag, i) => {
+    if (i > 0 && [short, long].includes(flags[i - 1])) return false
+    return flag !== short && flag !== long && !flag.startsWith(long + '=') && !(flag.startsWith(short) && !flag.startsWith('--') && flag.length > short.length)
+  })
+  if (o.model) out = without(out, '-m', '--model')
+  if (o.cwd) out = without(out, '-C', '--cd')
   if (o.readClaudeMd) out.push('-c', 'project_doc_fallback_filenames=["CLAUDE.md"]')
+  if (o.cwd) out.push('-C', o.cwd)
   if (o.model) out.push('-m', o.model)
   if (o.resumeId && o.forkId) throw new Error('Choose resume or fork, not both')
   if (o.forkId) return ['fork', ...out, o.forkId]
@@ -86,13 +94,15 @@ export function codexStatus(buffer: string): 'active' | 'idle' | undefined {
  * Codex's shared `app-server` daemon)? The npm install runs as
  * `node /opt/homebrew/bin/codex …`, which starts a native `…/bin/codex …`.
  */
+export function commandWords(command: string): string[] {
+  return (command.match(/"[^"\n]*"|'[^'\n]*'|[^\s]+/g) ?? []).map((w) => /^['"]/.test(w) ? w.slice(1, -1) : w)
+}
 export function isCodexCommand(command: string): boolean {
-  const words = command.split(/\s+/)
+  const words = commandWords(command)
   const base = (w: string | undefined) => (w ?? '').split(/[\\/]/).pop() ?? ''
-  const isCodex = (w: string | undefined) => /^codex(\.exe)?$/i.test(base(w))
-  const codexAt = isCodex(words[0]) ? 0 : /^node(\.exe)?$/i.test(base(words[0])) && isCodex(words[1]) ? 1 : -1
-  if (codexAt < 0) return false
-  return words[codexAt + 1] !== 'app-server'
+  const isCodex = (w: string | undefined) => /^codex(?:\.exe|\.js)?$/i.test(base(w))
+  const codexAt = isCodex(words[0]) ? 0 : /^node(?:\.exe)?$/i.test(base(words[0])) && isCodex(words[1]) ? 1 : -1
+  return codexAt >= 0 && words[codexAt + 1] !== 'app-server'
 }
 
 /** A transient input frame can precede folder trust on Windows startup. */

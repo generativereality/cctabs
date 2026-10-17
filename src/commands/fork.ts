@@ -1,6 +1,5 @@
 import { codexStatus } from '../core/codex.js'
-import { collectSessionRows } from '../core/session-rows.js'
-import { readProcessTable } from '../core/claude-procs.js'
+import { tabAgent } from '../core/tab-agent.js'
 import { openCodexSession } from '../core/open-codex.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
@@ -29,7 +28,8 @@ export const forkCommand = define({
 
     const config = loadConfig()
     const adapter = requireAdapter()
-    const { tabsById, tabNames } = await adapter.getAllData()
+    const data = await adapter.getAllData()
+    const { tabsById, tabNames } = data
     const matches = adapter.resolveTab(sourceQuery, tabsById, tabNames)
 
     if (!matches.length) { consola.error(`No tab matching '${sourceQuery}' (tabs in workspaces with no open window are not visible — open that workspace first)`); process.exit(1) }
@@ -48,14 +48,15 @@ export const forkCommand = define({
     const termBlocks = (tabsById.get(tabId) ?? []).filter((b) => b.view === 'term')
     if (!termBlocks.length) { consola.error(`Tab "${tabName}" has no terminal block`); process.exit(1) }
 
-    const source = (await collectSessionRows(adapter, readProcessTable())).flatMap((w) => w.sessions).find((r) => r.tab_id === tabId)
+    const source = tabAgent(adapter, data, tabId)
+    if (source.engine === 'unknown') { consola.error('The source engine is unresolved; no conversation was forked.'); process.exit(1) }
     if (source?.engine === 'codex') {
       if (ctx.values.backend) { consola.error('--backend applies to Claude, not a Codex fork.'); process.exit(1) }
-      if (!source.session_id) { consola.error('Cannot identify the source Codex session unambiguously; no fork was opened.'); process.exit(1) }
+      if (!source.id) { consola.error('Cannot identify the source Codex session unambiguously; no fork was opened.'); process.exit(1) }
       const color = resolveColorPreference(ctx.values.color as string | undefined, undefined, config.defaults.color)
-      const newTabId = await openCodexSession({ tabName: newName, dir: source.cwd, forkId: source.session_id, model: ctx.values.model as string | undefined, afterActive: true, color })
+      const newTabId = await openCodexSession({ tabName: newName, dir: source.cwd, forkId: source.id, model: ctx.values.model as string | undefined, afterActive: true, color })
       consola.success(`Forked Codex "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]`)
-      consola.info(`source session: ${source.session_id}`)
+      consola.info(`source session: ${source.id}`)
       return
     }
 

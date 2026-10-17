@@ -1,3 +1,4 @@
+import { namedCodex } from '../core/codex-state.js'
 import { codexStatus } from '../core/codex.js'
 import { launchEngine } from '../core/engine.js'
 import { readCodexSessions } from '../core/codex-sessions.js'
@@ -66,7 +67,8 @@ export const resumeCommand = define({
     const config = loadConfig()
     const displayName = applyPrefix(name, config.defaults.prefix)
 
-    const explicitSession = ctx.values.session as string | undefined
+    const named = ctx.values.session || ctx.values.engine === 'claude' || ctx.values.backend ? undefined : namedCodex(displayName, ctx.positionals[2] ? dir : undefined)
+    const explicitSession = (ctx.values.session as string | undefined) ?? named?.id
     const explicitBackend = ctx.values.backend as string | undefined
 
     const requestedEngine = launchEngine(ctx.values.engine as string | undefined, explicitBackend)
@@ -121,9 +123,11 @@ export const resumeCommand = define({
         engineAdapter.closeSocket()
         return
       }
+      const elsewhere = (await collectSessionRows(engineAdapter, readProcessTable())).flatMap((w) => w.sessions).find((r) => r.engine === 'codex' && r.session_id === sessionId && (r.codex_pid !== undefined || r.status === 'suspended'))
+      if (elsewhere) { consola.error(`Codex session is already in tab "${elsewhere.name}"; use that tab instead of opening a duplicate.`); process.exit(1) }
       const session = codexMatches[0]
       const color = resolveColorPreference(ctx.values.color as string | undefined, undefined, config.defaults.color)
-      const tabId = await openCodexSession({ tabName: displayName, dir: ctx.positionals[2] ? dir : session.cwd, resumeId: sessionId, model: ctx.values.model as string | undefined, afterActive: true, color })
+      const tabId = await openCodexSession({ tabName: displayName, dir: ctx.positionals[2] ? dir : named?.cwd ?? session.cwd, resumeId: sessionId, model: ctx.values.model as string | undefined, afterActive: true, color })
       consola.success(`Tab "${displayName}" [${tabId.slice(0, 8)}] → codex resume ${sessionId}`)
       return
     }

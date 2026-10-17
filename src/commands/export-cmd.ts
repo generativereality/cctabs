@@ -1,3 +1,7 @@
+import { readProcessTable } from '../core/claude-procs.js'
+import { readCodexSessions } from '../core/codex-sessions.js'
+import { tabAgent } from '../core/tab-agent.js'
+import { exportCodexHistory } from '../core/codex-history.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'fs'
@@ -14,6 +18,7 @@ import pkg from '../../package.json'
 const STAGED_SIDECAR = 'sidecar'
 
 interface ExportedTab {
+  engine?: 'claude' | 'codex'
   name: string
   cwd: string
   sessionId: string
@@ -32,7 +37,7 @@ interface ExportedTab {
 }
 
 interface ExportMeta {
-  cctabsExportVersion: 1
+  cctabsExportVersion: 1 | 2
   cctabsVersion: string
   exportedAt: string
   sourceMachine: string
@@ -52,7 +57,7 @@ function timestampSlug(): string {
 
 export const exportCommand = define({
   name: 'export',
-  description: 'Export tabs + their Claude sessions to a tarball you can move to another machine (then `cctabs import`).',
+  description: 'Export tabs + their Claude or Codex sessions to a tarball you can move to another machine (then `cctabs import`).',
   args: {
     all: { type: 'boolean', short: 'a', description: 'Export every tab in the workspace (use --workspace to pick one; default is the current workspace).' },
     workspace: { type: 'string', short: 'w', description: 'Workspace to export from when using --all (defaults to current).' },
@@ -74,7 +79,8 @@ export const exportCommand = define({
     }
 
     const adapter = requireAdapter()
-    const { tabsById, tabNames, workspaces } = await adapter.getAllData()
+    const data = await adapter.getAllData()
+    const { tabsById, tabNames, workspaces } = data
     const currentWs = adapter.currentWorkspaceId()
 
     // Pick the workspace
@@ -113,12 +119,29 @@ export const exportCommand = define({
     const exported: ExportedTab[] = []
     const skipped: Array<{ name: string; reason: string }> = []
 
+    const procRows = readProcessTable(), codexSessions = readCodexSessions()
     for (const tabId of targetTabIds) {
       const tabName = tabNames.get(tabId) ?? tabId.slice(0, 8)
       const termBlock = (tabsById.get(tabId) ?? []).find((b) => b.view === 'term')
       if (!termBlock) { skipped.push({ name: tabName, reason: 'no terminal block' }); continue }
       const cwd = termBlock.meta?.['cmd:cwd']
       if (!cwd) { skipped.push({ name: tabName, reason: 'no cwd recorded' }); continue }
+
+      const agent = tabAgent(adapter, data, tabId, procRows, codexSessions)
+      if (agent.engine === 'unknown') { skipped.push({ name: tabName, reason: 'engine unresolved; no transcript selected by name' }); continue }
+      if (agent.engine === 'codex') {
+        if (!agent.id) { skipped.push({ name: tabName, reason: 'Codex identity unresolved; no Claude fallback' }); continue }
+        if (exported.some((e) => e.engine === 'codex' && e.sessionId === agent.id)) { skipped.push({ name: tabName, reason: 'duplicate Codex session already bundled' }); continue }
+        try {
+          const tabDir = join(tabsRoot, agent.id), historyDir = join(tabDir, 'codex')
+          mkdirSync(historyDir, { recursive: true })
+          exportCodexHistory(agent.id, historyDir)
+          const manifest: ExportedTab = { engine: 'codex', name: tabName, cwd: agent.cwd, sessionId: agent.id, claudeProjectSlug: '', workspace: wsName }
+          writeFileSync(join(tabDir, 'manifest.json'), JSON.stringify(manifest, null, 2))
+          exported.push(manifest)
+        } catch (e) { skipped.push({ name: tabName, reason: (e as Error).message }) }
+        continue
+      }
 
       // Resolve session id by tab name. First try the tab's recorded cwd; if the
       // session lives in a worktree (`<cwd>/.claude/worktrees/<name>/`) the
@@ -224,7 +247,7 @@ export const exportCommand = define({
     }
 
     const meta: ExportMeta = {
-      cctabsExportVersion: 1,
+      cctabsExportVersion: exported.some((e) => e.engine === 'codex') ? 2 : 1,
       cctabsVersion: pkg.version,
       exportedAt: new Date().toISOString(),
       sourceMachine: hostname(),

@@ -1,4 +1,6 @@
-import { existsSync } from 'fs'
+import { tabAgent } from './tab-agent.js'
+import { rememberCodex } from './codex-state.js'
+import { existsSync, realpathSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { consola } from 'consola'
@@ -6,7 +8,7 @@ import { requireAdapter } from './adapter.js'
 import { loadConfig } from './config.js'
 import { resolveTabShell, tabLaunchArgv, shellQuoteArg } from './shell.js'
 import { readTab } from './open-session.js'
-import { codexArgs, codexStartupSettled, codexTrustDialog } from './codex.js'
+import { codexArgs, codexStartupSettled, codexTrustDialog, codexStatus } from './codex.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -33,15 +35,16 @@ export interface OpenCodexOptions {
  * explicitly, cctabs presses Enter once it has seen the cursor there.
  */
 export async function openCodexSession(opts: OpenCodexOptions): Promise<string> {
-  const dir = resolve(opts.dir.replace(/^~/, homedir()))
-  if (!existsSync(dir)) throw new Error(`Directory does not exist: ${dir}`)
+  const requestedDir = resolve(opts.dir.replace(/^~/, homedir()))
+  if (!existsSync(requestedDir)) throw new Error(`Directory does not exist: ${requestedDir}`)
+  const dir = realpathSync.native(requestedDir)
   const adapter = requireAdapter()
   if (!adapter.openTabDirect) throw new Error('Codex tabs need the Tabby plugin.')
 
   const shell = resolveTabShell()
 
   const readClaudeMd = existsSync(join(dir, 'CLAUDE.md')) && !existsSync(join(dir, 'AGENTS.md'))
-  const body = codexLaunchBody({ ...opts, readClaudeMd }, shell)
+  const body = codexLaunchBody({ ...opts, cwd: dir, readClaudeMd }, shell)
 
   const { blockId, tabId } = await adapter.openTabDirect({
     cwd: dir,
@@ -53,6 +56,12 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
   })
   if (readClaudeMd) consola.info('This folder has a CLAUDE.md and no AGENTS.md, so Codex is told to read CLAUDE.md.')
 
+  const remember = async () => {
+    if (opts.resumeId) rememberCodex({ id: opts.resumeId, name: opts.tabName, cwd: dir, tabId })
+    else { try { tabAgent(adapter, await adapter.getAllData(), tabId) } catch (e) { consola.warn(`Codex identity not yet saved: ${(e as Error).message}`) } }
+    return tabId
+  }
+
   // Get past the trust prompt, then confirm Codex is up.
   const deadline = Date.now() + 45_000
   let answered = false
@@ -60,6 +69,7 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
   while (Date.now() < deadline) {
     await sleep(700)
     const screen = await readTab(adapter, blockId, 40)
+    if (/Usage: codex/.test(screen) && /(?:^|\n)\s*error:/.test(screen) && codexStatus(screen) === undefined) throw new Error(`Codex rejected its launch arguments: ${screen.trim()}`)
     frames.push(screen)
     if (frames.length > 3) frames.shift()
     const trust = codexTrustDialog(screen)
@@ -67,7 +77,7 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
       if (answered) continue
       if (!trust.onTrust) {
         consola.warn('Codex is asking whether to trust this folder, and the cursor is not on "Trust and continue". Left for you to answer in the tab.')
-        return tabId
+        return remember()
       }
       await sleep(400) // let the dialog's key handler attach
       // Windows can replace this frame with its sandbox setup question.
@@ -78,10 +88,10 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
       answered = true
       continue
     }
-    if (codexStartupSettled(frames)) return tabId
+    if (codexStartupSettled(frames)) return remember()
   }
   consola.warn('Could not confirm Codex started within 45s — check the tab. (Signed out? `codex login`.)')
-  return tabId
+  return remember()
 }
 
 /**

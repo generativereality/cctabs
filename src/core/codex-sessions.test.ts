@@ -45,7 +45,7 @@ describe('Codex session identity', () => {
     const entry = parseManifest(JSON.stringify([{ name: 'cx', cwd: '/scratch', engine: 'codex', session_id: id, suspended: true }]))[0]
     expect(entry.engine).toBe('codex')
     expect(entry.suspended).toBe(true)
-    expect(placeholderClaudeLine({ engine: entry.engine, sessionId: id, name: 'cx', dir: '/scratch', extraFlags: [], recordFile: '/record' })).toBe(`codex 'resume' '${id}'`)
+    expect(placeholderClaudeLine({ engine: entry.engine, sessionId: id, name: 'cx', dir: '/scratch', extraFlags: [], recordFile: '/record' })).toBe(`codex 'resume' '-C' '/scratch' '${id}'`)
   })
 })
 

@@ -1,3 +1,6 @@
+import { codexIdentities } from '../core/codex-state.js'
+import { matchCodexTabs, readCodexSessions } from '../core/codex-sessions.js'
+import { callerEngine } from '../core/engine.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { existsSync, readdirSync } from 'fs'
@@ -33,13 +36,15 @@ export const whoamiCommand = define({
   name: 'whoami',
   description: 'Print the name of the cctabs tab this session is running in (or "unknown")',
   args: {
-    json: { type: 'boolean', short: 'j', description: 'Emit the full identity as JSON: tab, tab_id, session_id, cwd, worktree, backend, config_dir, color, via.' },
+    json: { type: 'boolean', short: 'j', description: 'Emit the full identity as JSON: engine, tab, tab_id, session_id, cwd, worktree, backend, config_dir, color, via.' },
   },
   async run(ctx) {
     const asJson = (ctx.values.json as boolean | undefined) ?? false
     // Claude Code exports this into every session, so a session always knows its
     // own id even when the process-tree walk below can't find its tab.
-    const sessionId = process.env.CLAUDE_CODE_SESSION_ID || undefined
+    const procRows = readProcessTable()
+    const engine = callerEngine(procRows)
+    const sessionId = engine === 'codex' ? process.env.CODEX_THREAD_ID || process.env.CODEX_SESSION_ID : process.env.CLAUDE_CODE_SESSION_ID || undefined
 
     // This command must not die the way the others do when there is no terminal
     // to talk to. `unknown` is its documented answer for a plain terminal, an
@@ -49,6 +54,7 @@ export const whoamiCommand = define({
     const adapter = optionalAdapter()
     let tabs: WhoamiTab[] = []
     let currentTabId: string | undefined
+    let currentTabVia: 'pid' | 'codex-session' = 'pid'
     if (adapter) {
       try {
         const { tabsById, tabNames } = await adapter.getAllData()
@@ -63,6 +69,19 @@ export const whoamiCommand = define({
           }]
         })
         currentTabId = adapter.currentTabId() || undefined
+        if (!currentTabId && engine === 'codex' && sessionId) {
+          const matches = matchCodexTabs([...tabsById].flatMap(([tabId, blocks]) => {
+            const b = blocks.find((b) => b.view === 'term')
+            return b ? [{ tabId, name: tabNames.get(tabId) ?? '', shellPid: b.shellPid, cwd: b.meta?.['cmd:cwd'] }] : []
+          }), procRows ?? [], readCodexSessions())
+          const ids = [...matches].filter(([, m]) => m.id === sessionId).map(([id]) => id)
+          if (ids.length === 1) currentTabId = ids[0]
+          else if (!ids.length) {
+            const saved = codexIdentities().filter((r) => r.id === sessionId && r.tabId && r.pid && matches.get(r.tabId)?.proc.pid === r.pid)
+            if (saved.length === 1) currentTabId = saved[0].tabId
+          }
+          if (currentTabId) currentTabVia = 'codex-session'
+        }
       } catch (err) {
         // An unreachable plugin is a broken setup, but reporting it by failing
         // would strand every caller. Say so on stderr; keep stdout an answer.
@@ -70,24 +89,25 @@ export const whoamiCommand = define({
       }
     }
 
-    const located = sessionId ? findSessionSlug(sessionId) : null
+    const located = engine === 'claude' && sessionId ? findSessionSlug(sessionId) : null
     const identity = resolveIdentity({
       sessionId,
       tabs,
       currentTabId,
+      currentTabVia,
       sessionSlug: located?.slug,
       slugOf: pathToProjectSlug,
       origin: located ? { backend: located.backend, configDir: located.configDir } : undefined,
       // One `ps` call and no transcript reads, so whoami stays cheap.
       ownClaudeName: (() => {
-        const rows = readProcessTable()
-        return rows ? ownClaudeProc(rows)?.name : undefined
+        return engine === 'claude' && procRows ? ownClaudeProc(procRows)?.name : undefined
       })(),
     })
     adapter?.closeSocket()
 
     if (asJson) {
       console.log(JSON.stringify({
+        engine,
         tab: identity.tab,
         tab_id: identity.tabId,
         session_id: identity.sessionId,
@@ -108,7 +128,7 @@ export const whoamiCommand = define({
     console.log(identity.tab ?? UNKNOWN_TAB)
     if (!identity.tab && !adapter) {
       consola.warn('No supported terminal here, so this session has no cctabs tab — run `cctabs doctor` if you expected one.')
-    } else if (!identity.tab && !sessionId) {
+    } else if (!identity.tab && !sessionId && engine === 'claude') {
       consola.warn('CLAUDE_CODE_SESSION_ID is not set — not running inside a Claude Code session, so only the process-tree match was available.')
     }
   },

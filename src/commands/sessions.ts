@@ -1,3 +1,5 @@
+import { codexStatus } from '../core/codex.js'
+import { matchCodexTabs } from '../core/codex-sessions.js'
 import { define } from 'gunshi'
 import { requireAdapter } from '../core/adapter.js'
 import { classifyTerminalBuffer, parsePermissionMode } from '../core/session-status.js'
@@ -30,6 +32,7 @@ export const sessionsCommand = define({
     const currentWs = adapter.currentWorkspaceId()
     const procRows = readProcessTable()
     const suspended = suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)
+    const codex = matchCodexTabs([...tabsById].flatMap(([tabId, blocks]) => { const b = blocks.find((b) => b.view === 'term'); return b ? [{ tabId, name: '', shellPid: b.shellPid }] : [] }), procRows ?? [], [])
 
     console.log('Sessions')
     console.log('='.repeat(50))
@@ -51,7 +54,8 @@ export const sessionsCommand = define({
         const b = termBlocks[0]
         const cwd = (b.meta?.['cmd:cwd'] ?? '').replace(process.env.HOME ?? '', '~')
 
-        const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
+        let buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
+        if ((codex.has(tabId) || codexStatus(buffer)) && adapter.screenText) { try { buffer = await adapter.screenText(b.blockid) || buffer } catch { /* retain stream evidence */ } }
         const susp = suspended.get(tabId)
         const onScreen = classifyTerminalBuffer(buffer)
         const status = susp ? 'suspended' : onScreen === 'suspended' && procRows ? 'terminal' : onScreen

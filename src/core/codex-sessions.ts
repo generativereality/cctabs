@@ -1,10 +1,11 @@
-import { closeSync, openSync, readSync, readdirSync } from 'fs'
+import { closeSync, openSync, readSync, readdirSync, realpathSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { ancestorsOf, descendantsOf, isClaudeCommand, type ProcRow, type ProcTab } from './claude-procs.js'
-import { isCodexCommand } from './codex.js'
+import { isCodexCommand, commandWords } from './codex.js'
 
 export interface CodexSession { id: string; cwd: string; startedAt: number; file: string; forkedFromId?: string }
+const isWrapper = (command: string) => /(?:^|[\\/])node(?:\.exe)?$/i.test(commandWords(command)[0] ?? '')
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i
 
 /** Read only the metadata line, never the potentially huge conversation. */
@@ -48,7 +49,7 @@ export function codexForkId(command: string): string | undefined {
 
 function codexSubcommandId(command: string, subcommand: string): string | undefined {
   if (!isCodexCommand(command)) return undefined
-  const words = command.split(/\s+/)
+  const words = commandWords(command)
   const at = /(?:^|[\\/])node(?:\.exe)?$/i.test(words[0]) ? 2 : 1
   if (words[at] !== subcommand) return undefined
   // Flags may precede the id; UUID-shaped prompts aren't resume ids on fresh launches.
@@ -63,7 +64,7 @@ export function matchCodexTabs(tabs: ProcTab[], rows: ProcRow[], sessions: Codex
     const root = rows.find((r) => r.pid === tab.shellPid)
     // Prefer the native child to the npm wrapper: it owns the TUI and its cwd.
     const under = [...(root ? [root] : []), ...descendantsOf(tab.shellPid, rows)].filter((r) => isCodexCommand(r.command))
-    const proc = under.find((r) => !/^(?:\S*[\\/])?node(?:\.exe)?\s/i.test(r.command)) ?? under[0]
+    const proc = under.find((r) => !isWrapper(r.command)) ?? under[0]
     if (!proc) continue
     // A Codex tool started by Claude does not own Claude's terminal tab.
     const chain = ancestorsOf(proc.pid, rows)
@@ -72,7 +73,7 @@ export function matchCodexTabs(tabs: ProcTab[], rows: ProcRow[], sessions: Codex
     const id = codexResumeId(proc.command)
     if (id) { out.set(tab.tabId, { proc, id, session: sessions.find((s) => s.id === id) }); continue }
     const forkedFromId = codexForkId(proc.command)
-    const candidates = sessions.filter((s) => s.forkedFromId === forkedFromId && proc.cwd === s.cwd && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000)
+    const candidates = sessions.filter((s) => s.forkedFromId === forkedFromId && sameCodexCwd(proc.cwd ?? tab.cwd, s.cwd) && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000)
     possibilities.set(tab.tabId, candidates)
     out.set(tab.tabId, { proc, ...(candidates.length === 1 ? { id: candidates[0].id, session: candidates[0] } : {}) })
   }
@@ -92,10 +93,20 @@ export function matchCodexTabs(tabs: ProcTab[], rows: ProcRow[], sessions: Codex
 
 export function codexLiveSessionPids(rows: ProcRow[]): Map<string, number[]> {
   const out = new Map<string, number[]>()
-  const native = rows.filter((r) => isCodexCommand(r.command) && !/^(?:\S*[\\/])?node(?:\.exe)?\s/i.test(r.command))
+  const native = rows.filter((r) => isCodexCommand(r.command) && !isWrapper(r.command))
   const matches = matchCodexTabs(native.map((r) => ({ tabId: String(r.pid), name: '', shellPid: r.pid })), rows, readCodexSessions())
   for (const m of matches.values()) {
     if (m.id) out.set(m.id, [...(out.get(m.id) ?? []), m.proc.pid])
   }
   return out
+}
+
+export function sameCodexCwd(a: string | undefined, b: string): boolean {
+  const normalize = (p: string) => {
+    const raw = p.replaceAll('\\', '/')
+    const slash = /^\/\/\?\/UNC\//i.test(raw) ? '//' + raw.slice(8) : raw.replace(/^\/\/\?\//, '')
+    if (/^[a-z]:\//i.test(slash) || slash.startsWith('//')) return slash.toLowerCase()
+    try { return realpathSync.native(p) } catch { return p }
+  }
+  return a !== undefined && normalize(a) === normalize(b)
 }

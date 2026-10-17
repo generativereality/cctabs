@@ -4,7 +4,7 @@
 
 New in 0.6.0: `cctabs new review ~/Dev/myapp --engine codex --prompt "review the changes"`.
 Discover Codex session ids, save and restore mixed fleets, and keep Codex tabs suspended until
-you need them. [Codex setup and platform limits](skills/cctabs/references/codex.md).
+you need them. [Codex setup and command support](skills/cctabs/references/codex.md).
 
 CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https://cctabs.com)
 

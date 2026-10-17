@@ -1,3 +1,5 @@
+import { tabAgent } from '../core/tab-agent.js'
+import { readCodexSessions } from '../core/codex-sessions.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { existsSync, readdirSync } from 'fs'
@@ -123,7 +125,8 @@ export const profileCopyCommand = define({
     const target = resolvedTarget
 
     const adapter = requireAdapter()
-    const { tabsById, tabNames } = await adapter.getAllData()
+    const data = await adapter.getAllData()
+    const { tabsById, tabNames } = data
 
     // --- resolve the source session -------------------------------------
     // A tab name is the common spelling; a session id is the escape hatch for a
@@ -141,6 +144,9 @@ export const profileCopyCommand = define({
       consola.error(`Multiple tabs match '${query}':`)
       for (const tid of tabMatches) consola.log(`  "${tabNames.get(tid)}"  [${tid.slice(0, 8)}]`)
       process.exit(1)
+    }
+    if (readCodexSessions().some((s) => /^[0-9a-f-]{8,36}$/i.test(query) && s.id.startsWith(query)) || (tabMatches.length === 1 && tabAgent(adapter, data, tabMatches[0]).engine !== 'claude')) {
+      consola.error('profile-copy migrates Claude accounts only. Use export/import for a Codex conversation.'); process.exit(1)
     }
     if (tabMatches.length === 1) {
       sourceTabId = tabMatches[0]

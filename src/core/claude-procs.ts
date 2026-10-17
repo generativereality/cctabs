@@ -1,6 +1,6 @@
 import { spawnSync } from 'child_process'
 import { readlinkSync } from 'fs'
-import { isCodexCommand } from './codex.js'
+import { isCodexCommand, commandWords } from './codex.js'
 import { basename } from 'path'
 
 /**
@@ -70,8 +70,8 @@ export function parseProcessTable(out: string): ProcRow[] {
  * twice, and signalling it would kill the tab rather than the Claude in it.
  */
 export function isClaudeCommand(command: string): boolean {
-  const argv0 = command.split(/\s+/, 1)[0] ?? ''
-  return basename(argv0) === 'claude'
+  const argv0 = commandWords(command)[0] ?? ''
+  return /^claude(?:\.exe)?$/i.test(argv0.split(/[\\/]/).pop() ?? '')
 }
 
 /**
@@ -188,7 +188,12 @@ export function ownClaudeProc(rows: ProcRow[], selfPid: number = process.pid): C
  * Claude with no session — the same trap as `ps aux | grep`.
  */
 export function readProcessTable(): ProcRow[] | null {
-  if (process.platform === 'win32') return null
+  if (process.platform === 'win32') {
+    const script = "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding; @(Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ pid=$_.ProcessId; ppid=$_.ParentProcessId; command=$(if ($_.CommandLine) {$_.CommandLine} else {$_.Name}); startedAt=$(if ($_.CreationDate) {$_.CreationDate.ToUniversalTime().ToString('o')} else {$null}) } }) | ConvertTo-Json -Compress"
+    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true, timeout: 15000, maxBuffer: 64 * 1024 * 1024 })
+    if (result.status !== 0) return null
+    try { return parseWindowsProcesses(result.stdout) } catch { return null }
+  }
   const r = spawnSync('ps', ['-Aww', '-o', 'pid=,ppid=,command='], {
     encoding: 'utf-8',
     maxBuffer: 64 * 1024 * 1024,
@@ -212,6 +217,7 @@ export function readProcessTable(): ProcRow[] | null {
 
 /** A tab reduced to what process matching needs. */
 export interface ProcTab {
+  cwd?: string
   tabId: string
   name: string
   /** The tab's own shell pid (the `stable-pid` capability), when reported. */
@@ -287,4 +293,10 @@ export function liveSessionPids(rows: ProcRow[]): Map<string, number[]> {
     else out.set(id, [p.pid])
   }
   return out
+}
+
+/** Full CIM command lines, without console formatting or truncation. */
+export function parseWindowsProcesses(json: string): ProcRow[] {
+  const values = JSON.parse(json.replace(/^\uFEFF/, ''))
+  return (Array.isArray(values) ? values : [values]).filter((r) => Number.isInteger(r.pid) && r.pid > 0 && typeof r.command === 'string').map((r) => ({ pid: r.pid, ppid: r.ppid, command: r.command, ...(Number.isFinite(Date.parse(r.startedAt)) ? { startedAt: Date.parse(r.startedAt) } : {}) }))
 }

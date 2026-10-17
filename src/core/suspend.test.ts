@@ -60,7 +60,7 @@ describe('shellCanHostPlaceholder', () => {
     expect(shellCanHostPlaceholder({ command: '/bin/zsh', posix: true })).toBe(true)
     expect(shellCanHostPlaceholder({ command: 'C:\\Program Files\\Git\\bin\\bash.exe', posix: true })).toBe(true)
     expect(shellCanHostPlaceholder({ command: '/opt/homebrew/bin/fish', posix: true })).toBe(false)
-    expect(shellCanHostPlaceholder({ command: 'cmd.exe', posix: false })).toBe(false)
+    expect(shellCanHostPlaceholder({ command: 'cmd.exe', posix: false })).toBe(true)
   })
 })
 
