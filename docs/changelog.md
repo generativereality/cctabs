@@ -21,7 +21,7 @@ npm i -g @generativereality/cctabs
 
 <!-- releases -->
 
-## Unreleased
+## 0.6.2 — 2026-10-18
 
 - **Codex command parity:** persistent names support rename and closed-tab resume; transcript/export/import follow Codex history and fork ancestry without consulting Claude transcripts. Import preserves longer local ancestors. `whoami`, engine-aware doctor, and mixed-engine restart support Codex callers. Windows session discovery uses CIM, and cmd.exe supports encoded Node Codex suspended placeholders. Claude profile migration explicitly rejects Codex targets. Verified sends read newly recorded Codex messages; status reads the current screen rather than stale redraws. Explicit model/cwd options replace configured singleton flags, and prompt text mentioning flags remains literal.
 

@@ -78,7 +78,7 @@ step for the operator. cctabs rechecks folder trust before pressing Enter and wa
 input frames, because Windows can briefly render an input box before a startup dialog.
 See `scripts/windows-guest/README.md` in the repo for the harness and VM cleanup rules.
 
-**Engine defaults (unreleased):** `new` inherits the nearest calling agent (Codex or Claude),
+**Engine defaults:** `new` inherits the nearest calling agent (Codex or Claude),
 falling back to Claude in a plain shell. `--engine claude|codex` overrides this; an explicit
 `--backend` selects Claude unless you explicitly request Codex (that combination errors).
 `fork <tab>` follows the source tab, not the caller: Codex uses `codex fork <session-id>`,
@@ -88,7 +88,7 @@ an existing Codex tab. cctabs records names and IDs in `~/.config/cctabs/codex-s
 `rename` and closed-session `resume <name>` work too. Duplicate saved names require an explicit
 `--session <id>`; a conversation already running under another tab name is not opened twice.
 
-**Conversation tools (unreleased):** `transcript` reads Codex assistant messages, including
+**Conversation tools:** `transcript` reads Codex assistant messages, including
 inherited fork history up to the fork boundary. `export`/`import` preserve the engine and bundle
 required ancestor rollouts with their ordinal/byte boundaries (archive format 2; imports also
 accept older Claude format 1). Missing ancestors fail rather
