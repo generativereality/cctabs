@@ -16,5 +16,5 @@ test('Codex wake uses current screen after its nonce, when PTY redraws omit the 
     },
   }, { timeoutMs: 4000 })
   expect(result).toMatchObject({ ok: true, ready: 'confirmed' })
-  expect(screens).toBe(2)
+  expect(screens).toBe(3)
 })

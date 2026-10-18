@@ -39,6 +39,8 @@ export interface RestartPlan {
 }
 
 export interface RestartInputs {
+  codexLiveSessionPids?: Map<string, number[]>
+  codexShellPid?: Map<string, number>
   /** Session id → pids of Claudes launched on it (from argv). */
   liveSessionPids: Map<string, number[]>
   /** Session id → the Claude pid found under that tab's own shell. */
@@ -61,8 +63,8 @@ export function planRestart(entries: RestoreEntry[], inputs: RestartInputs): Res
       continue
     }
 
-    const fromArgv = inputs.liveSessionPids.get(id) ?? []
-    let fromShell = inputs.shellPidClaude.get(id)
+    const fromArgv = (entry.engine === 'codex' ? inputs.codexLiveSessionPids : inputs.liveSessionPids)?.get(id) ?? []
+    let fromShell = (entry.engine === 'codex' ? inputs.codexShellPid : inputs.shellPidClaude)?.get(id)
     const shellLaunched = fromShell !== undefined ? inputs.launchedSession?.get(fromShell) : undefined
     const shellConflicts = shellLaunched !== undefined && shellLaunched !== id
     if (shellConflicts) fromShell = undefined
@@ -76,7 +78,7 @@ export function planRestart(entries: RestoreEntry[], inputs: RestartInputs): Res
       plan.targets.push({ entry, pids, via: fromArgv.length ? 'argv' : 'shell-pid' })
       continue
     }
-    if (shellConflicts || inputs.nameOnly.has(id)) {
+    if (shellConflicts || (entry.engine !== 'codex' && inputs.nameOnly.has(id))) {
       plan.handOnly.push(entry)
       continue
     }
@@ -101,14 +103,14 @@ export function entriesToRestore(plan: RestartPlan, stillRunning: Set<RestoreEnt
  * id. One that doesn't is the dangerous case — a tab that looks running but
  * came back EMPTY, replayed without `--resume`. Pure.
  */
-export function auditRestart(restored: RestoreEntry[], liveSessionPids: Map<string, number[]>): {
+export function auditRestart(restored: RestoreEntry[], liveSessionPids: Map<string, number[]>, codexLiveSessionPids: Map<string, number[]> = new Map()): {
   ok: RestoreEntry[]
   missing: RestoreEntry[]
   doubled: RestoreEntry[]
 } {
   const out = { ok: [] as RestoreEntry[], missing: [] as RestoreEntry[], doubled: [] as RestoreEntry[] }
   for (const e of restored) {
-    const pids = e.sessionId ? liveSessionPids.get(e.sessionId) ?? [] : []
+    const pids = e.sessionId ? (e.engine === 'codex' ? codexLiveSessionPids : liveSessionPids).get(e.sessionId) ?? [] : []
     if (!pids.length) out.missing.push(e)
     else if (pids.length > 1) out.doubled.push(e)
     else out.ok.push(e)

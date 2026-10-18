@@ -45,7 +45,7 @@ export interface WhoamiIdentity {
    * at. `pid` is the process-tree match; `session-slug` and `argv-name` are the
    * fallbacks below.
    */
-  via: 'pid' | 'session-slug' | 'argv-name' | null
+  via: 'pid' | 'codex-session' | 'session-slug' | 'argv-name' | null
 }
 
 /**
@@ -86,6 +86,7 @@ export function resolveIdentity(opts: {
   tabs: WhoamiTab[]
   /** Tab the terminal matched to our process tree, if any. */
   currentTabId?: string
+  currentTabVia?: 'pid' | 'codex-session'
   /** Project slug holding `sessionId`'s transcript, if it was found on disk. */
   sessionSlug?: string
   /** Maps a tab cwd to its project slug (injected so this stays pure). */
@@ -119,7 +120,7 @@ export function resolveIdentity(opts: {
 
   if (currentTabId) {
     const hit = tabs.find((t) => t.tabId === currentTabId)
-    if (hit) return found(hit, 'pid')
+    if (hit) return found(hit, opts.currentTabVia ?? 'pid')
   }
 
   if (sessionSlug && slugOf) {

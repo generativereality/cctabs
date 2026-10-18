@@ -1,10 +1,12 @@
+import { tabAgent } from '../core/tab-agent.js'
+import { codexUserMessages } from '../core/codex-history.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { readFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
 import { buildPathHandoff } from '../core/handoff.js'
 import { requireAdapter } from '../core/adapter.js'
-import { sendTextWithConfirmation } from '../core/open-session.js'
+import { sendTextWithConfirmation, readTab } from '../core/open-session.js'
 import { resolveTabTarget } from '../core/tab-target.js'
 import { classifyTerminalBuffer, promptIsReady } from '../core/session-status.js'
 import { judgeDelivery } from '../core/paste-confirm.js'
@@ -144,7 +146,8 @@ export const sendCommand = define({
     }
 
     const adapter = requireAdapter()
-    const { tabsById, tabNames, workspaces } = await adapter.getAllData()
+    const data = await adapter.getAllData()
+    const { tabsById, tabNames, workspaces } = data
 
     const resolved = resolveTabTarget(adapter, query, tabsById, tabNames)
     if (!resolved.ok) {
@@ -155,6 +158,9 @@ export const sendCommand = define({
     }
     let { blockId } = resolved.target
     const { tabId: targetTabId, name: tabName, cwd: tabCwd } = resolved.target
+
+    const agent = targetTabId ? tabAgent(adapter, data, targetTabId) : { engine: 'unknown' as const }
+    const codexSessionId = agent.engine === 'codex' ? agent.id : undefined
 
     // A suspended target is woken first, and the sender never has to know it
     // was asleep. The wake does not return until Claude is at a ready prompt —
@@ -207,7 +213,7 @@ export const sendCommand = define({
         // 20 rows, not 8: Claude renders notices (`Restart to update`) BELOW
         // the input line, and a short window plus a last-line-only test is
         // what made this time out against tabs that were ready.
-        if (promptIsReady(adapter.scrollback(blockId, 20))) { ready = true; break }
+        if (promptIsReady(agent.engine === 'codex' ? await readTab(adapter, blockId, 60) : adapter.scrollback(blockId, 20))) { ready = true; break }
         await new Promise((r) => setTimeout(r, 250))
       }
       if (!ready) {
@@ -241,7 +247,7 @@ export const sendCommand = define({
     // one of the two ways a send gets clipped, and unlike the other it is
     // knowable beforehand.
     if (!force && rawText.length > 0) {
-      const status = classifyTerminalBuffer(adapter.scrollback(blockId, 200))
+      const status = classifyTerminalBuffer(agent.engine === 'codex' ? await readTab(adapter, blockId, 200) : adapter.scrollback(blockId, 200))
       if (status === 'active') {
         if (rawText.length > CLIP_RISK_BYTES) {
           adapter.closeSocket()
@@ -254,6 +260,11 @@ export const sendCommand = define({
         consola.warn(`${blockId.slice(0, 8)} has a turn in flight — sending anyway, as this is short enough to be a reply rather than a brief.`)
       }
     }
+
+    const verifyBody = verify && sendEnter && rawText.length > 0
+    if (verifyBody && agent.engine === 'unknown') { consola.error('Cannot verify an unknown engine; no transcript was selected by name.'); process.exit(1) }
+    if (verifyBody && agent.engine === 'codex' && !codexSessionId) { consola.error('Cannot verify an unresolved Codex session; wait for its session ID and retry.'); process.exit(1) }
+    const codexBaseline = verifyBody && codexSessionId ? codexUserMessages(codexSessionId).length : 0
 
     // Send the body — confirming it actually landed and re-sending if not, since
     // text sent into a not-yet-ready input handler can be silently lost, front
@@ -313,7 +324,7 @@ export const sendCommand = define({
     // — it records the user message as received, so the payload's front and
     // tail are checkable against ground truth.
     if (verify && rawText.length > 0 && sendEnter) {
-      const outcome = await verifyDelivered(tabName ?? query, tabCwd ?? '', rawText, verifyTimeoutSec, wokenSessionId)
+      const outcome = await verifyDelivered(tabName ?? query, tabCwd ?? '', rawText, verifyTimeoutSec, wokenSessionId, codexSessionId, codexBaseline)
       if (!outcome.delivered) {
         consola.error(`Sent to ${blockId.slice(0, 8)}, but delivery does NOT check out: ${outcome.detail}`)
         process.exit(1)
@@ -364,6 +375,8 @@ async function verifyDelivered(
   timeoutSec: number,
   /** Known session id (a woken suspended tab) — skips the by-title lookup. */
   knownSessionId?: string,
+  codexSessionId?: string,
+  codexBaseline = 0,
 ): Promise<{ delivered: boolean; detail: string }> {
   const deadline = Date.now() + timeoutSec * 1000
   let last = judgeDelivery(payload, null)
@@ -371,6 +384,13 @@ async function verifyDelivered(
 
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1000))
+
+    if (codexSessionId) {
+      sawSession = true
+      try { last = judgeDelivery(payload, codexUserMessages(codexSessionId).slice(codexBaseline)) } catch { continue }
+      if (last.delivered) return last
+      continue
+    }
 
     resetTitleIndexCache()
     const session = knownSessionId ? { id: knownSessionId } : resolveTabSession(tabCwd, tabName)

@@ -116,7 +116,7 @@ export function readRecords(dir: string = suspendedDir()): SuspendRecord[] {
  * error while cctabs reports the tab suspended.
  */
 export function shellCanHostPlaceholder(shell: TabShell): boolean {
-  if (!shell.posix) return false
+  if (!shell.posix) return /(?:^|[\\/])cmd(?:\.exe)?$/i.test(shell.command)
   const base = (shell.command.split(/[\\/]/).pop() ?? '').replace(/\.exe$/i, '').toLowerCase()
   return ['zsh', 'bash', 'sh', 'dash', 'ksh', 'mksh', 'ash'].includes(base)
 }
@@ -147,7 +147,7 @@ export interface PlaceholderSpec {
  */
 export function placeholderClaudeLine(spec: PlaceholderSpec): string {
   const q = shellQuoteArg
-  if (spec.engine === 'codex') return ['codex', ...codexArgs({ resumeId: spec.sessionId, readClaudeMd: spec.readClaudeMd, extraFlags: spec.extraFlags }).map(q)].join(' ')
+  if (spec.engine === 'codex') return ['codex', ...codexArgs({ cwd: spec.dir, resumeId: spec.sessionId, readClaudeMd: spec.readClaudeMd, extraFlags: spec.extraFlags }).map(q)].join(' ')
   const env = Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${q(v)}`)
   const argv = [
     'claude',
@@ -215,7 +215,7 @@ export interface PlaceholderProc {
   woken: boolean
 }
 
-const PLACEHOLDER_RE = new RegExp(`(?:^|\\s)true ${PLACEHOLDER_TAG} ([0-9a-f-]{36})(?=[;\\s]|$)`, 'i')
+const PLACEHOLDER_RE = new RegExp(`(?:^|\\s)(?:true )?${PLACEHOLDER_TAG} ([0-9a-f-]{36})(?=[;\\s]|$)`, 'i')
 
 /** Find every placeholder in a process table, keyed by session id. Pure. */
 export function placeholderSessions(rows: ProcRow[]): Map<string, PlaceholderProc> {

@@ -42,6 +42,11 @@ describe('codexArgs', () => {
   })
 })
 
+it('forks the exact source session with flags after the subcommand', () => {
+  expect(codexArgs({ forkId: 'source-id', model: 'test-model', extraFlags: ['--no-alt-screen'] })).toEqual(['fork', '--no-alt-screen', '-m', 'test-model', 'source-id'])
+  expect(() => codexArgs({ forkId: 'a', resumeId: 'b' })).toThrow()
+})
+
 describe('Codex screens', () => {
   it('sees the trust prompt with the cursor on "Trust and continue"', () => {
     expect(codexTrustDialog(TRUST)).toEqual({ visible: true, onTrust: true })

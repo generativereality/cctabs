@@ -1,3 +1,5 @@
+import { inlineValueOptions } from '../core/cli-argv.js'
+import type { ArgSpecLike } from '../core/unknown-options.js'
 import { cli, define } from 'gunshi'
 import { consola } from 'consola'
 import pkg from '../../package.json'
@@ -102,7 +104,9 @@ const subCommands = new Map([
 ].map(([name, command]) => [name, rejectUnknownOptions(command as never)] as const) as Array<[string, never]>)
 
 export async function run(): Promise<void> {
-  await cli(process.argv.slice(2), defaultCommand, {
+  const raw = process.argv.slice(2)
+  const command = subCommands.get(raw[0]) as { args?: Record<string, ArgSpecLike> } | undefined
+  await cli(inlineValueOptions(raw, command?.args ?? {}), defaultCommand, {
     name: pkg.name,
     version: pkg.version,
     description: pkg.description,
@@ -110,5 +114,6 @@ export async function run(): Promise<void> {
     // Suppress gunshi's default banner so `--json` output stays parseable
     // and shells don't see noise when piping commands together.
     renderHeader: null,
+    renderValidationErrors: async (_ctx, error) => { process.exitCode = 1; return error.errors.map((e: Error) => e.message).join('\n') },
   })
 }

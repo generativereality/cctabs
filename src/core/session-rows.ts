@@ -119,7 +119,7 @@ export async function collectSessionRows(
   const codexSessions = readCodexSessions()
   const codex = matchCodexTabs([...tabsById].flatMap(([tabId, blocks]) => {
     const b = blocks.find((b) => b.view === 'term')
-    return b ? [{ tabId, name: tabNames.get(tabId) ?? '', shellPid: b.shellPid }] : []
+    return b ? [{ tabId, name: tabNames.get(tabId) ?? '', shellPid: b.shellPid, cwd: b.meta?.['cmd:cwd'] }] : []
   }), procRows ?? [], codexSessions)
   const suspended = suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)
 
@@ -139,10 +139,11 @@ export async function collectSessionRows(
       const b = termBlocks[0]
       const cwd = b.meta?.['cmd:cwd'] ?? ''
       // One read, three answers — see BUFFER_ROWS.
-      const buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
+      let buffer = adapter.scrollback(b.blockid, BUFFER_ROWS)
       const susp = suspended.get(tabId)
       const cx = codex.get(tabId)
       const engine: Engine = susp?.record.engine ?? (cx ? 'codex' : 'claude')
+      if (engine === 'codex' && !susp && adapter.screenText) { try { buffer = await adapter.screenText(b.blockid) || buffer } catch { /* retain stream evidence */ } }
       const onScreen = classifyTerminalBuffer(buffer)
       // The registry/process verdict wins. A marker on screen that they
       // contradict is a stale screen: the tab is the shell it now is.
@@ -176,7 +177,7 @@ export async function collectSessionRows(
         source = 'suspended'
       } else if (engine === 'codex') {
         sessionId = cx?.id ?? null
-        sessionDir = cx?.session?.cwd ?? cx?.proc.cwd ?? cwd
+        sessionDir = cx?.proc.cwd || cwd || cx?.session?.cwd || ''
         if (sessionId) source = cx?.session && !codexResumeId(cx.proc.command) ? 'transcript' : 'argv'
       } else if (cwd) {
         try {

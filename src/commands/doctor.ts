@@ -1,3 +1,4 @@
+import { launchEngine } from '../core/engine.js'
 import { spawnSync } from 'child_process'
 import { readPending } from '../core/fleet-state.js'
 import { define } from 'gunshi'
@@ -226,10 +227,10 @@ function checkAgentBashOnPath (): CheckResult {
  * failed install. Probed in the shell a tab actually gets, not this process's
  * PATH, because those differ on Windows.
  */
-function checkClaudeInSpawnedShell (): CheckResult {
-  const name = 'claude in the spawned shell'
+function checkClaudeInSpawnedShell (engine: 'claude' | 'codex' = 'claude'): CheckResult {
+  const name = `${engine} in the spawned shell`
   const shell = resolveTabShell()
-  const args = shell.posix ? ['-l', '-i', '-c', 'command -v claude'] : ['/c', 'where claude']
+  const args = shell.posix ? ['-l', '-i', '-c', `command -v ${engine}`] : ['/c', `where ${engine}`]
   const r = spawnSync(shell.command, args, { encoding: 'utf-8', timeout: 8000 })
   if (r.status === 0 && r.stdout?.trim()) {
     return { name, status: 'ok', detail: lastLine(r.stdout) }
@@ -238,8 +239,8 @@ function checkClaudeInSpawnedShell (): CheckResult {
   return {
     name,
     status: 'warn',
-    detail: `${shell.command}: claude not found`,
-    hint: windows
+    detail: `${shell.command}: ${engine} not found`,
+    hint: engine === 'codex' ? 'Install Codex and sign in with `codex login`; make codex available in the tab shell.' : windows
       ? 'On Windows the Claude Code installer does not put itself on PATH — the binary is ' +
         'usually there. Find it and add its directory to PATH. New tabs will open on a ' +
         '"command not found" until this resolves.'
@@ -255,8 +256,10 @@ function checkClaudeInSpawnedShell (): CheckResult {
 export const doctorCommand = define({
   name: 'doctor',
   description: 'Run environment checks (terminal detection, Tabby plugin reachability, spawned-shell PATH).',
-  args: {},
-  async run() {
+  args: { engine: { type: 'string', short: 'e', description: 'Engine to diagnose: claude or codex (defaults to caller).' } },
+  async run(ctx) {
+    const engine = launchEngine(ctx.values.engine as string | undefined)
+    if (!engine) throw new Error('Unknown engine; use claude or codex')
     // detectTerminal() is env-only; resolveTerminal() adds the plugin-probe
     // fallback so an SSH session (empty TERM_PROGRAM) whose Tabby plugin is
     // reachable reports as usable Tabby rather than a hard ✘.
@@ -285,10 +288,14 @@ export const doctorCommand = define({
     // Useful regardless of terminal: every cctabs-spawned tab needs `node` on
     // PATH for the CLI itself and for plugin MCPs that invoke `npx`.
     results.push(checkSpawnedShellPath())
-    results.push(checkClaudeInSpawnedShell())
+    results.push(checkClaudeInSpawnedShell(engine))
+    if (engine === 'codex') {
+      const login = spawnSync(shell.command, shell.posix ? ['-l', '-i', '-c', 'codex login status'] : ['/c', 'codex login status'], { encoding: 'utf8', timeout: 15000 })
+      results.push({ name: 'Codex sign-in', status: login.status === 0 ? 'ok' : 'warn', detail: login.status === 0 ? 'Codex reports signed in' : 'Sign in with codex login' })
+    }
 
     // Windows only: cctabs works without this, Claude Code does not.
-    if (process.platform === 'win32') {
+    if (process.platform === 'win32' && engine === 'claude') {
       results.push(checkAgentBashOnPath())
     }
 
