@@ -31,7 +31,7 @@ cctabs install-tabby-plugin --yes
 ```
 
 What it does, in order:
-1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs@0.1.6`
+1. `npm install --legacy-peer-deps --prefix <tabby-plugins-dir> tabby-cctabs@0.2.0`
 2. The same controlled restart as `cctabs restart-tabby`: saves every open session, closes the
    other tabs, quits and reopens Tabby, and restores everything in a new tab — this session
    included. See [restore-and-restart.md](restore-and-restart.md#restarting-tabby-or-the-computer).
@@ -46,7 +46,7 @@ to install only and restart Tabby yourself.
 TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
 mkdir -p "$TABBY_PLUGINS"
 [ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
-npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs@0.1.6
+npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs@0.2.0
 # then ask the user to quit + reopen Tabby
 ```
 
