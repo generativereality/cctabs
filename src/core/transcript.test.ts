@@ -282,3 +282,16 @@ describe('locateTranscriptFile and metadata-only trailers', () => {
     }
   })
 })
+
+describe('readLines', () => {
+  it('yields every line across chunk boundaries, multi-byte characters intact', async () => {
+    const { mkdtempSync, writeFileSync } = await import('fs')
+    const { tmpdir } = await import('os')
+    const { join } = await import('path')
+    const { readLines } = await import('./transcript.js')
+    const f = join(mkdtempSync(join(tmpdir(), 'cctabs-lines-')), 't.jsonl')
+    const lines = ['{"a":"åäö — ✔"}', '', 'x'.repeat(50), '{"b":"ünïcødé"}', 'no trailing newline']
+    writeFileSync(f, lines.join('\n'))
+    for (const chunk of [3, 7, 1024]) expect([...readLines(f, chunk)]).toEqual(lines)
+  })
+})

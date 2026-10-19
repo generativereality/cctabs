@@ -208,7 +208,7 @@ cctabs send <tab> --path <file>          # hand the tab a file PATH to read — 
 cctabs send <tab> --file <f> --verify    # check the target's transcript for what it actually RECEIVED
 cctabs send <tab> --submit               # press Enter only, submitting a prompt already parked in the box
 cctabs send <tab> "…" --allow-draft      # type even though the box holds an unsent draft (default: wait ≤60s, then refuse)
-cctabs send <tab> -- <free text>         # REQUIRED when your text contains `--` (e.g. names a flag)
+cctabs send <tab> -- <free text>         # only for text that is ONE bare flag-shaped word (`--push`); "run it with --push" needs nothing
 cctabs export <name> [--out path]        # bundle a tab + its claude session into a tarball
 cctabs export --all [-w workspace]       # bundle every tab in a workspace
 cctabs import <tarball> [--dry-run] [-f] # restore tabs + sessions from a tarball
@@ -291,11 +291,10 @@ cctabs findings payments            # same command, reads better when you're ask
   running under a backend preset writes beneath that preset's own
   `CLAUDE_CONFIG_DIR`, and looking in one root reports "no transcript" for a
   perfectly healthy session — which reads as "that tab is dead".
+- A tab **renamed after Claude started** is found anyway (0.6.3+): its running Claude is asked.
 - It **exits non-zero and says which failure it is** rather than printing
-  nothing: no session titled after this tab (with a count of how many
-  transcripts *do* exist for its directory — usually means the tab was renamed
-  after Claude started), no transcript on disk, or a lookup that failed
-  outright. "I couldn't read it" and "it hasn't said anything" are different
+  nothing: no session titled after this tab and no running Claude to ask, no
+  transcript on disk, or a lookup that failed outright. "I couldn't read it" and "it hasn't said anything" are different
   answers.
 - Tool-only and thinking-only messages are skipped; you get the prose.
 
@@ -453,7 +452,8 @@ cctabs scrollback auth 200      # last 200 lines
 ## Routing and sending: before you message another tab
 
 - ⛔ **Resolve the owner from the BRANCH, not the tab's name.** If no tab maps to the owning branch, say so and send nothing. Read what the tab has already said (`cctabs transcript`) and relay what was SAID, not your conclusions. The three gates in full: [references/routing.md](references/routing.md).
-- ⛔ **Text containing `--` needs the `--` terminator**: `cctabs send auth -- --verify is broken`.
+- **Text containing `--` is just text** (0.6.3+): `cctabs send auth "run publish.sh --push"` and `cctabs new … --prompt "… --push …"` both work. Only a message that is a single bare flag-shaped word needs the terminator: `cctabs send auth -- --push`.
+- ⛔ **Read a send's LAST line, and its exit code.** `NOT SENT to …` (exit 1) means nothing was submitted — the box held a draft, the text didn't land, or Enter didn't take. `| tail -1` is safe from 0.6.3 (the error used to be followed by a blank line, so it printed nothing). A refusal on a draft that is itself a peer's message meant for that tab is the one case for `--allow-draft`.
 - ⛔ **`nothing from the text appeared in the tab` means the tab is on a rendered menu** — don't retry with `--path` and don't drive the menu blind; `cctabs scrollback` it and escalate (the trust dialog is the one exception, above). The 1 KB busy-tab refusal means shorten the message, not `--force` it.
 - All `send` forms and refusals: [references/sending.md](references/sending.md). Remote Control status across the fleet: [references/remote-control.md](references/remote-control.md).
 

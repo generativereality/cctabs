@@ -18,6 +18,8 @@
  * it loses, are recovered here.
  */
 
+import { isOptionShaped } from './argv-text.js'
+
 /** `send` options that consume the token after them, so it isn't a positional. */
 export const SEND_VALUE_FLAGS: ReadonlySet<string> = new Set([
   '--file', '-f',
@@ -45,8 +47,8 @@ export interface SendArgv {
 /**
  * Split `send`'s tokens into its two positionals, skipping flags.
  *
- * Only a token that *starts* with `-` is treated as a flag, which is the whole
- * point: `"mentions --verify here"` is one argv element that begins with `m`,
+ * Only a token shaped like an option (`--name`, `--name=v`, `-x`) is treated
+ * as a flag, which is the whole point: `"mentions --verify here"` is one argv element that begins with `m`,
  * so it is free text, exactly as the shell delivered it. A token after `--` is
  * never a flag.
  */
@@ -74,8 +76,10 @@ export function parseSendArgv(
       break
     }
 
-    // A lone `-` is a value (the stdin convention), not a flag.
-    if (t.startsWith('-') && t.length > 1) {
+    // Only a token SHAPED like an option is one: `--push is the flag` is a
+    // message that starts with a dash, not a flag. A lone `-` is a value (the
+    // stdin convention). Same rule the CLI applies to argv (core/argv-text.ts).
+    if (isOptionShaped(t)) {
       // `--file=x` carries its own value; `--file x` consumes the next token.
       if (!t.includes('=') && valueFlags.has(t)) i++
       continue

@@ -98,3 +98,15 @@ describe('enterDisabledByValue', () => {
     expect(enterDisabledByValue(['tab', 'use --enter=false to park text'])).toBe(false)
   })
 })
+
+describe('parseSendArgv: text that starts with a dash', () => {
+  // A message is one argv element; if it is not shaped like an option it is
+  // the message, however it begins.
+  it('takes `--push is the flag` as the text', () => {
+    expect(parse('mytab', '--push is the flag')).toMatchObject({ target: 'mytab', text: '--push is the flag' })
+  })
+
+  it('still skips real flags and their values', () => {
+    expect(parse('--draft-wait', '5', 'mytab', '- a list item')).toMatchObject({ target: 'mytab', text: '- a list item' })
+  })
+})

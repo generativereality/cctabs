@@ -80,10 +80,10 @@ export interface AssistantTurn {
  * 4,000 entries because of it would make this useless on exactly the live
  * sessions it exists for.
  */
-export function parseAssistantTurns(jsonl: string): AssistantTurn[] {
+export function parseAssistantTurns(jsonl: string | Iterable<string>): AssistantTurn[] {
   const turns: AssistantTurn[] = []
 
-  for (const line of jsonl.split('\n')) {
+  for (const line of typeof jsonl === 'string' ? jsonl.split('\n') : jsonl) {
     if (!line.trim()) continue
     let entry: {
       message?: { role?: string; content?: unknown }
@@ -119,7 +119,40 @@ export function parseAssistantTurns(jsonl: string): AssistantTurn[] {
 
 /** {@link parseAssistantTurns} for a file on disk. */
 export function readAssistantTurns(file: string): AssistantTurn[] {
-  return parseAssistantTurns(readFileSync(file, 'utf-8'))
+  return parseAssistantTurns(readLines(file))
+}
+
+/**
+ * A file's lines, read a chunk at a time.
+ *
+ * Not `readFileSync(file, 'utf-8')`: a long-lived session's transcript passes
+ * Node's ~512 MB string limit (clerk-dev's was 585 MB on 2026-10-19), and then
+ * `transcript` fails with "Cannot create a string longer than 0x1fffffe8
+ * characters" — under Node, which is what the published CLI runs on; Bun's
+ * limit is higher, so it passed in development. Lines are split on the `\n`
+ * byte, so a multi-byte character is never cut in half.
+ */
+export function* readLines(file: string, chunkBytes = 4 * 1024 * 1024): Generator<string> {
+  const fd = openSync(file, 'r')
+  try {
+    const buf = Buffer.alloc(chunkBytes)
+    let carry: Buffer[] = []
+    for (;;) {
+      const n = readSync(fd, buf, 0, chunkBytes, null)
+      if (n === 0) break
+      let start = 0
+      for (let nl = buf.indexOf(10, 0); nl !== -1 && nl < n; nl = buf.indexOf(10, start)) {
+        const piece = buf.subarray(start, nl)
+        yield (carry.length ? Buffer.concat([...carry, piece]) : piece).toString('utf-8')
+        carry = []
+        start = nl + 1
+      }
+      if (start < n) carry.push(Buffer.from(buf.subarray(start, n)))
+    }
+    if (carry.length) yield Buffer.concat(carry).toString('utf-8')
+  } finally {
+    closeSync(fd)
+  }
 }
 
 /**
@@ -173,7 +206,7 @@ export function truncateTurn(text: string, maxChars?: number): string {
 export function readUserMessages(file: string): string[] {
   const messages: string[] = []
 
-  for (const line of readFileSync(file, 'utf-8').split('\n')) {
+  for (const line of readLines(file)) {
     if (!line.trim()) continue
     let entry: {
       message?: { role?: string; content?: unknown }

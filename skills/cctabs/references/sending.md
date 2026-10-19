@@ -27,8 +27,19 @@ See [suspended-tabs.md](suspended-tabs.md).
   (a hard failure), something arrived but completeness is unverified (a
   warning), and verified. "Sent" and "arrived whole" are not the same fact.
 - It **will not submit a body that did not land at all.** Pressing Enter on a
-  fragment sends something that reads as a complete message. The text is left in
-  the input box instead, and the command exits non-zero.
+  fragment sends something that reads as a complete message. It exits non-zero
+  instead, and takes its own text back out of the box (below).
+- It **checks that Enter submitted** (0.6.3+): the input box must empty after
+  Enter. An Enter can be swallowed, and before 0.6.3 `send` printed `✔ Sent` on
+  the strength of the text having landed — mmm-dev's message to clerk-dev did
+  exactly that on 2026-10-17 and sat unsubmitted in clerk-dev's box for hours,
+  where every later send refused on it as a draft. Now a box still holding the
+  text gets up to three more Enters, and if none takes, `send` exits 1.
+- It **doesn't leave its own text behind** (0.6.3+). When a send can't submit
+  what it typed, and the box was empty before it typed, it clears the text
+  (Ctrl-U) and says so: abandoned text is indistinguishable from someone's
+  draft and blocks the next sender. If the box already held something, nothing
+  is cleared and the message says so.
 - `--verify` **compares what the session received** against what was sent, via
   the target's transcript — the only reliable completeness check there is.
 - It **won't type into someone's unsent draft.** If the input box already holds
@@ -37,7 +48,9 @@ See [suspended-tabs.md](suspended-tabs.md).
   the draft. So it waits for the box to clear, re-checking at 1s, 2s, 4s … (capped
   at 16s), for up to `--draft-wait` seconds (default 60), then refuses with exit 1
   and quotes the draft. Treat that refusal as "a human is using this tab": try
-  later rather than forcing. `--allow-draft` types into it anyway; `--submit` is
+  later rather than forcing — unless the quoted draft is plainly another agent's
+  message to that tab (`From mmm-dev: …`), stranded by an older cctabs; then
+  `--allow-draft` delivers yours behind it, or `--submit` sends it. `--allow-draft` types into it anyway; `--submit` is
   exempt, since submitting what's parked is its job. `cctabs rename` waits the
   same way before typing `/rename`. Needs the Tabby plugin's `screen` capability
   (tabby-cctabs ≥ 0.1.6): it reads the tab's screen, because the output stream
@@ -53,16 +66,26 @@ See [suspended-tabs.md](suspended-tabs.md).
   line, so a `Restart to update` banner rendered *below* a ready prompt no
   longer makes it time out.
 
-⛔ **Text containing `--` needs the `--` terminator.** The option parser drops
-any argv element containing a double dash, so a message that *quotes a flag
-name* — the normal case when one session reports a tool bug to another — used to
-vanish silently while `send` printed a ✔. `send` now recovers its positionals
-from the raw command line, so this works either way, but the terminator is the
-unambiguous form and the only one for text that is *entirely* flag-shaped:
+**Text containing `--` is text** (0.6.3+). The tokenizer under cctabs' option
+parser takes any argv element with `--` *anywhere* in it for an option, so a
+message that quotes a flag — the normal case when one session reports a tool bug
+to another — was first eaten silently, then (0.5.x–0.6.2) refused with `… is not
+an option of cctabs send. Nothing was run.`, and `new --prompt "… --push …"`
+failed with `Optional argument '--prompt' … should be 'string'`. Now only an
+element *shaped* like an option (`--name`, `--name=value`, `-x`) is one; any
+other text is text, including text that starts with `--`:
 
 ```bash
-cctabs send auth -- --verify is broken and --path too
+cctabs send auth "run publish.sh --push to ship"      # fine
+cctabs send auth "--verify is broken and --path too"  # fine: not shaped like one option
+cctabs send auth -- --push                            # a lone flag-shaped word needs the terminator
 ```
+
+**Every refusal ends the output with one line, `ERROR  NOT SENT to "<tab>" (<id>): …`,
+and exits 1.** Read the last line (and the exit code, which a `| tail` hides).
+Before 0.6.3 the error was followed by a blank line, so `cctabs send … 2>&1 |
+tail -1` printed nothing at all — neither ✔ nor ERROR — and an agent sent into a
+refusing tab for hours.
 
 An empty body is now a **hard error**, not a ✔ — so a swallowed payload fails
 loudly instead of pressing Enter and claiming success. A deliberate bare Enter

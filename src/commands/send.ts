@@ -13,8 +13,9 @@ import { judgeDelivery } from '../core/paste-confirm.js'
 import { resetTitleIndexCache, resolveTabSession } from '../core/session.js'
 import { locateTranscriptFile, readUserMessages } from '../core/transcript.js'
 import { parseSendArgv, enterDisabledByValue } from '../core/send-argv.js'
-import { waitOutDraft, draftPreview, DRAFT_WAIT_SECONDS } from '../core/draft-guard.js'
+import { waitOutDraft, draftPreview, submitAndConfirm, clearOwnText, DRAFT_WAIT_SECONDS } from '../core/draft-guard.js'
 import { readProcessTable } from '../core/claude-procs.js'
+import { liveTabSession, procTabsOf } from '../core/tab-session.js'
 import { reviveDormant, suspendedTabsIn, wakeSuspendedTab, reportWake, type WakeTarget } from '../core/suspend-ops.js'
 
 function readStdin(): Promise<string> {
@@ -152,8 +153,10 @@ export const sendCommand = define({
     const resolved = resolveTabTarget(adapter, query, tabsById, tabNames)
     if (!resolved.ok) {
       adapter.closeSocket()
-      consola.error(resolved.message)
+      // Candidates first, the error last: a caller reading only the end of the
+      // output must still see that nothing was sent.
       for (const line of resolved.lines ?? []) consola.log(line)
+      consola.error(resolved.message)
       process.exit(1)
     }
     let { blockId } = resolved.target
@@ -223,9 +226,17 @@ export const sendCommand = define({
       }
     }
 
+    // Shown in every refusal below. The tab's name, not just its id, because
+    // the refusal is often read by an agent that addressed the tab by name.
+    const who = tabName ? `"${tabName}" (${blockId.slice(0, 8)})` : blockId.slice(0, 8)
+
     // Don't type into someone's unsent draft. The text would land at the end of
     // it and Enter would submit both — and a retry's Ctrl-U would wipe the
     // draft. `--submit` is exempt: submitting what is parked is its job.
+    //
+    // Whether the box was seen EMPTY is kept: only then is everything in it
+    // after typing ours, and safe to take back if it can't be submitted.
+    let boxWasEmpty = false
     if (rawText.length > 0 && !allowDraft) {
       const guard = await waitOutDraft(adapter, blockId, {
         totalMs: draftWaitSec * 1000,
@@ -236,11 +247,12 @@ export const sendCommand = define({
       if (!guard.ok) {
         adapter.closeSocket()
         consola.error(
-          `Not sent: ${blockId.slice(0, 8)} still has an unsent draft in its input box (${draftPreview(guard.text)}), and typing now would append to it and submit both. ` +
-          `Try again once it is sent or cleared, wait longer with --draft-wait <sec>, or pass --allow-draft to type into it anyway.`,
+          `NOT SENT to ${who}: its input box still holds an unsent draft (${draftPreview(guard.text)}) after ${Math.round(guard.waitedMs / 1000)}s, and typing would append to it and submit both. ` +
+          `Send again once it is sent or cleared, wait longer with --draft-wait <sec>, or pass --allow-draft to type into it anyway.`,
         )
         process.exit(1)
       }
+      boxWasEmpty = guard.state.state === 'empty'
     }
 
     // Refuse to push a large payload into a tab with a turn in flight. This is
@@ -294,27 +306,52 @@ export const sendCommand = define({
     // send whatever fraction arrived as though it were the whole message, and a
     // truncated brief reads as a complete one to whoever receives it — which is
     // exactly the failure being fixed, with the retry moved one step later.
+    //
+    // Nor may it be LEFT there, when the box was empty before this send typed:
+    // text abandoned in a box is indistinguishable from someone's draft, and
+    // every later send to the tab refuses on it (see takeBack).
     if (!landed) {
+      const fate = await takeBack(adapter, blockId, boxWasEmpty)
       adapter.closeSocket()
       consola.error(
-        `Delivery to ${blockId.slice(0, 8)} could not be confirmed: ${detail}. NOT submitting — a partial message looks like a whole one. ` +
-        `The text is left in the tab's input box for you to inspect (ctrl+u clears it). ` +
+        `NOT SENT to ${who}: delivery could not be confirmed (${detail}), so it was not submitted — a partial message looks like a whole one. ${fate} ` +
         `For anything large, \`cctabs send ${query} --path <file>\` avoids the prompt line entirely.`,
       )
       process.exit(1)
     }
 
-    let resp: unknown
+    // The submit. Checked, not assumed: an Enter can be swallowed, and a send
+    // that typed its text, lost its Enter and printed ✔ is how one tab's
+    // message came to block another tab's input box for hours (2026-10-17).
+    let submitUnchecked = false
     if (sendEnter) {
       // 350ms, not 200: Codex swallows an Enter that follows the text by less
       // than ~300ms (measured by codex-support, 2026-10-15). Claude is unaffected.
       if (rawText.length > 0) await new Promise((r) => setTimeout(r, 350))
-      resp = await adapter.sendInput(blockId, '\r')
+      if (skipConfirm) {
+        const resp = await adapter.sendInput(blockId, '\r')
+        if (resp && (resp as Record<string, unknown>).error) {
+          adapter.closeSocket()
+          consola.error(`NOT SENT to ${who}: Enter could not be delivered: ${String((resp as Record<string, unknown>).error)}`)
+          process.exit(1)
+        }
+      } else {
+        const submit = await submitAndConfirm(adapter, blockId)
+        if (!submit.submitted) {
+          const fate = rawText.length > 0
+            ? await takeBack(adapter, blockId, boxWasEmpty)
+            : 'What was parked in the box is still there.'
+          adapter.closeSocket()
+          consola.error(
+            `NOT SENT to ${who}: the text was typed, but ${submit.enters} Enter presses did not submit it (${draftPreview(submit.text)} is still in its input box). ${fate}`,
+          )
+          process.exit(1)
+        }
+        submitUnchecked = !submit.checked
+        if (submit.enters > 1) detail = `${detail}; Enter took ${submit.enters} presses`
+      }
     }
     adapter.closeSocket()
-    if (resp && (resp as Record<string, unknown>).error) {
-      consola.error(String((resp as Record<string, unknown>).error)); process.exit(1)
-    }
 
     const preview = rawText.slice(0, 80).replace(/\n/g, '↵').replace(/\t/g, '→')
     const label = rawText.length > 0 ? `${JSON.stringify(preview)}${rawText.length > 80 ? '…' : ''}${sendEnter ? ' ⏎' : ''}` : '⏎'
@@ -324,7 +361,10 @@ export const sendCommand = define({
     // — it records the user message as received, so the payload's front and
     // tail are checkable against ground truth.
     if (verify && rawText.length > 0 && sendEnter) {
-      const outcome = await verifyDelivered(tabName ?? query, tabCwd ?? '', rawText, verifyTimeoutSec, wokenSessionId, codexSessionId, codexBaseline)
+      // The running Claude's own session, for a tab the title search can't
+      // place (renamed after Claude started). Asked once: it doesn't change.
+      const liveId = wokenSessionId ?? (targetTabId && !codexSessionId ? liveTabSession(targetTabId, procTabsOf(tabsById, tabNames), readProcessTable())?.id : undefined)
+      const outcome = await verifyDelivered(tabName ?? query, tabCwd ?? '', rawText, verifyTimeoutSec, wokenSessionId, codexSessionId, codexBaseline, liveId)
       if (!outcome.delivered) {
         consola.error(`Sent to ${blockId.slice(0, 8)}, but delivery does NOT check out: ${outcome.detail}`)
         process.exit(1)
@@ -346,6 +386,8 @@ export const sendCommand = define({
       consola.success(`Submitted Enter only (no body) to ${blockId.slice(0, 8)}`)
     } else if (unchecked) {
       consola.info(`Sent to ${blockId.slice(0, 8)} (unconfirmed — ${detail}): ${label}`)
+    } else if (submitUnchecked && sendEnter) {
+      consola.info(`Sent to ${blockId.slice(0, 8)} (submit unconfirmed — the input box could not be read after Enter): ${label}`)
     } else if (!confirmed) {
       consola.warn(`Sent to ${blockId.slice(0, 8)} — arrived, but completeness UNVERIFIED: ${detail}. ${label}`)
     } else {
@@ -353,6 +395,23 @@ export const sendCommand = define({
     }
   },
 })
+
+/**
+ * Take back text this send typed and could not submit, and say what became of
+ * it, as the tail of the refusal message.
+ *
+ * Leaving it was the old behaviour ("left in the box for you to inspect"), and
+ * it is a trap in a fleet: the next agent to send there finds what looks like
+ * a human's half-written draft, and refuses — correctly, by its lights — for
+ * as long as the text sits there. Only cleared when the box was seen empty
+ * before typing; otherwise someone's draft is in there too, and it stays.
+ */
+async function takeBack(adapter: Parameters<typeof clearOwnText>[0], blockId: string, boxWasEmpty: boolean): Promise<string> {
+  if (!boxWasEmpty) return 'The text was left in the input box, which also held text before this send (ctrl+u in the tab clears it).'
+  return (await clearOwnText(adapter, blockId))
+    ? 'It was cleared from the input box, so it is not left there looking like a draft. Send again.'
+    : 'Clearing it from the input box failed too, so it is still there: clear it in the tab (ctrl+u) before sending again.'
+}
 
 /**
  * Poll the target's transcript until it records the message, then compare.
@@ -377,6 +436,8 @@ async function verifyDelivered(
   knownSessionId?: string,
   codexSessionId?: string,
   codexBaseline = 0,
+  /** The running Claude's session, used when the by-title lookup finds none. */
+  liveSessionId?: string,
 ): Promise<{ delivered: boolean; detail: string }> {
   const deadline = Date.now() + timeoutSec * 1000
   let last = judgeDelivery(payload, null)
@@ -393,7 +454,8 @@ async function verifyDelivered(
     }
 
     resetTitleIndexCache()
-    const session = knownSessionId ? { id: knownSessionId } : resolveTabSession(tabCwd, tabName)
+    const byTitle = knownSessionId ? null : resolveTabSession(tabCwd, tabName)
+    const session = knownSessionId ? { id: knownSessionId } : byTitle ?? (liveSessionId ? { id: liveSessionId } : null)
     if (!session) continue
     sawSession = true
 

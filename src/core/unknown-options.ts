@@ -81,5 +81,10 @@ export function findUnknownOptions(
 export function unknownOptionMessage(command: string, unknown: string[]): string {
   const which = unknown.map((u) => `\`${u}\``).join(', ')
   const plural = unknown.length > 1 ? 'are not options' : 'is not an option'
-  return `${which} ${plural} of \`cctabs ${command}\`. Nothing was run. See \`cctabs ${command} --help\`.`
+  // A whole argv element that is nothing but a flag (`--push`) can't be told
+  // from a typo'd option, so `send` points at the terminator for that case.
+  const asText = command === 'send'
+    ? ` If it is part of the message, put the message after \`--\`: cctabs send <tab> -- <text>.`
+    : ''
+  return `${which} ${plural} of \`cctabs ${command}\`. Nothing was run. See \`cctabs ${command} --help\`.${asText}`
 }

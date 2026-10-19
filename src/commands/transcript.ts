@@ -6,6 +6,8 @@ import { requireAdapter } from '../core/adapter.js'
 import { resolveTabTarget } from '../core/tab-target.js'
 import { resolveTabSession } from '../core/session.js'
 import { classifySessionLookup, explainSessionLookup } from '../core/session-lookup.js'
+import { readProcessTable } from '../core/claude-procs.js'
+import { liveTabSession, procTabsOf } from '../core/tab-session.js'
 import {
   countSessionsInDir,
   locateTranscriptFile,
@@ -48,7 +50,7 @@ export const transcriptCommand = define({
       for (const line of resolved.lines ?? []) consola.log(line)
       process.exit(1)
     }
-    const { name, cwd, blockId } = resolved.target
+    const { name, cwd, blockId, tabId } = resolved.target
     const owner = [...tabsById].find(([, blocks]) => blocks.some((b) => b.blockid === blockId))?.[0]
     const agent = owner ? tabAgent(adapter, data, owner) : undefined
     if (agent?.engine === 'unknown') fail(asJson, blockId, 'unknown-engine', 'Cannot identify the tab’s engine; no transcript was selected by name.')
@@ -71,12 +73,19 @@ export const transcriptCommand = define({
       fail(asJson, blockId, 'no-tab', 'Matched a block, not a named tab — no session to look up. Pass a tab name.')
     }
 
-    let session: ReturnType<typeof resolveTabSession> = null
+    let session: { id: string } | null = null
     let lookupError: Error | undefined
     try {
       session = resolveTabSession(cwd!, name!)
     } catch (err) {
       lookupError = err as Error
+    }
+    // Nothing on disk is titled after the tab — it was renamed after Claude
+    // started, or its worktree was. The Claude running in it still knows which
+    // session it is on; `sessions` asks it the same way.
+    if (!session && tabId) {
+      const live = liveTabSession(tabId, procTabsOf(tabsById, tabNames), readProcessTable())
+      if (live) session = { id: live.id }
     }
     if (!session) {
       // Exactly the distinction `sessions --json` now reports, made by the same

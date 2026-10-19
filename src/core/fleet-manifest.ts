@@ -233,7 +233,7 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
     if (
       r.session_id &&
       r.engine !== 'codex' &&
-      r.session_source === 'argv' &&
+      (r.session_source === 'argv' || r.session_source === 'registry') &&
       opts.transcriptInDir &&
       opts.transcriptExists(r.session_id, r.engine) &&
       !opts.transcriptInDir(r.session_id, dir)
@@ -242,7 +242,7 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
         name: r.name,
         severity: 'warning',
         code: 'transcript-elsewhere',
-        message: `session ${r.session_id.slice(0, 8)}… (from the running Claude's --resume) is filed under another directory than ${dir || '(no directory)'} — fine on Claude Code 2.1.280+, which resumes by id from anywhere; an older Claude may not find it`,
+        message: `session ${r.session_id.slice(0, 8)}… (from the running Claude) is filed under another directory than ${dir || '(no directory)'} — fine on Claude Code 2.1.280+, which resumes by id from anywhere; an older Claude may not find it`,
       })
     }
 

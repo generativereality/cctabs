@@ -1,7 +1,8 @@
 import { spawnSync } from 'child_process'
-import { readlinkSync } from 'fs'
+import { readFileSync, readlinkSync } from 'fs'
 import { isCodexCommand, commandWords } from './codex.js'
-import { basename } from 'path'
+import { basename, join } from 'path'
+import { listClaudeConfigDirs } from './config-dirs.js'
 
 /**
  * The machine's running Claude Code processes, read from the process table.
@@ -127,6 +128,41 @@ export function claudeProcsOf(rows: ProcRow[]): ClaudeProc[] {
  */
 export function launchedSessionOf(p: ClaudeProc): string | undefined {
   return p.resumeId ?? p.sessionIdArg
+}
+
+/**
+ * The session a running Claude says it is on, from Claude Code's own registry
+ * of live processes: `<config dir>/sessions/<pid>.json`, `{pid, sessionId, …}`
+ * (measured on Claude Code 2.1.303). Searched in every config dir, since a
+ * backend preset's Claude registers under its own.
+ *
+ * Better than argv where both exist: it names a session that was started
+ * fresh — no `--resume`, so argv has nothing — and one that has since been
+ * renamed. A live Claude writes its own pid's file when it starts, so a file
+ * for a live Claude pid is that process's, never a dead one's leftover.
+ */
+export function registeredSessionOf(pid: number, roots: string[] = listClaudeConfigDirs().map((c) => c.root)): string | undefined {
+  for (const root of roots) {
+    try {
+      const rec = JSON.parse(readFileSync(join(root, 'sessions', `${pid}.json`), 'utf8')) as { pid?: unknown; sessionId?: unknown }
+      if (rec.pid === pid && typeof rec.sessionId === 'string' && UUID.test(rec.sessionId)) return rec.sessionId
+    } catch { /* not registered here */ }
+  }
+  return undefined
+}
+
+/**
+ * The session a running Claude is on: its registry entry, else what its argv
+ * launched. Which one answered is returned with it.
+ */
+export function liveSessionOf(
+  p: ClaudeProc,
+  registered: (pid: number) => string | undefined = registeredSessionOf,
+): { id: string; via: 'registry' | 'argv' } | undefined {
+  const reg = registered(p.pid)
+  if (reg) return { id: reg, via: 'registry' }
+  const launched = launchedSessionOf(p)
+  return launched ? { id: launched, via: 'argv' } : undefined
 }
 
 /** `[pid, ppid, …]` up to the root, walked through `rows`. Pure. */

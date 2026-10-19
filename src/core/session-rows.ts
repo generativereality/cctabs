@@ -6,7 +6,7 @@ import { classifyTerminalBuffer, parsePermissionMode } from './session-status.js
 import { countSessionsInDir, locateTranscriptFile } from './transcript.js'
 import { classifySessionLookup, type SessionLookup } from './session-lookup.js'
 import {
-  launchedSessionOf,
+  liveSessionOf,
   matchTabsToClaude,
   type ProcMatchVia,
   type ProcRow,
@@ -42,10 +42,11 @@ export interface SessionRow {
   session_lookup: SessionLookup
   /**
    * Where `session_id` came from: the by-title transcript search, or — only
-   * when that found nothing — the `--resume` in the argv of the Claude running
-   * in this tab. Absent when there is no id.
+   * when that found nothing — the Claude running in this tab: Claude Code's
+   * own registry of live processes (`registry`), else its `--resume` argv
+   * (`argv`). Absent when there is no id.
    */
-  session_source?: 'transcript' | 'argv' | 'suspended'
+  session_source?: 'transcript' | 'registry' | 'argv' | 'suspended'
   /**
    * For `session_lookup: "not-found"`: how many transcripts exist for
    * this tab's directory under any title. `> 0` means the tab was
@@ -194,18 +195,18 @@ export async function collectSessionRows(
         }
       }
 
-      // Before reporting "no session": ask the process. A live Claude launched
-      // with `--resume <id>` names its session exactly, and the title search
-      // has two measured blind spots — a renamed worktree (the transcript sits
-      // under the old slug) and an on-disk title that no longer matches the tab.
-      // Only the id is taken from argv; the name stays the tab's.
+      // Before reporting "no session": ask the process. A live Claude names its
+      // session exactly — in Claude Code's registry, or in its `--resume` — and
+      // the title search has two measured blind spots: a renamed worktree (the
+      // transcript sits under the old slug) and an on-disk title that no longer
+      // matches the tab. Only the id is taken; the name stays the tab's.
       const tabProc = procsByTab.get(tabId)
       if (!sessionId && tabProc) {
-        const launched = launchedSessionOf(tabProc.proc)
-        if (launched) {
-          sessionId = launched
-          source = 'argv'
-          const located = locateTranscriptFile(launched)
+        const live = liveSessionOf(tabProc.proc)
+        if (live) {
+          sessionId = live.id
+          source = live.via
+          const located = locateTranscriptFile(live.id)
           backend = located?.backend
           configDir = located?.configDir
           lookupError = undefined

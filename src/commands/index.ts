@@ -4,6 +4,7 @@ import { cli, define } from 'gunshi'
 import { consola } from 'consola'
 import pkg from '../../package.json'
 import { findUnknownOptions, unknownOptionMessage } from '../core/unknown-options.js'
+import { protectArgv, restoreParsed } from '../core/argv-text.js'
 import { sessionsCommand } from './sessions.js'
 import { listCommand } from './list.js'
 import { newCommand } from './new.js'
@@ -49,15 +50,21 @@ const defaultCommand = define({
  * is exactly the kind nobody goes looking for. A new command gets this by
  * being in the map below, with nothing to remember.
  */
-function rejectUnknownOptions<T extends { name?: string; args?: unknown; run?: unknown }>(command: T): T {
+export function rejectUnknownOptions<T extends { name?: string; args?: unknown; run?: unknown }>(command: T): T {
   const original = command.run
   if (typeof original !== 'function') return command
   return {
     ...command,
-    run: function (this: unknown, ctx: { tokens?: unknown; args?: unknown }) {
+    run: function (this: unknown, frozen: Record<string, unknown>) {
+      // Text the argv was disguised in (see run() below) comes back out as the
+      // text it was. A copy: gunshi deep-freezes the context.
+      const ctx = { ...frozen }
+      for (const key of ['values', 'positionals', 'rest', '_', 'tokens']) {
+        if (key in ctx) ctx[key] = restoreParsed(ctx[key])
+      }
       const unknown = findUnknownOptions(
-        (ctx?.tokens ?? []) as never,
-        (ctx?.args ?? {}) as never,
+        (ctx.tokens ?? []) as never,
+        (ctx.args ?? {}) as never,
       )
       if (unknown.length > 0) {
         consola.error(unknownOptionMessage(command.name ?? 'cctabs', unknown))
@@ -104,7 +111,10 @@ const subCommands = new Map([
 ].map(([name, command]) => [name, rejectUnknownOptions(command as never)] as const) as Array<[string, never]>)
 
 export async function run(): Promise<void> {
-  const raw = process.argv.slice(2)
+  // Text that merely CONTAINS `--` (a message quoting a flag) is disguised
+  // before gunshi's tokenizer can take it for an option (core/argv-text.ts);
+  // then declared value options are inlined as `--name=value`.
+  const raw = protectArgv(process.argv.slice(2))
   const command = subCommands.get(raw[0]) as { args?: Record<string, ArgSpecLike> } | undefined
   await cli(inlineValueOptions(raw, command?.args ?? {}), defaultCommand, {
     name: pkg.name,
