@@ -10,6 +10,7 @@ import type { TerminalAdapter } from './adapter.js'
 import { pluginTimeoutSec, isTransientCurlExit, splitCurlOutput, TabbyPluginRequestError } from './plugin-request.js'
 import { readInputDraft, type DraftState, type ScreenRow } from './input-draft.js'
 import { classifyTerminalBuffer } from './session-status.js'
+import { authHeaders, controlTokenPath, curlAuth, readControlToken } from './control-token.js'
 import { TABBY_PLUGIN } from './tabby-plugin-dir.js'
 import { matchTabsByName, normalizeTabName, type TabMatchOptions } from './tab-match.js'
 
@@ -38,6 +39,15 @@ export class TabbyPluginUnreachableError extends Error {
     super(lines.join('\n'))
     this.name = 'TabbyPluginUnreachableError'
   }
+}
+
+/** Why the plugin refuses us, and the fix. */
+function tokenRefusedMessage(): string {
+  return [
+    `The cctabs Tabby plugin requires a control token, and there is none readable at ${controlTokenPath()}.`,
+    'The plugin writes a fresh one each time Tabby starts. Restart Tabby; if this persists,',
+    'check that this command runs as the same OS user as Tabby (`cctabs doctor`).',
+  ].join('\n')
 }
 
 /**
@@ -83,6 +93,17 @@ export class TabbyAdapter implements TerminalAdapter {
     if (r.status !== 200 || !r.body) {
       throw new TabbyPluginUnreachableError(this.host, this.port, `/api/health answered HTTP ${r.status}`)
     }
+    // A plugin that wants a token answers every other call with 401. Find out now, before
+    // any command has started acting on the fleet, while the failure can still be explained.
+    let capabilities: string[] = []
+    try {
+      capabilities = (JSON.parse(r.body) as { capabilities?: string[] }).capabilities ?? []
+    } catch {
+      // An unparseable health reply is an old plugin; it wants no token.
+    }
+    if (capabilities.includes('control-token') && !readControlToken()) {
+      throw new Error(tokenRefusedMessage())
+    }
     this.healthChecked = true
   }
 
@@ -105,8 +126,11 @@ export class TabbyAdapter implements TerminalAdapter {
     const attempts = opts.retry === false ? 1 : 2
     let last: { status: number | null; stderr: string } = { status: null, stderr: '' }
     for (let i = 0; i < attempts; i++) {
-      const r = spawnSync('curl', args, { encoding: 'utf-8' })
+      // Read per attempt: the plugin mints a new token each time Tabby starts.
+      const auth = curlAuth()
+      const r = spawnSync('curl', [...auth.args, ...args], { encoding: 'utf-8', input: auth.input })
       const parsed = r.status === 0 ? splitCurlOutput(r.stdout ?? '') : null
+      if (parsed?.status === 401) throw new Error(tokenRefusedMessage())
       if (parsed) return parsed
       last = { status: r.status, stderr: (r.stderr || '').trim() }
       if (!isTransientCurlExit(r.status)) break
@@ -133,9 +157,10 @@ export class TabbyAdapter implements TerminalAdapter {
       // after 1s idle, every time — and anything that polls with a sleep
       // between calls (a wake, a restore's verification, the draft guard) hits
       // exactly that. With `connection: close` the same requests take ~3ms.
-      headers: body ? { 'content-type': 'application/json', connection: 'close' } : { connection: 'close' },
+      headers: { ...authHeaders(), connection: 'close', ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     })
+    if (res.status === 401) throw new Error(tokenRefusedMessage())
     if (res.status === 404) return null
     if (!res.ok) {
       throw new Error(`Tabby plugin ${method} ${path} failed: ${res.status}`)
@@ -371,7 +396,7 @@ export class TabbyAdapter implements TerminalAdapter {
     // blocksList(); refetch with title so we don't re-derive.
     const tabNames = new Map<string, string>()
     try {
-      const res = await fetch(this.url('/api/tabs'), { headers: { connection: 'close' } })
+      const res = await fetch(this.url('/api/tabs'), { headers: { ...authHeaders(), connection: 'close' } })
       if (res.ok) {
         const data = (await res.json()) as {
           tabs: Array<{ uuid: string; title: string; customTitle?: string }>
