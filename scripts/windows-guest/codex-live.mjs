@@ -11,7 +11,7 @@ const result = { runId, version: spawnSync(process.execPath, [cli, '--version'],
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 const log = (label, data) => writeFileSync(join(base, label + '.log'), data)
 async function api(path, method = 'GET') {
-  const r = await fetch('http://127.0.0.1:3300/api' + path, { method, headers: { connection: 'close' } })
+  const r = await fetch('http://127.0.0.1:3300/api' + path, { method, headers: { connection: 'close', ...controlAuth() } })
   if (!r.ok) throw Error(`${method} ${path}: ${r.status} ${await r.text()}`)
   return r.json()
 }
@@ -114,3 +114,11 @@ finally {
   writeFileSync(join(base, 'real-validation.json'), JSON.stringify(result, null, 2))
 }
 console.log(JSON.stringify(result, null, 2))
+
+/** tabby-cctabs 0.2.0+ refuses API calls without the control token it writes at startup. */
+function controlAuth() {
+  try {
+    const t = readFileSync(process.env.CCTABS_CONTROL_TOKEN_FILE || join(homedir(), '.cctabs', 'control-token'), 'utf8').trim()
+    return t ? { authorization: `Bearer ${t}` } : {}
+  } catch { return {} }
+}

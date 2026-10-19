@@ -2,6 +2,7 @@
 import fs from 'node:fs'
 import cp from 'node:child_process'
 import path from 'node:path'
+import os from 'node:os'
 import assert from 'node:assert/strict'
 if (process.platform !== 'win32') throw new Error('Windows guest only')
 const root = 'C:\\Users\\dev\\cctabs-cx-validation'
@@ -11,7 +12,7 @@ fs.mkdirSync(dir, { recursive: true })
 const result = { runId, build: process.env.CCTABS_VALIDATION_BUILD || 'unreleased', tests: [], pass: false }
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 async function api(route, method = 'GET') {
-  const response = await fetch('http://127.0.0.1:3300/api' + route, { method, headers: { connection: 'close' } })
+  const response = await fetch('http://127.0.0.1:3300/api' + route, { method, headers: { connection: 'close', ...controlAuth() } })
   if (!response.ok) throw new Error(`${route}: ${response.status}`)
   return response.json()
 }
@@ -84,4 +85,12 @@ finally {
   for (const t of (await tabs()).filter((t) => [name, renamed].includes(t.customTitle))) { fs.writeFileSync(path.join(root, 'parity-cleanup-screen.log'), await screen(t)); await close(t) }
   fs.writeFileSync(path.join(root, 'parity-result.json'), JSON.stringify(result, null, 2))
   console.log(result)
+}
+
+/** tabby-cctabs 0.2.0+ refuses API calls without the control token it writes at startup. */
+function controlAuth() {
+  try {
+    const t = fs.readFileSync(process.env.CCTABS_CONTROL_TOKEN_FILE || path.join(os.homedir(), '.cctabs', 'control-token'), 'utf8').trim()
+    return t ? { authorization: `Bearer ${t}` } : {}
+  } catch { return {} }
 }

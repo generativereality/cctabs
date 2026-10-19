@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, unlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
 import assert from 'node:assert/strict'
 if (process.platform !== 'win32') throw new Error('Run this harness inside the disposable Windows guest only')
 const base = 'C:\\Users\\dev\\cctabs-cx-validation'
@@ -9,7 +10,7 @@ const cwd = join(base, 'work space & directory')
 mkdirSync(cwd, { recursive: true })
 const delay = (ms) => new Promise((r) => setTimeout(r, ms))
 async function api(path, method = 'GET') {
-  const r = await fetch('http://127.0.0.1:3300/api' + path, { method, headers: { connection: 'close' } })
+  const r = await fetch('http://127.0.0.1:3300/api' + path, { method, headers: { connection: 'close', ...controlAuth() } })
   if (!r.ok) throw Error(`${method} ${path}: ${r.status} ${await r.text()}`)
   return r.status === 204 ? null : r.json()
 }
@@ -70,3 +71,11 @@ finally {
   writeFileSync(join(base, 'argv-validation.json'), JSON.stringify(result, null, 2))
 }
 console.log(JSON.stringify(result, null, 2))
+
+/** tabby-cctabs 0.2.0+ refuses API calls without the control token it writes at startup. */
+function controlAuth() {
+  try {
+    const t = readFileSync(process.env.CCTABS_CONTROL_TOKEN_FILE || join(homedir(), '.cctabs', 'control-token'), 'utf8').trim()
+    return t ? { authorization: `Bearer ${t}` } : {}
+  } catch { return {} }
+}

@@ -14,7 +14,7 @@ import { mintControlToken } from './control-token'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
-const PLUGIN_VERSION = '0.1.6'
+const PLUGIN_VERSION = '0.2.0'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
