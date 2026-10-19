@@ -9,6 +9,8 @@ import { OutputBufferStore } from './output-buffer'
 import { CctabsLogger } from './logger'
 import { bufferLines } from './buffer'
 import { readScreen } from './screen'
+import { checkRequest } from './request-guard'
+import { mintControlToken } from './control-token'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
@@ -39,13 +41,17 @@ const PLUGIN_VERSION = '0.1.6'
  * five minutes later — so on a measured 57-tab fleet 52 tabs reported a pid
  * that no longer existed, and identify matched none of them. `pid` is kept for
  * older CLIs; nothing new should read it.
+ *
+ * `control-token` — every endpoint but /api/health needs
+ * `Authorization: Bearer <token>`, the token being the contents of the file
+ * `control-token.ts` writes. See `request-guard.ts`.
  */
 /*
  * `screen` — `GET /api/tabs/:uuid/screen` returns the tab's visible rows from
  * its xterm, with dim ranges marked. Lets the CLI see what is in a Claude input
  * box before typing into it; `/buffer` is a diff stream and cannot (screen.ts).
  */
-const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid', 'screen']
+const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid', 'screen', 'control-token']
 
 function sleep (ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -130,6 +136,8 @@ function sendJson (res: ServerResponse, status: number, body: unknown): void {
 @Injectable({ providedIn: 'root' })
 export class CctabsServer {
   private server: Server | null = null
+  private token: string | null = null
+  private boundHost = '127.0.0.1'
 
   constructor (
     private app: AppService,
@@ -139,6 +147,14 @@ export class CctabsServer {
     private output: OutputBufferStore,
     private logger: CctabsLogger,
   ) {
+    // Once per Tabby start, not per restart(): a config edit must not invalidate the
+    // token a running CLI has just read.
+    try {
+      this.token = mintControlToken()
+    } catch (err) {
+      // Without a token every guarded endpoint answers 503 — closed, not open.
+      this.logger.error('could not write the control token', err)
+    }
     this.start()
 
     // Restart server on config change so port edits take effect
@@ -149,6 +165,7 @@ export class CctabsServer {
     const cfg = this.config.store?.cctabs ?? {}
     const port: number = cfg.port ?? 3300
     const host: string = cfg.host ?? '127.0.0.1'
+    this.boundHost = host
 
     this.server = createServer((req, res) => this.handle(req, res).catch(err => {
       this.logger.error('handler error', err)
@@ -179,6 +196,12 @@ export class CctabsServer {
     const url = new URL(req.url ?? '/', 'http://localhost')
     const path = url.pathname
     const method = req.method ?? 'GET'
+
+    const refusal = checkRequest({ method, path, headers: req.headers }, this.token, this.boundHost)
+    if (refusal) {
+      this.logger.warn(`refused ${method} ${path}: ${refusal.error}`)
+      return sendJson(res, refusal.status, { error: refusal.error })
+    }
 
     if (method === 'GET' && path === '/api/health') {
       return sendJson(res, 200, { ok: true, version: PLUGIN_VERSION, capabilities: PLUGIN_CAPABILITIES })

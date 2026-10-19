@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **Security: the Tabby plugin's API requires a control token.** The plugin listened on `127.0.0.1:3300` with no authentication, and its API can start any command and read or type into any tab. So any local process could drive it, and so, plausibly, could a web page open in the user's browser: the plugin parsed a `text/plain` POST, which a page can send without a preflight, and did not check `Origin` or `Host` (DNS rebinding). The plugin now writes a fresh random token to `~/.cctabs/control-token` (0600) at every Tabby start and refuses any request without it, any request with an `Origin` header, any non-loopback `Host`, and any body not labelled JSON. `/api/health` stays open and advertises `control-token`. The CLI sends the token on every call through curl's stdin, never its argv, and explains a missing token instead of reporting no tabs. **Update both the CLI and the plugin** (`cctabs install-tabby-plugin`); until then, disabling the plugin is the safe choice.
+
 ## 0.6.3 — 2026-10-19
 
 - **Fix: `send` could leave its text in a tab's input box without submitting it, and print ✔.** It pressed Enter once and reported success because the text had landed. It never checked that Enter submitted. On 2026-10-17 a message from one tab to another printed `✔ Sent`, lost its Enter, and sat in the receiving tab's input box for hours. Every later send to that tab read it as a person's unsent draft and refused. `send` now checks that the input box empties after Enter, presses Enter up to three more times if it doesn't, and otherwise exits 1 instead of printing ✔. A send that can't submit its text also no longer leaves it behind. If the box was empty before the send typed, the send clears its own text and says so. Text left in the box looks like someone's draft. The same applies when delivery can't be confirmed, which used to leave the text "for you to inspect". The check needs the plugin's `screen` capability, as the draft check does.

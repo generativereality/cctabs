@@ -27,6 +27,8 @@ For local development, see *Build and sideload* below.
 
 All endpoints bind to `127.0.0.1:3300` by default. Override host/port in Tabby's settings under **cctabs**.
 
+**Every endpoint but `/api/health` requires a control token.** The API can start any command and read or type into any tab, so loopback alone is not enough: any local process, and a web page through a simple cross-origin POST or DNS rebinding, could reach it. At each Tabby start the plugin writes a fresh random token to `~/.cctabs/control-token` (mode 0600, directory 0700; `CCTABS_CONTROL_TOKEN_FILE` overrides the path), and a request must send it as `Authorization: Bearer <token>`. Requests carrying an `Origin` header (any browser), a `Host` other than loopback, or a body not labelled `application/json` are refused. The cctabs CLI reads the file and sends the token itself, through curl's stdin rather than its command line.
+
 | Method | Path | Purpose |
 |---|---|---|
 | `GET`  | `/api/health` | `{ ok: true, version, capabilities: string[] }` |
@@ -52,6 +54,7 @@ Tab identity is a v4 UUID assigned on `tabOpened$` and discarded on `tabClosed$`
 |---|---|
 | `spawn-waits-for-pty` | `POST /api/tabs/new` serialises concurrent creates and doesn't answer until the new tab's process is running, so callers may create tabs in parallel. |
 | `tab-color` | Tabs carry a colour: reported on `/api/tabs`, accepted by `/api/tabs/new`, and settable via `PUT /api/tabs/:uuid/color`. |
+| `control-token` | Every endpoint but `/api/health` requires the control token (see above). A CLI that sees this and has no token explains the fix instead of reading an empty tab list. |
 
 ### Tab colours
 
