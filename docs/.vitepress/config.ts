@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitepress'
 
 const siteUrl = 'https://cctabs.com'
-const ogTitle = 'cctabs — Run a fleet of Claude Code sessions across your terminal tabs'
-const ogDescription = 'Every Claude Code session gets its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the fleet itself. No tmux.'
+const ogTitle = 'cctabs — Run 50+ Claude Code sessions in your own terminal tabs'
+const ogDescription = 'Every Claude Code session in its own named, native terminal tab, with no tmux. Mix Claude accounts and backends per tab, move a session to another account when one runs out of quota, and restore the fleet after a restart.'
 
 export default defineConfig({
   title: 'cctabs',
-  description: 'Run a fleet of Claude Code sessions across your terminal tabs. Every session gets its own named tab, driven by a CLI or by Claude Code itself. No tmux, no TUI.',
+  description: 'Run 50+ Claude Code sessions in your own terminal tabs. Every session gets its own named tab, on any Claude account or backend, driven by a CLI or by Claude Code itself. No tmux, no TUI.',
   lang: 'en-US',
   cleanUrls: true,
 

@@ -1,23 +1,27 @@
 # cctabs
 
-**Run a fleet of Claude Code and Codex CLI sessions in terminal tabs.**
+**Run 50+ Claude Code and Codex CLI sessions in your own terminal tabs.**
 
-New in 0.6.0: `cctabs new review ~/Dev/myapp --engine codex --prompt "review the changes"`.
-Discover Codex session ids, save and restore mixed fleets, and keep Codex tabs suspended until
-you need them. [Codex setup and command support](skills/cctabs/references/codex.md).
+- **Built for 50+ sessions.** Around ten you can juggle by hand; past that you need orchestration, and Claude Code can do it itself.
+- **Native tabs, not tmux.** Your keybindings work and scrolling behaves.
+- **Any account, any backend, per tab.** Your Claude account, a client's, [Codex CLI](skills/cctabs/references/codex.md), Ollama Cloud or a local model, side by side.
+- **Out of quota? Move the session** to another account and pick it up where it left off (`cctabs profile-copy`).
+- **Sessions talk across accounts.** Claude Code's own messaging only reaches sessions on the same account; `cctabs send` reaches any tab.
+- **Restore after a restart.** Every tab comes back, named, in order, resumed.
+- And: tab colours by account or by rule, reorder tabs by recent activity, suspend idle tabs so they stop taking memory.
 
 CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https://cctabs.com)
 
 ```bash
 cctabs new auth ~/Dev/myapp       # new tab, claude starts
-cctabs new api ~/Dev/myapp
-cctabs new infra ~/Dev/myapp
+cctabs new api ~/Dev/myapp -b client-x        # same, on another Claude account
 cctabs new review ~/Dev/myapp --engine codex
 
 cctabs sessions                   # what's running across all tabs
 cctabs scrollback auth            # read what auth is doing without switching tabs
 cctabs send api --file task.txt   # drop a prompt into any session
 cctabs fork auth -n auth-v2       # branch a conversation, keep the original
+cctabs profile-copy auth --to client-x   # out of quota: carry on under another account
 ```
 
 No tmux. No dashboard. Your terminal tabs are the UI.
