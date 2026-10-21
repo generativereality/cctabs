@@ -1,8 +1,8 @@
 # cctabs
 
-**Run 50+ Claude Code and Codex CLI sessions in your own terminal tabs.**
+**Run 20+ Claude Code and Codex CLI sessions in your own terminal tabs.**
 
-- **Built for 50+ sessions.** Around ten you can juggle by hand; past that you need orchestration, and Claude Code can do it itself.
+- **Built for 20+ sessions.** Around ten you can juggle by hand; past that you need orchestration, and Claude Code can do it itself.
 - **Native tabs, not tmux.** Your keybindings work and scrolling behaves.
 - **Any account, any backend, per tab.** Your Claude account, a client's, [Codex CLI](skills/cctabs/references/codex.md), Ollama Cloud or a local model, side by side.
 - **Out of quota? Move the session** to another account and pick it up where it left off (`cctabs profile-copy`).

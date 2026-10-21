@@ -1,11 +1,11 @@
 ---
 layout: home
-title: cctabs — Run 50+ Claude Code sessions in your own terminal tabs
+title: cctabs — Run 20+ Claude Code sessions in your own terminal tabs
 description: cctabs runs every Claude Code and Codex CLI session in its own named, native terminal tab, with no tmux. Mix Claude accounts and backends tab by tab, move a session to another account when one runs out of quota, and bring the whole fleet back after a restart. Claude Code drives it itself.
 
 hero:
   name: cctabs
-  text: Run 50+ Claude Code sessions in your own terminal tabs
+  text: Run 20+ Claude Code sessions in your own terminal tabs
   tagline: "Every session gets its own named, native tab: no tmux, so your keybindings and scrolling still work. Mix Claude accounts, Codex and local models tab by tab, move a session to another account when one runs out of quota, and bring the whole fleet back after a restart. Claude Code drives all of it itself."
   actions:
     - theme: brand
@@ -16,7 +16,7 @@ hero:
       link: https://github.com/generativereality/cctabs
 
 features:
-  - title: Built for 50+ sessions
+  - title: Built for 20+ sessions
     details: Around ten sessions you can still juggle by hand. Past that you need orchestration. cctabs names every tab, shows which sessions are busy and which are waiting for you, and lets Claude open, read and message the rest, so the fleet keeps growing without the bookkeeping growing with it.
   - title: Native tabs, not tmux
     details: Each session is an ordinary tab in your terminal. Your keybindings work, scrolling and copy-paste behave the way they do everywhere else, and switching is a click. There is no tmux underneath and no dashboard to live in.
