@@ -60,8 +60,9 @@ started. cctabs now exits with a pointer to Tabby when it detects Wave. Your
 conversations aren't affected — they live in `~/.claude/projects`, so
 `cctabs restore` brings them back by name once Tabby is set up.
 
-cctabs is actively tested on macOS. Tabby on Linux and Windows hasn't been tried
-yet, though its plugin format is portable so it may well work as-is.
+cctabs is tested on macOS and Windows 11 (Windows since 0.5.4). Tabby on Linux
+hasn't been tried yet, though its plugin format is portable so it may well work
+as-is.
 
 ## Installing it
 

@@ -80,11 +80,11 @@ Or follow the manual steps in the [Getting Started guide](/guide/getting-started
 |---|---|---|
 | **[Tabby](https://tabby.sh)** | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
 
-> **Platform status:** cctabs is actively tested on **macOS**. Tabby on Linux and Windows hasn't been tried yet, but its plugin format is portable, so it might Just Work.
+> **Platform status:** cctabs is tested on **macOS** and **Windows 11** (Windows since 0.5.4). Tabby on Linux hasn't been tried yet, but its plugin format is portable, so it might Just Work.
 >
 > **Wave Terminal was supported through 0.4.x and was withdrawn in 0.5.0** — tabs would open but the Claude session inside them often never started. Running cctabs under Wave now exits with a pointer to Tabby. Your sessions are unaffected: they live in `~/.claude/projects`, so `cctabs restore` reopens them by name once Tabby is set up.
 >
-> **Hitting issues on Linux, Windows, or another terminal?** Point Claude Code at [the cctabs repo](https://github.com/generativereality/cctabs), share the error, and ask it to investigate and open a PR. Adding a new terminal backend means implementing the small [`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts) interface — [`src/core/tabby.ts`](https://github.com/generativereality/cctabs/blob/main/src/core/tabby.ts) is the worked example.
+> **Hitting issues on Linux or another terminal?** Point Claude Code at [the cctabs repo](https://github.com/generativereality/cctabs), share the error, and ask it to investigate and open a PR. Adding a new terminal backend means implementing the small [`TerminalAdapter`](https://github.com/generativereality/cctabs/blob/main/src/core/adapter.ts) interface — [`src/core/tabby.ts`](https://github.com/generativereality/cctabs/blob/main/src/core/tabby.ts) is the worked example.
 
 Then, inside Claude Code:
 
