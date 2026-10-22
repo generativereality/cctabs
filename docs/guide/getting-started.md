@@ -12,7 +12,7 @@ description: Install cctabs as a Claude Code plugin or via npm, then open your f
   It stays responsive with many open tabs and is fast on tab creation and
   scrollback reads, which matters once Claude is orchestrating 10+ sessions.
   Tabby runs on macOS, Linux, and Windows; cctabs is tested on **macOS** and
-  **Windows 11** (Windows since 0.5.4), and Linux hasn't been tried yet but the
+  **Windows 11**, and Linux hasn't been tried yet but the
   plugin format is portable, so it might Just Work. If you hit issues on another platform or
   want a new terminal supported, point Claude Code at
   [the repo](https://github.com/generativereality/cctabs), share the

@@ -80,7 +80,7 @@ Or follow the manual steps in the [Getting Started guide](/guide/getting-started
 |---|---|---|
 | **[Tabby](https://tabby.sh)** | macOS · Linux · Windows | Tabby → Settings → Plugins → search **cctabs** → install → restart |
 
-> **Platform status:** cctabs is tested on **macOS** and **Windows 11** (Windows since 0.5.4). Tabby on Linux hasn't been tried yet, but its plugin format is portable, so it might Just Work.
+> **Platform status:** cctabs is tested on **macOS** and **Windows 11**. Tabby on Linux hasn't been tried yet, but its plugin format is portable, so it might Just Work.
 >
 > **Wave Terminal was supported through 0.4.x and was withdrawn in 0.5.0** — tabs would open but the Claude session inside them often never started. Running cctabs under Wave now exits with a pointer to Tabby. Your sessions are unaffected: they live in `~/.claude/projects`, so `cctabs restore` reopens them by name once Tabby is set up.
 >
