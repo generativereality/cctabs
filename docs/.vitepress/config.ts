@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitepress'
 
 const siteUrl = 'https://cctabs.com'
-const ogTitle = 'cctabs — Run a fleet of Claude Code sessions across your terminal tabs'
-const ogDescription = 'Every Claude Code session gets its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the fleet itself. No tmux.'
+const ogTitle = 'cctabs — Run 20+ Claude Code sessions in your own terminal tabs'
+const ogDescription = 'A Claude Code and Codex CLI fleet tab manager for people who prefer each session in its own native terminal tab, not tmux or a dashboard. It enables swift coordination of 20+ long-running sessions: Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact.'
 
 export default defineConfig({
   title: 'cctabs',
-  description: 'Run a fleet of Claude Code sessions across your terminal tabs. Every session gets its own named tab, driven by a CLI or by Claude Code itself. No tmux, no TUI.',
+  description: 'A Claude Code and Codex CLI fleet tab manager for people who prefer each session in its own native terminal tab, not tmux or a dashboard. It enables swift coordination of 20+ long-running sessions: Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact.',
   lang: 'en-US',
   cleanUrls: true,
 
@@ -43,7 +43,7 @@ export default defineConfig({
     ['meta', { name: 'twitter:image', content: `${siteUrl}/og.png` }],
 
     // Additional SEO
-    ['meta', { name: 'author', content: 'generativereality' }],
+    ['meta', { name: 'author', content: 'Augmented Mind' }],
     ['meta', { name: 'keywords', content: 'cctabs, claude code, claude code sessions, parallel claude code sessions, claude code session manager, terminal tabs, agent orchestration, multi-agent, tabby terminal, tmux alternative' }],
 
     // Google tag (gtag.js) — cookieless config, no banner required

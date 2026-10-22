@@ -1,12 +1,12 @@
 ---
 layout: home
-title: cctabs — Run a fleet of Claude Code sessions across your terminal tabs
-description: cctabs gives every Claude Code session its own named terminal tab, with a CLI to open, fork, resume, and read them, and a skill so Claude Code can drive the whole fleet itself. Runs in Tabby, with no tmux.
+title: cctabs — Run 20+ Claude Code sessions in your own terminal tabs
+description: "A Claude Code and Codex CLI fleet tab manager for people who prefer each session in its own native terminal tab, not tmux or a dashboard. It enables swift coordination of 20+ long-running sessions: Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact."
 
 hero:
   name: cctabs
-  text: Run a fleet of Claude Code sessions across your terminal tabs
-  tagline: "Every Claude Code session gets its own named terminal tab (auth, api, frontend) that you can scroll and switch to like any other tab, plus a CLI to open, fork, and read them. Claude Code can drive the whole thing itself, which is how you get to ten or fifteen sessions without losing track of them."
+  text: Run 20+ Claude Code sessions in your own terminal tabs
+  tagline: "A fleet tab manager for Claude Code and Codex CLI, for people who prefer each session in its own native terminal tab: no tmux, no dashboard, so your keybindings and scrolling still work. Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact."
   actions:
     - theme: brand
       text: Get Started
@@ -16,19 +16,53 @@ hero:
       link: https://github.com/generativereality/cctabs
 
 features:
-  - title: Claude spawns its own sessions
-    details: Install one plugin and Claude Code can see your tabs. It checks what's already running, opens new tabs, starts sessions in them, and coordinates work across the ones it opened, without you relaying anything by hand.
-  - title: Real terminal tabs
-    details: Every session runs in a native tab of the terminal you already use, so the whole fleet is visible in the tab bar, switching is a click, and scrolling and copy-paste behave the way they always do. There is no tmux underneath and no TUI to live in.
-  - title: From four sessions to fifteen
-    details: Most people open three or four Claude Code sessions by hand and stall there, because the bookkeeping grows faster than the work does. cctabs hands that bookkeeping to Claude, so ten or fifteen parallel sessions cost you roughly what four did.
-  - title: Restore after a computer restart
-    details: After a reboot, say "restore my cctabs now after a computer restart" and Claude reopens every named tab, resumes each session where it left off, and puts the tab bar back in its original order.
-  - title: Fork to explore
-    details: Branch any conversation into a new independent tab and try a different approach in it, with the original left exactly as it was. If the fork turns out better you keep it and close the one you started from.
-  - title: One plugin install
-    details: Install the Claude Code plugin and the CLI comes with it, along with the skill that lets Claude use it. There is nothing to configure and nothing else to install. Runs in Tabby.
+  - title: Built for 20+ sessions
+    details: Around ten sessions you can still juggle by hand. Past that you need orchestration. cctabs names every tab, shows which sessions are busy and which are waiting for you, and lets Claude open, read and message the rest, so the fleet keeps growing without the bookkeeping growing with it.
+  - title: Native tabs, not tmux
+    details: Each session is an ordinary tab in your terminal. Your keybindings work, scrolling and copy-paste behave the way they do everywhere else, and switching is a click. There is no tmux underneath and no dashboard to live in.
+  - title: Any account, any backend, per tab
+    details: Run one tab on your own Claude account, the next on a client's or your company's, another on Codex CLI, Ollama Cloud or a local model. Tabs a session spawns stay on its account, and resume finds each session under the account it belongs to.
+    link: /guide/configuration#multiple-claude-accounts
+    linkText: Set up accounts
+  - title: Out of quota? Move the session
+    details: When one account runs out, move the session to another and pick it up right where it left off. cctabs copies the whole conversation, subagent history included, and opens it in a new tab under the other account.
+    link: /reference/commands#cctabs-profile-copy
+    linkText: profile-copy
+  - title: Sessions talk across accounts
+    details: Claude Code's own messaging between sessions only reaches sessions on the same account. With cctabs, any tab can read what another is doing and send it a prompt, whatever account or backend either one runs on, and the send checks that the message actually arrived.
+  - title: Restore after a restart
+    details: Restart the computer and every tab comes back, named, in its original order, resumed where it left off. cctabs can also restart Tabby itself, or the whole fleet onto a new Claude Code version, without losing a conversation.
+    link: /guide/workflows#resuming-after-a-restart
+    linkText: How restore works
+  - title: Colours that mean something
+    details: Colour tabs by hand, or set rules, one colour per Claude account or a default for every new tab, so you can tell at a glance what each one is. Colours survive a restart.
+    link: /reference/commands#cctabs-color
+    linkText: Tab colours
+  - title: Tidy the tab bar
+    details: Ask Claude to reorder the tabs by recent activity, newest first, or pin the handful you are working with to the front. Tabs without a Claude session keep their order at the end.
+    link: /reference/commands#cctabs-sort
+    linkText: cctabs sort
+  - title: Suspend what you aren't using
+    details: A suspended tab keeps its name, its place and its conversation, but runs no Claude, so it stops taking memory. It wakes on Enter, or when another tab sends it a message. A 60-tab fleet can come back asleep in seconds.
+    link: https://github.com/generativereality/cctabs/blob/main/skills/cctabs/references/suspended-tabs.md
+    linkText: Suspended tabs
 ---
+
+## Everything else it does
+
+**Claude drives the fleet.** One plugin install gives Claude Code the CLI and a skill to use it. Claude checks what is already running, opens new tabs, starts sessions in them, reads their output and sends them work, without you relaying anything by hand. Pair it with Claude Code's [Remote Control](https://docs.anthropic.com/en/docs/claude-code/remote-control) and you steer the whole fleet from your phone.
+
+**Fork to explore.** Branch any conversation into a new tab and try a different approach, with the original left exactly as it was. `--worktree` gives a new session its own branch and checkout.
+
+**Check in without switching tabs.** `cctabs sessions` lists every session with its status; `scrollback` and `transcript` show what a tab is doing and what it has worked out.
+
+**Names that stay put.** `cctabs rename` changes the tab title, the live session's name and the name `resume` looks for, together. A per-machine `prefix` keeps names apart when several machines share one Remote Control list.
+
+**Move to another machine.** `cctabs export` packs a tab or a whole workspace, conversation included, and `cctabs import` opens it on the new laptop.
+
+**Claude Code and Codex CLI.** cctabs runs both, and one fleet can mix them.
+
+See [all commands](/reference/commands), or [how it compares](/guide/what-is-cctabs) to claude-squad, ccmanager and agent-deck.
 
 ## Get started in 60 seconds
 

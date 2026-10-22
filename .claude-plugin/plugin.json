@@ -3,8 +3,8 @@
   "description": "Claude Code and Codex CLI tab manager. Terminal tabs as the UI, no tmux. Manage mixed fleets of agent sessions.",
   "version": "0.7.0",
   "author": {
-    "name": "generativereality",
-    "url": "https://cctabs.com"
+    "name": "Augmented Mind",
+    "url": "https://augmentedmind.io"
   },
   "repository": "https://github.com/generativereality/cctabs",
   "homepage": "https://cctabs.com",
