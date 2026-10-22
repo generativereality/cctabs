@@ -71,7 +71,7 @@ curl -fsSL https://codeload.github.com/generativereality/cctabs/tar.gz/main \
 
 That fetches the whole skill directory: `SKILL.md` plus the `references/` files it points to.
 
-**Requirements:** [Tabby](https://tabby.sh) · macOS · Node.js 20+
+**Requirements:** [Tabby](https://tabby.sh) · macOS or Windows 11 · Node.js 20+
 
 **One-time:** install the companion plugin — run `cctabs install-tabby-plugin` from inside a Tabby tab, then restart Tabby.
 
