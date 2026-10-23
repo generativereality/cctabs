@@ -34,7 +34,12 @@
     "cctabs",
     "agentherder",
     "codex",
-    "codex-cli"
+    "codex-cli",
+    "claude-code-plugin",
+    "parallel-sessions",
+    "multiple-sessions",
+    "tabby-plugin",
+    "tmux-alternative"
   ],
   "author": "Augmented Mind (https://augmentedmind.io)",
   "license": "MIT",
