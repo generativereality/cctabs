@@ -48,6 +48,14 @@ features:
     linkText: Suspended tabs
 ---
 
+## Why I built it
+
+I usually have more than 50 Claude Code sessions open. I started cctabs for myself in March, and it has been how I work ever since: thousands of pull requests at work, most in private repos, have come out of sessions in its tabs. My team runs parallel sessions the same way, and it has taken our PR throughput up about four to five times. After people saw it in demos at work and at meetups, I kept adding what my team and others needed, so it is now something you can install too.
+
+It grew release by release: Wave Terminal in April (0.1), Tabby and a backend per tab in May (0.3–0.4), moving a session to another Claude account in August (0.5), Windows 11 in September (0.5.4), and in October restore across a reboot, Codex tabs and a token that locks the plugin's API (0.5.12–0.7.0). The whole history is in the [changelog](/changelog).
+
+— Fred Motin ([@motin](https://github.com/motin))
+
 ## Everything else it does
 
 **Claude drives the fleet.** One plugin install gives Claude Code the CLI and a skill to use it. Claude checks what is already running, opens new tabs, starts sessions in them, reads their output and sends them work, without you relaying anything by hand. Pair it with Claude Code's [Remote Control](https://docs.anthropic.com/en/docs/claude-code/remote-control) and you steer the whole fleet from your phone.
