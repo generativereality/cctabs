@@ -19,7 +19,7 @@ import { openCodexSession } from '../core/open-codex.js'
 
 export const newCommand = define({
   name: 'new',
-  description: 'Open a new tab with the calling session’s engine (Claude outside an agent session). Usage: cctabs new <name> [dir] (dir defaults to cwd)',
+  description: 'Open a new tab with the calling session’s engine (Claude outside an agent session). Usage: cctabs new <name> [dir] (dir defaults to cwd). From an agent, run it as its own Bash call — no `cd …;`, `; echo` or second `cctabs new` chained to it — so a `Bash(cctabs:*)` allow rule covers it.',
   args: {
     name: { type: 'positional', description: 'Tab name' },
     // `dir` is read from ctx.positionals, deliberately NOT declared: this gunshi

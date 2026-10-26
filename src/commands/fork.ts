@@ -15,7 +15,7 @@ import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
 
 export const forkCommand = define({
   name: 'fork',
-  description: 'Fork the source tab’s conversation into a new tab, preserving Claude or Codex',
+  description: 'Fork the source tab’s conversation into a new tab, preserving Claude or Codex. From an agent, run it as its own Bash call, nothing chained to it, so a `Bash(cctabs:*)` allow rule covers it.',
   args: {
     tab: { type: 'positional', description: 'Source tab name or ID prefix' },
     name: { type: 'string', short: 'n', description: 'Name for the new tab' },
