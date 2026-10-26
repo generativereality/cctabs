@@ -328,8 +328,10 @@ export class TabbyAdapter implements TerminalAdapter {
       // The new tab had to be in front to start its process (see the plugin's
       // openNewTab); with `spawn-waits-for-pty` it is running by now, so the
       // caller can have the screen back.
-      const caps = await this.backendCapabilities()
-      if (!caller) consola.warn('Not inside a Tabby tab, so there is no tab to keep in front; the new tab is.')
+      // Run from outside any tab (a script, an SSH session) there is no caller
+      // to put back, and with the config default on that is the normal case.
+      const caps = caller ? await this.backendCapabilities() : []
+      if (!caller) { /* nothing to keep in front */ }
       else if (!caps.includes('tab-focus') || !caps.includes('spawn-waits-for-pty')) consola.warn('The Tabby plugin cannot switch tabs (no `tab-focus`), so the new tab is in front. Update it: cctabs install-tabby-plugin')
       else if (caller !== uuid) await this.http('POST', `/api/tabs/${caller}/focus`)
     }
