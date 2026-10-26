@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -169,6 +170,16 @@ export function tabbyLifecycle(platform: Platform, exePath?: string): { quit: st
     return { quit: ['taskkill', '/IM', 'Tabby.exe'], open: [exePath ?? 'Tabby.exe'] }
   }
   return { quit: ['pkill', '-TERM', '-x', 'tabby'], open: [exePath ?? 'tabby'] }
+}
+
+/**
+ * Bring this user's Tabby to the front (macOS). `open -a Tabby` from the
+ * detached restart worker does not: in take 2 of the demo (2026-10-26) the
+ * reopened window came up behind another app's. Best effort, never fatal.
+ */
+export function bringTabbyToFront(platform: Platform): void {
+  if (platform !== 'darwin') return
+  try { spawnSync('osascript', ['-e', 'tell application "Tabby" to activate'], { stdio: 'ignore', timeout: 5000 }) } catch { /* best effort */ }
 }
 
 /**

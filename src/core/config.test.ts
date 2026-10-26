@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { applyPrefix } from './config.js'
+import { applyPrefix, keepCallerInFront } from './config.js'
 
 describe('applyPrefix', () => {
   it('prepends the prefix to a bare name', () => {
@@ -21,5 +21,17 @@ describe('applyPrefix', () => {
 
   it('only guards on a true prefix, not a mid-string match', () => {
     expect(applyPrefix('my-mbp18-thing', 'mbp18-')).toBe('mbp18-my-mbp18-thing')
+  })
+})
+
+describe('keepCallerInFront', () => {
+  const cfg = (background?: boolean) => ({ claude: { flags: [] }, codex: { flags: [] }, defaults: { workspace: '', prefix: '', color: '', background } })
+  it('is off unless asked for', () => {
+    expect(keepCallerInFront({}, cfg())).toBe(false)
+  })
+  it('takes the config default, and a flag overrides it either way', () => {
+    expect(keepCallerInFront({}, cfg(true))).toBe(true)
+    expect(keepCallerInFront({ foreground: true }, cfg(true))).toBe(false)
+    expect(keepCallerInFront({ background: true }, cfg(false))).toBe(true)
   })
 })

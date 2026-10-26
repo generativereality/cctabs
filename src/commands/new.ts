@@ -4,7 +4,7 @@ import { writeFileSync, existsSync, readFileSync } from 'fs'
 import { tmpdir, homedir } from 'os'
 import { join, resolve } from 'path'
 import { openSession } from '../core/open-session.js'
-import { loadConfig, applyPrefix } from '../core/config.js'
+import { loadConfig, applyPrefix, keepCallerInFront } from '../core/config.js'
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import { expandSessionId, pathToProjectSlug } from '../core/session.js'
 import { setupWorktree } from '../core/worktree.js'
@@ -36,6 +36,8 @@ export const newCommand = define({
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to Claude or -m to Codex). Useful with --backend ollama-local.' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
     engine: { type: 'string', short: 'e', description: 'Engine: claude or codex. Defaults to the calling agent, else Claude; an explicit --backend selects Claude. --resume uses that engine’s session ID; Codex --model passes -m.' },
+    background: { type: 'boolean', short: 'B', description: 'Keep the tab you ran this from in front; the new tab opens and starts behind it. Default from `[defaults] background` in the config. Needs Tabby plugin 0.2.1+ (`tab-focus`).' },
+    foreground: { type: 'boolean', description: 'Switch to the new tab (the default), overriding `[defaults] background`.' },
     suspended: { type: 'boolean', short: 's', description: 'Open the tab SUSPENDED (needs --resume): named and holding the session, but running a placeholder instead of its agent until woken by Enter, `cctabs resume`/`wake`, or `cctabs send`.' },
   },
   async run(ctx) {
@@ -69,6 +71,7 @@ export const newCommand = define({
     }
 
     const config = loadConfig()
+    const background = keepCallerInFront({ background: ctx.values.background as boolean | undefined, foreground: ctx.values.foreground as boolean | undefined }, config)
 
     // Prefix (if configured) rides on the tab title + `claude --name` only —
     // the raw `name` still drives the worktree branch/dir so those stay clean.
@@ -219,6 +222,7 @@ export const newCommand = define({
           model: modelOverride,
           afterActive: true,
           color,
+          background,
         })
         const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
         const rs = resolvedSessionId ? ` resume ${resolvedSessionId.slice(0, 8)}…` : ''
@@ -248,6 +252,7 @@ export const newCommand = define({
       modelOverride: resolvedModel,
       afterActive: true,
       color,
+      background,
     })
     const wt = worktreeInfo ? ` (worktree: .claude/worktrees/${name} @ ${worktreeInfo.baseSha.slice(0, 8)})` : ''
     const be = backendName ? ` [backend: ${backendName}${inheritedBackend ? ' (inherited)' : ''}${resolvedModel ? ` → ${resolvedModel}` : ''}]` : ''

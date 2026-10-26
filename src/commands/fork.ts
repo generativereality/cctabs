@@ -8,7 +8,7 @@ import { readProcessTable } from '../core/claude-procs.js'
 import { liveTabSession, procTabsOf } from '../core/tab-session.js'
 import { collectSessionRows } from '../core/session-rows.js'
 import { openSession } from '../core/open-session.js'
-import { loadConfig, applyPrefix } from '../core/config.js'
+import { loadConfig, applyPrefix, keepCallerInFront } from '../core/config.js'
 import { repoRootOf } from '../core/worktree.js'
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
 import { resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
@@ -21,6 +21,8 @@ export const forkCommand = define({
     name: { type: 'string', short: 'n', description: 'Name for the new tab' },
     model: { type: 'string', short: 'm', description: 'Override the fork’s model.' },
     backend: { type: 'string', short: 'b', description: 'Backend preset. Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
+    background: { type: 'boolean', short: 'B', description: 'Keep the tab you ran this from in front; the new tab opens and starts behind it. Default from `[defaults] background` in the config. Needs Tabby plugin 0.2.1+ (`tab-focus`).' },
+    foreground: { type: 'boolean', description: 'Switch to the new tab (the default), overriding `[defaults] background`.' },
     color: { type: 'string', short: 'c', description: `Tab colour for the fork: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
   },
   async run(ctx) {
@@ -29,6 +31,7 @@ export const forkCommand = define({
     if (!sourceQuery) { consola.error('Source tab name is required'); process.exit(1) }
 
     const config = loadConfig()
+    const background = keepCallerInFront({ background: ctx.values.background as boolean | undefined, foreground: ctx.values.foreground as boolean | undefined }, config)
     const adapter = requireAdapter()
     const data = await adapter.getAllData()
     const { tabsById, tabNames } = data
@@ -56,7 +59,7 @@ export const forkCommand = define({
       if (ctx.values.backend) { consola.error('--backend applies to Claude, not a Codex fork.'); process.exit(1) }
       if (!source.id) { consola.error('Cannot identify the source Codex session unambiguously; no fork was opened.'); process.exit(1) }
       const color = resolveColorPreference(ctx.values.color as string | undefined, undefined, config.defaults.color)
-      const newTabId = await openCodexSession({ tabName: newName, dir: source.cwd, forkId: source.id, model: ctx.values.model as string | undefined, afterActive: true, color })
+      const newTabId = await openCodexSession({ tabName: newName, dir: source.cwd, forkId: source.id, model: ctx.values.model as string | undefined, afterActive: true, color, background })
       consola.success(`Forked Codex "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]`)
       consola.info(`source session: ${source.id}`)
       return
@@ -127,6 +130,7 @@ export const forkCommand = define({
       modelOverride: ctx.values.model as string | undefined,
       afterActive: true,
       color,
+      background,
     })
     consola.success(`Forked "${tabName}" → "${newName}" [${newTabId.slice(0, 8)}]${be}`)
     consola.info(`session: ${sessionId}`)

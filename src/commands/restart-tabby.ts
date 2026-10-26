@@ -12,7 +12,7 @@ import { gatherManifest, manifestJson, reportManifest } from './manifest.js'
 import { withoutInvalid } from '../core/fleet-manifest.js'
 import {
   checkCapture, defaultSuspendAge, restorableEntries, fleetDir, readPending, stampedManifestPath, tabbyLifecycle,
-  tabbyLaunchEnv, tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
+  bringTabbyToFront, tabbyLaunchEnv, tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
 } from '../core/fleet-state.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -270,6 +270,7 @@ export const restartTabbyWorkerCommand = define({
       process.exit(1)
     }
     log('Plugin is up.')
+    bringTabbyToFront(platform)
     // A moment for Tabby to finish its own startup before a tab is added.
     await sleep(2000)
 
@@ -281,6 +282,7 @@ export const restartTabbyWorkerCommand = define({
     try {
       const fresh = requireAdapter()
       const tab = await fresh.openTabDirect!({ cwd: homedir(), title: 'cctabs restore', command: shell.command, args: tabLaunchArgv(shell, body) })
+      bringTabbyToFront(platform)
       log(`Opened the restore tab ${tab.tabId.slice(0, 8)}. Done here.`)
     } catch (err) {
       log(`Could not open the restore tab: ${(err as Error).message}. Open one yourself and run: cctabs restore --pending`)

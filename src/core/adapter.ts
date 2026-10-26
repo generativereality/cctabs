@@ -66,6 +66,13 @@ export interface TerminalAdapter {
      * — a backend without it drops the field silently.
      */
     color?: string | null
+    /**
+     * Keep the CALLING tab in front: once the new tab's process is running,
+     * select the caller again. Needs `tab-focus`; without it the new tab stays
+     * in front, with one warning. Not for batch opens (restore): a focus change
+     * between two creates can starve the next tab of the focus it starts on.
+     */
+    background?: boolean
   }): Promise<{ blockId: string; tabId: string }>
 
   /** Reorder the tab bar to match `order` (tab ids); unlisted tabs keep order and sort after. */

@@ -8,7 +8,7 @@ export const CONFIG_PATH = join(homedir(), '.config', 'cctabs', 'config.toml')
 const DEFAULT_CONFIG: Config = {
   claude: { flags: ['--allow-dangerously-skip-permissions'] },
   codex: { flags: [] },
-  defaults: { workspace: '', prefix: '', color: '' },
+  defaults: { workspace: '', prefix: '', color: '', background: false },
 }
 
 const DEFAULT_CONFIG_FILE = `# cctabs configuration
@@ -38,6 +38,10 @@ flags = []
 # \`[backends.<name>] color\` overrides this for tabs launched under that preset,
 # and \`--color\` overrides both. Empty (uncoloured) by default.
 # color = ""
+
+# Keep the tab you ran \`cctabs new\`/\`fork\` from in front, instead of switching
+# to the new tab. \`--background\` / \`--foreground\` override it per command.
+# background = false
 `
 
 function parseToml(text: string): Partial<Record<string, Record<string, unknown>>> {
@@ -104,6 +108,17 @@ export function loadConfig(): Config {
 export function applyPrefix(name: string, prefix: string): string {
   if (!prefix || name.startsWith(prefix)) return name
   return `${prefix}${name}`
+}
+
+/**
+ * Should `new`/`fork` keep the caller's tab in front? An explicit flag wins,
+ * then `[defaults] background`. Both flags at once is a contradiction; the
+ * caller reports it.
+ */
+export function keepCallerInFront(flags: { background?: boolean; foreground?: boolean }, config: Config): boolean {
+  if (flags.foreground) return false
+  if (flags.background) return true
+  return config.defaults.background === true
 }
 
 export function ensureConfigExists(): string {
