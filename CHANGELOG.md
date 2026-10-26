@@ -3,7 +3,7 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.7.1 — 2026-10-26
 
 - **Fix: `fork <tab>` could fork the wrong conversation.** It resumed the newest session in the tab's folder, and with several tabs in one repo that is usually the one running the fork. It now asks the Claude running in the tab which session it is on, falls back to what `sessions` reports for that tab, and refuses rather than guess.
 - **Fix: `restart-tabby` saved no Codex tabs that were opened one after another in the same folder.** Each new Codex tab is matched to the rollout Codex writes when it starts; tabs opened seconds apart each fitted all the later rollouts, so none got an id and none was saved. A rollout now also has to start before the next Codex in that folder. Two launches in the same second still refuse to guess.

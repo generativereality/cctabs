@@ -2,7 +2,7 @@
   "name": "cctabs",
   "displayName": "cctabs",
   "description": "A tab manager for Claude Code and Codex CLI, for people who run many sessions at once. Each session gets its own named, native terminal tab: no tmux, no dashboard. Claude itself opens, reads, prompts and forks the tabs, a Claude session can move to another account when one runs out of quota, and one command restarts the terminal and brings every tab back (before a reboot, another saves them). Runs in Tabby today.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "author": {
     "name": "Augmented Mind",
     "url": "https://augmentedmind.io"

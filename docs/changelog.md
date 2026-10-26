@@ -21,6 +21,17 @@ npm i -g @generativereality/cctabs
 
 <!-- releases -->
 
+## 0.7.1 — 2026-10-26
+
+- **Fix: `fork <tab>` could fork the wrong conversation.** It resumed the newest session in the tab's folder, and with several tabs in one repo that is usually the one running the fork. It now asks the Claude running in the tab which session it is on, falls back to what `sessions` reports for that tab, and refuses rather than guess.
+- **Fix: `restart-tabby` saved no Codex tabs that were opened one after another in the same folder.** Each new Codex tab is matched to the rollout Codex writes when it starts; tabs opened seconds apart each fitted all the later rollouts, so none got an id and none was saved. A rollout now also has to start before the next Codex in that folder. Two launches in the same second still refuse to guess.
+- **Fix: `restart-tabby` never reopened Tabby while another macOS user's Tabby was running.** It waited for every user's Tabby to exit. It now looks only at yours.
+- **`restart-tabby` brings the tabs back in their order.** The restored tabs come first, in the order they were saved; the restore tab and Tabby's own startup tab go after them. Tabby comes to the front when it reopens (macOS). With plugin 0.2.1 the reordered bar is also drawn right away: before, it could go on showing the order the tabs were created in.
+- **`new`/`fork --background` (`-B`) keep your tab in front.** The new tab starts behind the one you ran the command from. `[defaults] background = true` makes it the default; `--foreground` overrides that. Needs tabby-cctabs 0.2.1 (`tab-focus`).
+- **The skill tells Claude to run each `cctabs` command as its own Bash call.** A command chained to `cd …;` or `; echo` is not covered by a `Bash(cctabs:*)` allow rule, and auto mode's classifier refused one that opened two tabs. The README's install notes suggest the allow rule.
+- **Installs tabby-cctabs 0.2.1:** `POST /api/tabs/:uuid/focus` (`tab-focus`); requests that change something run where Tabby redraws; and the port set in Tabby's config is honoured (it bound 3300 regardless, which clashes with a second Tabby on the same Mac).
+- **The plugin has a README, icon and LICENSE** for Claude's plugin directory, and cctabs.com has a [privacy page](https://cctabs.com/privacy).
+
 ## 0.7.0 — 2026-10-19
 
 - **Installs tabby-cctabs 0.2.0, the plugin that requires the control token.** 0.6.3 shipped the CLI half of the fix: its plugin API was open to any local process, and plausibly to a web page. This release pins the plugin half. **Run `cctabs install-tabby-plugin`.** It restarts Tabby, which is when the new plugin loads, and restores your tabs. It is a minor version because the plugin breaks older clients: **cctabs 0.6.2 and earlier cannot talk to tabby-cctabs 0.2.0**, and neither can anything else that calls `127.0.0.1:3300` directly without the token in `~/.cctabs/control-token`. Update cctabs on every machine before updating the plugin. `/api/health` stays open, so `cctabs doctor` and other version checks keep working.
