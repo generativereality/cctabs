@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core'
+import { Injectable, NgZone } from '@angular/core'
 import { ConfigService, AppService, BaseTabComponent } from 'tabby-core'
 import { BaseTerminalTabComponent } from 'tabby-terminal'
 import { TerminalTabComponent } from 'tabby-local'
@@ -14,7 +14,7 @@ import { mintControlToken } from './control-token'
 
 // Keep in step with package.json — /api/health reports this, and it had
 // silently drifted a release behind.
-const PLUGIN_VERSION = '0.2.0'
+const PLUGIN_VERSION = '0.2.1'
 
 /**
  * Capability tokens advertised on /api/health so the CLI can feature-detect
@@ -50,8 +50,12 @@ const PLUGIN_VERSION = '0.2.0'
  * `screen` — `GET /api/tabs/:uuid/screen` returns the tab's visible rows from
  * its xterm, with dim ranges marked. Lets the CLI see what is in a Claude input
  * box before typing into it; `/buffer` is a diff stream and cannot (screen.ts).
+ *
+ * `tab-focus` — `POST /api/tabs/:uuid/focus` selects a tab, as clicking it does.
+ * A new tab still has to be focused to start its process (see openNewTab), so
+ * "open without switching" is: create, then focus the caller again.
  */
-const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid', 'screen', 'control-token']
+const PLUGIN_CAPABILITIES = ['spawn-waits-for-pty', 'tab-color', 'stable-pid', 'screen', 'control-token', 'tab-focus']
 
 function sleep (ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -146,6 +150,7 @@ export class CctabsServer {
     private pids: PidIndex,
     private output: OutputBufferStore,
     private logger: CctabsLogger,
+    private zone: NgZone,
   ) {
     // Once per Tabby start, not per restart(): a config edit must not invalidate the
     // token a running CLI has just read.
@@ -155,10 +160,14 @@ export class CctabsServer {
       // Without a token every guarded endpoint answers 503 — closed, not open.
       this.logger.error('could not write the control token', err)
     }
-    this.start()
-
-    // Restart server on config change so port edits take effect
-    this.config.changed$.subscribe(() => this.restart())
+    // Start once the config is loaded. Started here directly, `config.store` was
+    // not read yet and a configured port was ignored: the server bound 3300, which
+    // collides with a second Tabby on the same Mac (demo rehearsal, 2026-10-26).
+    this.config.ready$.subscribe(() => {
+      this.start()
+      // Restart server on config change so port edits take effect
+      this.config.changed$.subscribe(() => this.restart())
+    })
   }
 
   start (): void {
@@ -167,7 +176,12 @@ export class CctabsServer {
     const host: string = cfg.host ?? '127.0.0.1'
     this.boundHost = host
 
-    this.server = createServer((req, res) => this.handle(req, res).catch(err => {
+    // Requests that change something run inside Angular's zone. Outside it, a
+    // reorder sorted app.tabs and the tab bar went on showing the old order until
+    // something else triggered change detection (take 2 of the demo, 2026-10-26).
+    const handle = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
+      req.method === 'GET' ? this.handle(req, res) : this.zone.run(() => this.handle(req, res))
+    this.server = createServer((req, res) => handle(req, res).catch(err => {
       this.logger.error('handler error', err)
       try { sendJson(res, 500, { error: String(err?.message ?? err) }) } catch {}
     }))
@@ -270,6 +284,16 @@ export class CctabsServer {
         target = (target as any).parent
       }
       await this.app.closeTab(target, false)
+      return sendJson(res, 200, {})
+    }
+
+    if (method === 'POST' && sub === 'focus') {
+      // Select the tab: what clicking it does. `tab-focus` capability.
+      let target: BaseTabComponent = tab
+      while (!this.app.tabs.includes(target) && (target as any).parent) {
+        target = (target as any).parent
+      }
+      this.app.selectTab(target)
       return sendJson(res, 200, {})
     }
 

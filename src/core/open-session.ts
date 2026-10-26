@@ -43,6 +43,8 @@ interface OpenSessionOptions {
    * colour at all — that's the common case, and it skips the capability probe.
    */
   color?: string | null
+  /** Keep the calling tab in front (see `openTabDirect`'s `background`). */
+  background?: boolean
 }
 
 function shellQuoteEnv(env: Record<string, string>): string {
@@ -631,6 +633,7 @@ export async function openSession(opts: OpenSessionOptions): Promise<string> {
       args: tabLaunchArgv(shell, `${envPrefix}${claudeCore}`),
       afterActive,
       color,
+      background: opts.background,
     })
     mark('openTabDirect')
 

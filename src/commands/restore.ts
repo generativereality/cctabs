@@ -1,11 +1,12 @@
 import { collectSessionRows } from '../core/session-rows.js'
-import { codexLiveSessionPids, readCodexSessions } from '../core/codex-sessions.js'
+import { codexLiveSessionPids, matchCodexTabs, readCodexSessions } from '../core/codex-sessions.js'
+import { codexStatus } from '../core/codex.js'
 import { openCodexSession, codexLaunchBody } from '../core/open-codex.js'
 import { join, resolve } from 'path'
 import { homedir } from 'os'
 import { readFileSync, existsSync } from 'fs'
 import { define } from 'gunshi'
-import { readPending, clearPending, fleetDir } from '../core/fleet-state.js'
+import { readPending, clearPending, fleetDir, bringTabbyToFront } from '../core/fleet-state.js'
 import { consola } from 'consola'
 import { loadConfig } from '../core/config.js'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
@@ -122,7 +123,7 @@ export const restoreCommand = define({
       if (suspended || manifest.some((e) => e.suspended && e.sessionId)) {
         try { placeholderShellOrThrow() } catch (e) { consola.error((e as Error).message); process.exit(1) }
       }
-      const req = { manifest, scopedDir: null, createMissing, dryRun, suspended }
+      const req = { manifest, scopedDir: null, createMissing, dryRun, suspended, restoredFirst: !!pending }
       let report = await runRestore(req)
       const notUp = (r: typeof report) => (r ? [...r.outcomes.values()].filter((o) => o === 'failed' || o === 'unverified').length : 0)
       // A pending restore gets one more pass on its own. It runs into a Tabby
@@ -136,6 +137,8 @@ export const restoreCommand = define({
       }
       if (pending && !dryRun) {
         const failed = report ? [...report.outcomes.values()].filter((o) => o === 'failed').length : 0
+        // The fleet is back: make sure it is the window in front (macOS).
+        if (process.platform === 'darwin') bringTabbyToFront('darwin')
         if (report && !failed) {
           clearPending()
           consola.success('Pending restore done and cleared.')
@@ -204,6 +207,13 @@ export interface RestoreRequest {
   dryRun: boolean
   /** Restore every entry that has a session as a suspended placeholder. */
   suspended?: boolean
+  /**
+   * Put the manifest's tabs first, in manifest order, and anything else in the
+   * bar after them. For `--pending`: after a restart the bar is the restore tab
+   * and Tabby's own startup tab, which kept the front and pushed the fleet back
+   * a place (the demo clip's "tabs come back in order", 2026-10-26).
+   */
+  restoredFirst?: boolean
 }
 
 /** What a restore did, for a caller that has to act on it (`restart`). */
@@ -251,7 +261,7 @@ export async function runRestore(
       : new Set<string>(tabsById.keys())
     // The bar as it stands — so the tabs already in it, the invoking one
     // above all, keep their places and new tabs are appended after them.
-    baseOrder = currentWsData ? [...currentWsData.workspacedata.tabids] : [...tabsById.keys()]
+    baseOrder = req.restoredFirst ? [] : currentWsData ? [...currentWsData.workspacedata.tabids] : [...tabsById.keys()]
     entries = rehomeEntries(req.manifest, listClaudeConfigDirs(), locateTranscriptFile, (m) => consola.warn(m))
     if (req.suspended) entries = entries.map((e) => ({ ...e, suspended: true }))
   } else {
@@ -465,6 +475,12 @@ export function buildPlanDeps(
   // pid, the ones that don't are genuinely process-less.
   const reportsPids = [...opts.tabsById.values()]
     .some((blocks) => blocks.some((b) => typeof b.pid === 'number'))
+  // Terminal blocks with a live Codex in them. The screen alone would also read
+  // as Codex after Codex had exited, so it only counts with a process under it.
+  const codexBlocks = new Set(opts.procRows ? [...matchCodexTabs([...opts.tabsById].flatMap(([tabId, blocks]) => {
+    const b = blocks.find((x) => x.view === 'term')
+    return b ? [{ tabId, name: opts.tabNames.get(tabId) ?? '', shellPid: b.shellPid, cwd: b.meta?.['cmd:cwd'] }] : []
+  }), opts.procRows, codexSessions).keys()].map((tabId) => (opts.tabsById.get(tabId) ?? []).find((b) => b.view === 'term')?.blockid) : [])
 
   return {
     currentTabId: opts.currentTabId,
@@ -484,6 +500,12 @@ export function buildPlanDeps(
     statusOf: (blockId) => {
       if (suspendedBlocks.has(blockId)) return 'suspended'
       const status = adapter.detectSessionStatus(blockId)
+      // A Codex tab is "already running" as a Claude one is; it used to read as
+      // a session live "in another tab" — its own (restart-tabby, 2026-10-26).
+      if (status !== 'active' && status !== 'idle' && codexBlocks.has(blockId)) {
+        const cx = codexStatus(adapter.scrollback(blockId, 80))
+        if (cx) return cx
+      }
       // The on-screen marker alone, contradicted by the process table (no
       // placeholder anywhere for that tab), is a stale screen — let the
       // planner treat the tab as the shell it now is.

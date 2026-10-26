@@ -6,13 +6,13 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { detectTerminal } from '../core/terminal.js'
-import { readProcessTable } from '../core/claude-procs.js'
+import { readOwnProcessTable } from '../core/claude-procs.js'
 import { resolveTabShell, tabLaunchArgv, shellQuoteArg } from '../core/shell.js'
 import { gatherManifest, manifestJson, reportManifest } from './manifest.js'
 import { withoutInvalid } from '../core/fleet-manifest.js'
 import {
   checkCapture, defaultSuspendAge, restorableEntries, fleetDir, readPending, stampedManifestPath, tabbyLifecycle,
-  tabbyLaunchEnv, tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
+  bringTabbyToFront, tabbyLaunchEnv, tabbyMainPids, tasklistShowsTabby, writePending, type PendingReason, type Platform,
 } from '../core/fleet-state.js'
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
@@ -189,7 +189,8 @@ function tabbyRunning(platform: Platform): boolean {
     const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq Tabby.exe', '/NH'], { encoding: 'utf-8' })
     return tasklistShowsTabby(r.stdout ?? '')
   }
-  return tabbyMainPids(readProcessTable() ?? [], platform).length > 0
+  // Only this user's Tabby: another account's must not hold the reopen.
+  return tabbyMainPids(readOwnProcessTable() ?? [], platform).length > 0
 }
 
 /** Where to start Tabby again from, read off the running process. macOS reopens by app name. */
@@ -200,7 +201,7 @@ function tabbyExePath(platform: Platform): string | undefined {
       return r.stdout?.trim() || undefined
     }
     if (platform === 'linux') {
-      const pid = tabbyMainPids(readProcessTable() ?? [], platform)[0]
+      const pid = tabbyMainPids(readOwnProcessTable() ?? [], platform)[0]
       return pid ? readlinkSync(`/proc/${pid}/exe`) : undefined
     }
   } catch { /* fall back to the name on PATH */ }
@@ -269,6 +270,7 @@ export const restartTabbyWorkerCommand = define({
       process.exit(1)
     }
     log('Plugin is up.')
+    bringTabbyToFront(platform)
     // A moment for Tabby to finish its own startup before a tab is added.
     await sleep(2000)
 
@@ -280,6 +282,7 @@ export const restartTabbyWorkerCommand = define({
     try {
       const fresh = requireAdapter()
       const tab = await fresh.openTabDirect!({ cwd: homedir(), title: 'cctabs restore', command: shell.command, args: tabLaunchArgv(shell, body) })
+      bringTabbyToFront(platform)
       log(`Opened the restore tab ${tab.tabId.slice(0, 8)}. Done here.`)
     } catch (err) {
       log(`Could not open the restore tab: ${(err as Error).message}. Open one yourself and run: cctabs restore --pending`)

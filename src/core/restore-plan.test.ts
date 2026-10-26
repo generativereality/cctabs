@@ -319,6 +319,11 @@ describe('planRestore — dry-run parity', () => {
 })
 
 describe('buildDesiredOrder', () => {
+  it('with no base order (restore --pending) lists only the restored tabs, in manifest order', () => {
+    // The restore tab and Tabby's startup tab are not listed, so the plugin sorts
+    // them after the fleet instead of leaving them in front of it.
+    expect(buildDesiredOrder(['docs', 'search', 'lead'], new Map([['old-search', 'search']]), [])).toEqual(['docs', 'search', 'lead'])
+  })
   it('rebuilds the pre-restore bar, swapping recreated tabs in place', () => {
     const order = buildDesiredOrder(
       [],

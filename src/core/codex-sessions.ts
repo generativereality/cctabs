@@ -73,7 +73,18 @@ export function matchCodexTabs(tabs: ProcTab[], rows: ProcRow[], sessions: Codex
     const id = codexResumeId(proc.command)
     if (id) { out.set(tab.tabId, { proc, id, session: sessions.find((s) => s.id === id) }); continue }
     const forkedFromId = codexForkId(proc.command)
-    const candidates = sessions.filter((s) => s.forkedFromId === forkedFromId && sameCodexCwd(proc.cwd ?? tab.cwd, s.cwd) && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000)
+    const cwd = proc.cwd ?? tab.cwd
+    // A fresh rollout is created after its process starts and, when tabs are
+    // opened one after another, before the NEXT fresh Codex in the same folder
+    // starts. Without that upper bound, four tabs opened 3s apart in one repo
+    // each fitted all later rollouts, the never-guess rule below cleared every
+    // id, and restart-tabby saved none of them (demo rehearsal 2026-10-26).
+    // Start times are whole seconds, so two launches in the same second still
+    // overlap and still refuse; so does a window holding no rollout or two.
+    const nextStart = proc.startedAt === undefined ? undefined : Math.min(...rows
+      .filter((r) => r.pid !== proc.pid && isCodexCommand(r.command) && !isWrapper(r.command) && !codexResumeId(r.command) && codexForkId(r.command) === forkedFromId && r.startedAt !== undefined && r.startedAt > proc.startedAt! && sameCodexCwd(r.cwd, cwd ?? ''))
+      .map((r) => r.startedAt!))
+    const candidates = sessions.filter((s) => s.forkedFromId === forkedFromId && sameCodexCwd(cwd, s.cwd) && proc.startedAt !== undefined && s.startedAt >= proc.startedAt && s.startedAt - proc.startedAt < 120_000 && s.startedAt < nextStart!)
     possibilities.set(tab.tabId, candidates)
     out.set(tab.tabId, { proc, ...(candidates.length === 1 ? { id: candidates[0].id, session: candidates[0] } : {}) })
   }

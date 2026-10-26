@@ -97,7 +97,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the MIT License.',
+      message: 'Released under the MIT License. · <a href="/privacy">Privacy</a>',
       copyright: 'Copyright © 2026 Augmented Mind',
     },
   },

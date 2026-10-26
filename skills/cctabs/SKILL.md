@@ -173,6 +173,10 @@ A human can also pre-clear a repo once (run Claude Code in it and accept, or set
 `hasTrustDialogAccepted` for that root by hand) — that is their call to make, not
 a driver's, since it is the decision the dialog exists to ask.
 
+## Run each `cctabs` command as its own Bash call
+
+One bare `cctabs …` per Bash call: no `cd …;` in front (pass the dir as the argument), no `; echo` or `&&` chained to it, never two `cctabs new` in one call (two tabs: two calls, in parallel). The user's `Bash(cctabs:*)` allow rule only covers a call that *is* a cctabs command; a chained one goes to auto mode's classifier, which denied opening tabs as "[Create Unsafe Agents]" (2026-10-26). Opening from inside a tab, `-B`/`--background` keeps your tab in front (default: `[defaults] background`).
+
 ## Quick Reference
 
 ```bash
@@ -480,20 +484,16 @@ cctabs close e5f6a7b8                  # close by block ID prefix
 
 ## Notes
 
-- Tab names are matched by exact name, then by prefix, ignoring case — except that an exact-case match wins, so `dal` and `DAL` are two different targets
-- Block IDs can be abbreviated to the first 8 characters
+- Tab names are matched by exact name, then by prefix, ignoring case — except that an exact-case match wins, so `dal` and `DAL` are two different targets. Block IDs can be abbreviated to 8 characters, and `send` resolves a name to its block
 - `cctabs new` and `cctabs resume` automatically pass `--name <tab-name>` to claude, syncing the session display name with the tab title. `cctabs rename` changes the tab title, the live session/RC name (it sends Claude `/rename`) and the on-disk `customTitle`, so `resume`/`restore` find the new name after a restart (see "Two names" in [references/tabs.md](references/tabs.md))
-- Configured `claude.flags` in `~/.config/cctabs/config.toml` are applied to every session
-- `defaults.prefix` in `~/.config/cctabs/config.toml` (empty by default) is prepended to both the tab title and the `claude --name` for every name minted by `new`/`resume`/`fork` — set it to disambiguate this machine when multiple machines share one claude.ai remote-control list
-- `cctabs send` resolves tab names to their terminal block automatically
+- `claude.flags` in `~/.config/cctabs/config.toml` apply to every session; `defaults.prefix` in `~/.config/cctabs/config.toml` (empty by default) is prepended to both the tab title and the `claude --name` for every name minted by `new`/`resume`/`fork` — set it to disambiguate this machine when multiple machines share one claude.ai remote-control list
 
 ## Lesson: the common failure mode
 
 A pattern that wastes the most tokens: an orchestrator spawns three tabs for "parallel workstreams" on the same feature, each tab diverges from the base and from each other, the orchestrator loses visibility into what each is doing, one tab misinterprets a course-correct and resets its own work, and finally the orchestrator spends hours hand-merging commits that don't apply cleanly against an intervening refactor.
 
 The fix is upstream: before spawning, ask *"are these workstreams actually independent?"* If the answer is "mostly, but they share a common data model / schema / utility module" — they are **not** independent for cctabs purposes. Either:
-- Do them sequentially in one tab (cheapest).
-- Use the Agent tool for subtasks that share orchestrator state.
+- Do them sequentially in one tab (cheapest), or use the Agent tool for subtasks that share orchestrator state.
 - Land the shared pieces first on `main`/`next`, push, then spawn tabs (each branches cleanly off the new tip and work is truly orthogonal from there).
 
 Parallel tabs earn their keep when the work is genuinely orthogonal (separate repos, separate brand-new directories, independent features) and when you'd otherwise be idle waiting for one long-running task to finish.

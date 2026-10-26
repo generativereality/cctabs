@@ -251,6 +251,25 @@ export function readProcessTable(): ProcRow[] | null {
   return rows
 }
 
+/**
+ * This user's processes only (POSIX), for questions about THIS user's apps.
+ *
+ * `readProcessTable` lists every user's processes, which is right for matching
+ * tabs to Claudes (by pid) and wrong for "is my Tabby still running": with a
+ * second macOS account's Tabby open, `restart-tabby` waited 60s for a Tabby
+ * that was not its own to exit and never reopened (demo rehearsal 2026-10-26).
+ * Null where `ps -U` is unavailable (Windows) or failed.
+ */
+export function readOwnProcessTable(): ProcRow[] | null {
+  if (process.platform === 'win32' || typeof process.getuid !== 'function') return null
+  const r = spawnSync('ps', ['-ww', '-U', String(process.getuid()), '-o', 'pid=,ppid=,command='], {
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  if (r.status !== 0 || !r.stdout) return null
+  return parseProcessTable(r.stdout)
+}
+
 /** A tab reduced to what process matching needs. */
 export interface ProcTab {
   cwd?: string

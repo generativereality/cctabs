@@ -41,6 +41,21 @@ if ! diff -rq "$REPO_ROOT/skills/cctabs" "$PLUGINS_DIR/plugins/cctabs/skills/cct
   ERRORS=1
 fi
 
+# The directory listing's files: the plugin's README (its page in Claude's
+# plugin directory), LICENSE and icon. Sources live in .claude-plugin/ here.
+# README and LICENSE go to the plugin root, where the directory reads them.
+for pair in "README.md:README.md" "LICENSE:LICENSE" "icon.png:.claude-plugin/icon.png"; do
+  src="$REPO_ROOT/.claude-plugin/${pair%%:*}"; dst="$PLUGINS_DIR/plugins/cctabs/${pair#*:}"
+  if ! cmp -s "$src" "$dst"; then
+    echo "MISMATCH: .claude-plugin/${pair%%:*} differs from plugins repo ${pair#*:}"
+    ERRORS=1
+  fi
+done
+if ! cmp -s "$REPO_ROOT/.claude-plugin/plugin.json" "$PLUGINS_DIR/plugins/cctabs/.claude-plugin/plugin.json"; then
+  echo "MISMATCH: .claude-plugin/plugin.json differs from plugins repo"
+  ERRORS=1
+fi
+
 if [ "$CHECK_ONLY" = true ]; then
   if [ "$ERRORS" -ne 0 ]; then
     echo ""
@@ -54,13 +69,19 @@ fi
 # Sync files
 mkdir -p "$PLUGINS_DIR/plugins/cctabs/.claude-plugin" "$PLUGINS_DIR/plugins/cctabs/skills"
 cp "$REPO_ROOT/.claude-plugin/plugin.json" "$PLUGINS_DIR/plugins/cctabs/.claude-plugin/plugin.json"
+cp "$REPO_ROOT/.claude-plugin/icon.png" "$PLUGINS_DIR/plugins/cctabs/.claude-plugin/icon.png"
+cp "$REPO_ROOT/.claude-plugin/README.md" "$PLUGINS_DIR/plugins/cctabs/README.md"
+cp "$REPO_ROOT/.claude-plugin/LICENSE" "$PLUGINS_DIR/plugins/cctabs/LICENSE"
 # Replace the skill directory wholesale, so a reference file removed here is
 # removed there too.
 rm -rf "$PLUGINS_DIR/plugins/cctabs/skills/cctabs"
 cp -R "$REPO_ROOT/skills/cctabs" "$PLUGINS_DIR/plugins/cctabs/skills/cctabs"
 
 cd "$PLUGINS_DIR"
-if git diff --quiet; then
+# `git status`, not `git diff`: a sync that only ADDS files (the README,
+# LICENSE and icon, the first time) is invisible to `git diff`, and would be
+# reported as up to date and never pushed.
+if [ -z "$(git status --porcelain -- plugins/cctabs)" ]; then
   echo "Plugins repo already up to date (v$VERSION)"
   exit 0
 fi

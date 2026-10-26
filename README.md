@@ -75,6 +75,8 @@ That fetches the whole skill directory: `SKILL.md` plus the `references/` files 
 
 **One-time:** install the companion plugin — run `cctabs install-tabby-plugin` from inside a Tabby tab, then restart Tabby.
 
+**Using auto mode?** Allow cctabs, so Claude can open and drive tabs without each command being judged: add `"Bash(cctabs:*)"` to `permissions.allow` in your project's `.claude/settings.json` (or `~/.claude/settings.json` for every project). The skill tells Claude to run each `cctabs` command as its own Bash call, which is what the rule matches; a command chained to `cd` or `echo` falls to auto mode's classifier, which can refuse to open a tab.
+
 ## Usage
 
 ```

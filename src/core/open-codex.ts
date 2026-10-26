@@ -22,6 +22,8 @@ export interface OpenCodexOptions {
   model?: string
   afterActive?: boolean
   color?: string | null
+  /** Keep the calling tab in front (see `openTabDirect`'s `background`). */
+  background?: boolean
 }
 
 /**
@@ -53,6 +55,7 @@ export async function openCodexSession(opts: OpenCodexOptions): Promise<string> 
     args: tabLaunchArgv(shell, body),
     afterActive: opts.afterActive,
     color: opts.color,
+    background: opts.background,
   })
   if (readClaudeMd) consola.info('This folder has a CLAUDE.md and no AGENTS.md, so Codex is told to read CLAUDE.md.')
 

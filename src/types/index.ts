@@ -63,6 +63,11 @@ export interface Config {
      * own. A palette name or hex value; empty leaves tabs uncoloured.
      */
     color: string
+    /**
+     * Keep the calling tab in front when `new`/`fork` open a tab from inside
+     * one. `--background` / `--foreground` override it per command.
+     */
+    background?: boolean
   }
 }
 

@@ -1,4 +1,5 @@
 import { spawnSync } from 'child_process'
+import { consola } from 'consola'
 import type {
   AllData,
   Block,
@@ -306,8 +307,11 @@ export class TabbyAdapter implements TerminalAdapter {
     args: string[]
     afterActive?: boolean
     color?: string | null
+    background?: boolean
   }): Promise<{ blockId: string; tabId: string }> {
     this.ensureHealthy()
+    // Who to put back in front, read BEFORE the create makes the new tab active.
+    const caller = opts.background ? this.currentTabId() : ''
     const r = (await this.http('POST', '/api/tabs/new', {
       cwd: opts.cwd,
       title: opts.title,
@@ -320,6 +324,17 @@ export class TabbyAdapter implements TerminalAdapter {
     })) as { uuid?: string } | null
     const uuid = r?.uuid
     if (!uuid) throw new Error('Tabby plugin did not return a tab uuid')
+    if (opts.background) {
+      // The new tab had to be in front to start its process (see the plugin's
+      // openNewTab); with `spawn-waits-for-pty` it is running by now, so the
+      // caller can have the screen back.
+      // Run from outside any tab (a script, an SSH session) there is no caller
+      // to put back, and with the config default on that is the normal case.
+      const caps = caller ? await this.backendCapabilities() : []
+      if (!caller) { /* nothing to keep in front */ }
+      else if (!caps.includes('tab-focus') || !caps.includes('spawn-waits-for-pty')) consola.warn('The Tabby plugin cannot switch tabs (no `tab-focus`), so the new tab is in front. Update it: cctabs install-tabby-plugin')
+      else if (caller !== uuid) await this.http('POST', `/api/tabs/${caller}/focus`)
+    }
     return { blockId: uuid, tabId: uuid }
   }
 
