@@ -41,6 +41,33 @@ describe('Codex session identity', () => {
     const procs = [...rows, { ...rows[1], pid: 21, ppid: 20 }]
     expect([...matchCodexTabs(two, procs, [session]).values()].every((m) => !m.id)).toBe(true)
   })
+  test('tabs opened one after another in one folder each get their own rollout', () => {
+    // The demo rehearsal's timings, 2026-10-26: four fresh Codex tabs in one repo,
+    // started 3s apart (ps reports whole seconds), each rollout created ~0.7s in.
+    const starts = [22_000, 25_000, 28_000, 31_000]
+    const created = [22_750, 25_572, 28_709, 32_109]
+    const ids = created.map((_, i) => `0000000${i}-1234-1234-1234-123456789abc`)
+    const four = starts.map((_, i) => ({ tabId: `t${i}`, name: `t${i}`, shellPid: 100 + i * 10 }))
+    const procs = starts.flatMap((startedAt, i) => [
+      { pid: 100 + i * 10, ppid: 1, command: 'zsh' },
+      { pid: 101 + i * 10, ppid: 100 + i * 10, command: '/bin/codex -C /repo hi', cwd: '/repo', startedAt },
+    ])
+    const rollouts = created.map((startedAt, i) => ({ id: ids[i], cwd: '/repo', startedAt, file: `/r${i}.jsonl` }))
+    const got = matchCodexTabs(four, procs, rollouts)
+    expect(four.map((t) => got.get(t.tabId)?.id)).toEqual(ids)
+    // Two launches in the same second cannot be told apart: still no guess.
+    const sameSecond = procs.map((r) => r.pid === 111 ? { ...r, startedAt: 22_000 } : r)
+    const unsure = matchCodexTabs(four, sameSecond, rollouts)
+    expect(unsure.get('t0')?.id).toBeUndefined()
+    expect(unsure.get('t1')?.id).toBeUndefined()
+    // A rollout late enough to land in the next tab's window: that window holds
+    // two and the first holds none, so neither tab is guessed.
+    const late = rollouts.map((r, i) => i === 0 ? { ...r, startedAt: 25_100 } : r)
+    const lateGot = matchCodexTabs(four, procs, late)
+    expect(lateGot.get('t0')?.id).toBeUndefined()
+    expect(lateGot.get('t1')?.id).toBeUndefined()
+    expect(lateGot.get('t2')?.id).toBe(ids[2])
+  })
   test('manifest and placeholder preserve engine', () => {
     const entry = parseManifest(JSON.stringify([{ name: 'cx', cwd: '/scratch', engine: 'codex', session_id: id, suspended: true }]))[0]
     expect(entry.engine).toBe('codex')

@@ -4,7 +4,9 @@ import { openCodexSession } from '../core/open-codex.js'
 import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
-import { findLatestSessionId, pathToProjectSlug } from '../core/session.js'
+import { readProcessTable } from '../core/claude-procs.js'
+import { liveTabSession, procTabsOf } from '../core/tab-session.js'
+import { collectSessionRows } from '../core/session-rows.js'
 import { openSession } from '../core/open-session.js'
 import { loadConfig, applyPrefix } from '../core/config.js'
 import { repoRootOf } from '../core/worktree.js'
@@ -97,10 +99,20 @@ export const forkCommand = define({
     const sessionLookupDir = repoRootOf(rawDir)
     const openDir = sessionLookupDir
 
-    const sessionId = findLatestSessionId(sessionLookupDir)
+    // The SOURCE TAB's own session, never the newest one in its folder: with
+    // several tabs in one repo the newest transcript is usually the caller's,
+    // mid-turn running this very fork (rehearsal 2026-10-26: `fork api` opened
+    // the lead tab's conversation). Asked of the Claude running in the tab
+    // first, then the same per-tab resolution `sessions` reports.
+    const procRows = readProcessTable()
+    let sessionId = liveTabSession(tabId, procTabsOf(tabsById, tabNames), procRows)?.id
     if (!sessionId) {
-      consola.error(`No Claude session found for ${sessionLookupDir}`)
-      consola.info(`Looked in ~/.claude/projects/${pathToProjectSlug(sessionLookupDir)}/`)
+      const row = (await collectSessionRows(adapter, procRows)).flatMap((w) => w.sessions).find((r) => r.tab_id === tabId)
+      sessionId = row?.session_id ?? undefined
+    }
+    if (!sessionId) {
+      consola.error(`Could not identify the session of "${tabName}"; no fork was opened.`)
+      consola.info('cctabs does not guess from the newest session in the folder, which with several tabs there is usually another tab\'s. Check `cctabs sessions`.')
       process.exit(1)
     }
 

@@ -6,7 +6,7 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter, type TerminalAdapter } from '../core/adapter.js'
 import { detectTerminal } from '../core/terminal.js'
-import { readProcessTable } from '../core/claude-procs.js'
+import { readOwnProcessTable } from '../core/claude-procs.js'
 import { resolveTabShell, tabLaunchArgv, shellQuoteArg } from '../core/shell.js'
 import { gatherManifest, manifestJson, reportManifest } from './manifest.js'
 import { withoutInvalid } from '../core/fleet-manifest.js'
@@ -189,7 +189,8 @@ function tabbyRunning(platform: Platform): boolean {
     const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq Tabby.exe', '/NH'], { encoding: 'utf-8' })
     return tasklistShowsTabby(r.stdout ?? '')
   }
-  return tabbyMainPids(readProcessTable() ?? [], platform).length > 0
+  // Only this user's Tabby: another account's must not hold the reopen.
+  return tabbyMainPids(readOwnProcessTable() ?? [], platform).length > 0
 }
 
 /** Where to start Tabby again from, read off the running process. macOS reopens by app name. */
@@ -200,7 +201,7 @@ function tabbyExePath(platform: Platform): string | undefined {
       return r.stdout?.trim() || undefined
     }
     if (platform === 'linux') {
-      const pid = tabbyMainPids(readProcessTable() ?? [], platform)[0]
+      const pid = tabbyMainPids(readOwnProcessTable() ?? [], platform)[0]
       return pid ? readlinkSync(`/proc/${pid}/exe`) : undefined
     }
   } catch { /* fall back to the name on PATH */ }
