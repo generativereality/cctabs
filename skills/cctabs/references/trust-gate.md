@@ -1,6 +1,6 @@
 # The trust gate: which directories are gated
 
-> Read when deciding whether a `--prompt`/`--file` will land in a new tab's directory, and SKILL.md's pre-spawn check is not enough.
+> Read when deciding whether a `--prompt`/`--file` will land in a new tab's directory, and SKILL.md's rule (spawn bare when unsure) is not enough.
 >
 > Reference for the `cctabs` skill — moved out of [SKILL.md](../SKILL.md) to keep it short.
 

@@ -12,7 +12,7 @@
 - The terminal app may need to be in focus / foreground for tab creation to register.
 - The internal timeout may be slightly too short for the current system load.
 - Transient IPC timing issue between cctabs and the terminal.
-- **Tabby only:** the cctabs plugin must be installed and running (`curl http://127.0.0.1:3300/api/health` to verify).
+- **Tabby only:** the cctabs plugin must be installed and running (`cctabs list` answers only when it is).
 
 **What to do:**
 1. **Retry the same command** — it often works on the second attempt
@@ -44,6 +44,5 @@ timeout, and a call that still fails stops the command instead of answering "not
 
 **What NOT to do:**
 - ❌ Do NOT treat a result from a run that hit this as complete. A tab list, a manifest or a
-  session list read during the overload is only trustworthy once its count matches what
-  `curl -s -H "Authorization: Bearer $(cat ~/.cctabs/control-token)" 127.0.0.1:3300/api/tabs` reports
-  (tabby-cctabs 0.2.0+ refuses that call without the control token; `/api/health` stays open).
+  session list read during the overload is only trustworthy once the load has dropped and a
+  second `cctabs list` reports the same number of tabs.

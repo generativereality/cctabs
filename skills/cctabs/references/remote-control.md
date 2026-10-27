@@ -23,11 +23,10 @@ Footer/output signatures to look for:
 
 **Enable RC automatically for every future session** (skips the manual `/remote-control` toggle per tab): set `"remoteControlAtStartup": true` in `~/.claude/settings.json` (or scope it to a project's `.claude/settings.json`). Re-running `/remote-control` inside a session that's *already* connected is non-destructive in the CLI — it opens a status panel, it does not disconnect (that toggle-to-disconnect behavior is VS-Code-specific).
 
-**Sweep the whole fleet in one loop:**
+**Sweep the whole fleet:** take the tabs that have a session from `cctabs sessions`, and for each one:
 
 ```bash
-for t in $(cctabs sessions --json | python3 -c "import json,sys; [print(s['name']) for w in json.load(sys.stdin)['workspaces'] for s in w['sessions'] if s.get('session_id')]"); do
-  err=$(cctabs scrollback "$t" --lines 6 | grep -iE "reconnect|disconnect|jwt refresh|401|oauth token")
-  [ -n "$err" ] && echo "ISSUE: $t -> $err"
-done
+cctabs scrollback <tab> --lines 6 | grep -iE "reconnect|disconnect|jwt refresh|401|oauth token"
 ```
+
+Any line it prints is an issue for that tab.

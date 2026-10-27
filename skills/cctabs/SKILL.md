@@ -149,18 +149,9 @@ cctabs send <tab> --submit            # ⛔ bare Enter confirms "No, exit" and k
 
 **Which directories are gated is NOT "is it a worktree".** Trust is recorded per repo root, and each `CLAUDE_CONFIG_DIR` has its own list: a `--worktree` of an already-trusted repo is not gated, a repo Claude Code has never run in is, however many trusted ancestors it has. Details and measurements: [references/trust-gate.md](references/trust-gate.md).
 
-⭐ **Check it before you spawn** — cheap, read-only, and answers the question
-exactly:
-
-```bash
-root=$(git -C ~/Dev/myapp rev-parse --path-format=absolute --git-common-dir); root=${root%/.git}
-python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["projects"].get(sys.argv[2],{}).get("hasTrustDialogAccepted"))' \
-  "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" "$root"
-# True -> --prompt/--file will land.   None/False -> it will not; spawn bare.
-```
-
-Anything but `True` ⇒ **spawn bare, clear the gate, then send**, so no brief is in
-flight while a menu is on screen:
+⭐ **Not sure the repo root is trusted in the config dir this tab will use?** Then
+**spawn bare, clear the gate, then send**, so no brief is in flight while a menu
+is on screen:
 
 ```bash
 cctabs new fix-auth ~/Dev/myapp --worktree       # no --prompt/--file yet
