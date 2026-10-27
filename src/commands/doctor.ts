@@ -5,7 +5,11 @@ import { define } from 'gunshi'
 import { detectTerminal, resolveTerminal, type KnownTerminal } from '../core/terminal.js'
 import { manualInstallSnippet } from '../core/tabby-plugin-dir.js'
 import { resolveTabShell, findGitBash } from '../core/shell.js'
-import { win32 as pathWin32 } from 'path'
+import { win32 as pathWin32, join } from 'path'
+import { existsSync, readdirSync, readFileSync } from 'fs'
+import { listClaudeConfigDirs } from '../core/config-dirs.js'
+import { isNewer } from '../core/version-check.js'
+import pkg from '../../package.json'
 
 type CheckStatus = 'ok' | 'warn' | 'fail' | 'skip'
 
@@ -220,6 +224,79 @@ function checkAgentBashOnPath (): CheckResult {
 }
 
 /**
+ * The skill and the CLI reach people through two channels (the plugin
+ * marketplace and npm), so the skill text Claude is reading can be several
+ * releases behind the binary it describes. On 2026-09-16 a driver read a 0.5.0
+ * skill with no word about the trust dialog while the CLI was 0.5.3, and lost
+ * five tabs to the failure the newer text documented. The skill used to carry
+ * an `ls` of the plugin cache for this; the doctor does it now.
+ */
+export const SKILL_VERSION_CHECK = 'cctabs skill (Claude Code plugin)'
+
+/** Pure half: `inUse` is the plugin version Claude Code has installed, if any. */
+export function skillVersionResult (inUse: string | undefined, cli: string): CheckResult {
+  const name = SKILL_VERSION_CHECK
+  if (!inUse) {
+    return {
+      name,
+      status: 'skip',
+      detail: 'not installed as a plugin',
+      hint: 'Optional: in Claude Code, `/plugins` → Marketplaces → add generativereality/plugins → install cctabs.',
+    }
+  }
+  if (isNewer(cli, inUse)) {
+    return {
+      name,
+      status: 'warn',
+      detail: `skill ${inUse}, CLI ${cli}: the skill Claude reads is older than the CLI`,
+      hint: 'In Claude Code: `/plugins` → Marketplaces → Update generativereality, then update cctabs. Until then prefer `cctabs <cmd> --help` where the two disagree.',
+    }
+  }
+  return { name, status: 'ok', detail: inUse === cli ? inUse : `skill ${inUse}, CLI ${cli}` }
+}
+
+/**
+ * The installed plugin version, from Claude Code's own record of it. Newest
+ * across config dirs, because an account profile can hold its own install.
+ */
+export function installedPluginVersion (installedPluginsJson: string): string | undefined {
+  try {
+    const d = JSON.parse(installedPluginsJson) as { plugins?: Record<string, Array<{ version?: string }>> }
+    const versions: string[] = []
+    for (const [key, entries] of Object.entries(d.plugins ?? {})) {
+      if (!key.startsWith('cctabs@')) continue
+      for (const e of entries ?? []) if (e.version) versions.push(e.version)
+    }
+    return versions.reduce<string | undefined>((best, v) => (!best || isNewer(v, best) ? v : best), undefined)
+  } catch {
+    return undefined
+  }
+}
+
+function checkSkillVersion (): CheckResult {
+  let inUse: string | undefined
+  for (const dir of listClaudeConfigDirs()) {
+    const file = join(dir.root, 'plugins', 'installed_plugins.json')
+    if (!existsSync(file)) continue
+    const v = installedPluginVersion(readFileSync(file, 'utf-8'))
+    if (v && (!inUse || isNewer(v, inUse))) inUse = v
+  }
+  // No record of the install, but the cache has one: the newest cached copy.
+  if (!inUse) {
+    for (const dir of listClaudeConfigDirs()) {
+      const cache = join(dir.root, 'plugins', 'cache')
+      if (!existsSync(cache)) continue
+      for (const marketplace of readdirSync(cache)) {
+        const versions = join(cache, marketplace, 'cctabs')
+        if (!existsSync(versions)) continue
+        for (const v of readdirSync(versions)) if (!inUse || isNewer(v, inUse)) inUse = v
+      }
+    }
+  }
+  return skillVersionResult(inUse, pkg.version)
+}
+
+/**
  * Whether the tab's shell can find `claude`. cctabs launches `claude` inside the
  * spawned shell, so this is the difference between a tab that starts a session
  * and a tab that opens on an error — and on Windows the installer does not add
@@ -255,7 +332,7 @@ function checkClaudeInSpawnedShell (engine: 'claude' | 'codex' = 'claude'): Chec
 
 export const doctorCommand = define({
   name: 'doctor',
-  description: 'Run environment checks (terminal detection, Tabby plugin reachability, spawned-shell PATH).',
+  description: 'Run environment checks (terminal detection, Tabby plugin reachability, spawned-shell PATH, whether the cctabs skill Claude reads is older than this CLI).',
   args: { engine: { type: 'string', short: 'e', description: 'Engine to diagnose: claude or codex (defaults to caller).' } },
   async run(ctx) {
     const engine = launchEngine(ctx.values.engine as string | undefined)
@@ -298,6 +375,8 @@ export const doctorCommand = define({
     if (process.platform === 'win32' && engine === 'claude') {
       results.push(checkAgentBashOnPath())
     }
+
+    if (engine === 'claude') results.push(checkSkillVersion())
 
     if (terminal === 'tabby') {
       results.push(checkTabbyPlugin())

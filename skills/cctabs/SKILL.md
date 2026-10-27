@@ -52,7 +52,7 @@ On your first cctabs invocation in a session, look at the version banner cctabs 
 
 Don't silently work around an outdated CLI: detection heuristics, command flags, and bug fixes diverge between versions, so misbehavior on the user's machine is often "binary on PATH lags behind the plugin docs you're reading." The Claude Code marketplace plugin update path only refreshes this skill — the npm-installed CLI binary is a separate channel and must be upgraded explicitly.
 
-⚠️ **This text can itself be the stale half**: the cached skill can lag the CLI on PATH by several releases. If `cctabs <cmd> --help` disagrees with this file, trust the binary — how to check which version of this skill you are reading: [references/install.md](references/install.md).
+⚠️ **This text can itself be the stale half**: the cached skill can lag the CLI on PATH by several releases. If `cctabs <cmd> --help` disagrees with this file, trust the binary; `cctabs doctor` says when this skill is older than the CLI.
 
 ### A one-time plugin install is needed
 
@@ -171,6 +171,7 @@ cctabs list                              # list all workspaces, tabs, and blocks
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab; inherits caller’s engine (else Claude)
 cctabs new <name> [dir] --path <file>    # new tab handed a file PATH to read — same handoff as `send --path`, no short flag (`-p` is --prompt here)
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account
+cctabs account add <name>                # add another Claude account: the user signs in, in the tab it opens
 cctabs new <name> [dir] -c <colour>      # new tab, coloured (also -c on resume/fork)
 cctabs resume <name> [dir] [-s session]  # resume last session (reuses tab or creates one; picks the session's own account)
 cctabs restore [dir] [--dry]             # resume every empty tab by name search (e.g. after a reboot)

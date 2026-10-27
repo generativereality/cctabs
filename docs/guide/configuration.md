@@ -94,9 +94,13 @@ base_url = "http://localhost:11434"
 # Full control via env_<NAME> — including a different Claude account:
 [backends.client-x]
 description = "Client X's Claude account"
-env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
 env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
 ```
+
+You don't write an account's preset by hand: `cctabs account add client-x` opens a
+tab where you sign in as that account with Claude's normal login, and writes the
+preset into this file. The login stays in that config dir's own Keychain entry, so
+the preset holds no token. `cctabs account list` shows the accounts.
 
 ### Inheritance
 
@@ -123,7 +127,6 @@ tab bar instead of something to remember:
 
 ```toml
 [backends.work]
-env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
 env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-work"
 color = "blue"
 ```

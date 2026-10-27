@@ -51,18 +51,16 @@ interface TargetProfile {
 /**
  * Resolve `--to` to a Claude config dir.
  *
- * A backend preset is the primary spelling, and not for tidiness: on macOS the
- * Keychain holds ONE Claude Code login per OS user and it isn't scoped by
- * CLAUDE_CONFIG_DIR, so running a session under another profile depends on that
- * profile's `CLAUDE_CODE_OAUTH_TOKEN`. Presets already carry it. A bare path is
- * accepted for the case where no preset exists yet, with a warning, because it
- * will find the transcript but may not be able to authenticate.
+ * A backend preset is the primary spelling: it names the account, so the tab
+ * comes back under it and child tabs inherit it. A bare path works too, since
+ * Claude Code keys its Keychain login by CLAUDE_CONFIG_DIR, but nothing names
+ * it, so it gets a nudge towards `cctabs account add`.
  */
 function resolveTargetProfile(to: string): TargetProfile | { error: string } {
   if (to.startsWith('/') || to.startsWith('~')) {
     const configRoot = expandTilde(to)
     consola.warn(
-      `--to ${to} is a bare config dir, so no OAuth token comes with it. If Claude can't authenticate there, define a [backends.<name>] preset with env_CLAUDE_CODE_OAUTH_TOKEN and env_CLAUDE_CONFIG_DIR and pass that instead.`,
+      `--to ${to} is a bare config dir. It needs its own login there (\`CLAUDE_CONFIG_DIR=${to} claude auth login\`); to name it as an account, run \`cctabs account add <name> --config-dir ${to}\`.`,
     )
     return { configRoot }
   }

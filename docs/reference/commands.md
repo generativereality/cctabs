@@ -132,6 +132,11 @@ backend: explicit `-b`, then the account the session was found in, then the one
 inherited from the calling tab (`CCTABS_ACTIVE_BACKEND`). The success line says
 which was used.
 
+With `-s <id>` and a `dir`, a session filed under a worktree that has since been
+deleted is moved into `dir`'s project folder first, with its subagent
+transcripts, and the dead worktree's empty folder is archived out of
+`projects/`. A session whose worktree still exists is left where it is.
+
 ## cctabs restore
 
 Bring back every tab that lost its session — the usual after a reboot or a
@@ -178,6 +183,23 @@ accounts. See [Configuration](/guide/configuration#backends).
 ```bash
 cctabs backends
 ```
+
+## cctabs account
+
+Add another Claude account (a client's, an organisation's) as a backend preset.
+
+```bash
+cctabs account add client-x   # you sign in as that account, in its own config dir
+cctabs account list
+cctabs new task ~/Dev/client -b client-x
+```
+
+`add` runs Claude's normal sign-in (`claude auth login`) under the account's own
+config dir (`~/.claude-client-x`, or `--config-dir`). You sign in in the browser as
+the account you are adding, and cctabs writes `[backends.client-x]` into its config
+file. Claude Code keeps each config dir's login in its own Keychain entry, so your
+own login is untouched and the preset holds no token. Run from an agent, which has
+no terminal, it opens a tab and runs there.
 
 ## cctabs fork
 
@@ -493,12 +515,10 @@ things make the hand-copy easy to get wrong, and this command handles each:
 
 ### Why `--to` names a preset
 
-On macOS the Keychain holds one Claude Code login per OS user, and it is *not*
-scoped by `CLAUDE_CONFIG_DIR` — so running a session under another profile depends
-on that profile's `CLAUDE_CODE_OAUTH_TOKEN`. Backend presets already carry it, so
-`--to <preset>` gets both the config dir and the credentials. A bare config-dir
-path is accepted for the case where no preset exists yet, with a warning that
-Claude may not be able to authenticate there.
+A preset names the account, so the copy reopens under it and tabs spawned from it
+inherit it. A bare config-dir path works too, since Claude Code keeps each config
+dir's login in its own Keychain entry, but it has to be signed in once, and the
+warning says how, or how to name it with `cctabs account add`.
 
 ### Naming
 
@@ -523,6 +543,9 @@ Checks:
 - **Spawned shell PATH** — whether a login+interactive `zsh` can find `node`.
   This is the canonical macOS PATH-sourcing failure: when it breaks, tabs spawn
   but Claude Code and plugin MCPs can't start inside them.
+- **cctabs skill** — whether the skill Claude Code has installed is older than
+  this CLI. They update through different channels (the plugin marketplace and
+  npm), and a stale skill can lack what the CLI now does.
 - **Tabby cctabs plugin** — whether the companion plugin answers on
   `127.0.0.1:3300`, and which version.
 

@@ -4,7 +4,7 @@ import { launchEngine } from '../core/engine.js'
 import { readCodexSessions } from '../core/codex-sessions.js'
 import { collectSessionRows } from '../core/session-rows.js'
 import { openCodexSession } from '../core/open-codex.js'
-import { resolve } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
@@ -13,10 +13,12 @@ import { requireAdapter } from '../core/adapter.js'
 import { openSession } from '../core/open-session.js'
 import { findSessionsByName, pathToProjectSlug, listSessionNames, locateSessionById } from '../core/session.js'
 import { resolveBackend, resolveBackendName, backendEnvWithMarker, listBackends } from '../core/backends.js'
-import type { SessionOrigin } from '../core/config-dirs.js'
+import { DEFAULT_CONFIG_ROOT, type SessionOrigin } from '../core/config-dirs.js'
+import { planResumeRelocation } from '../core/session-relocate.js'
+import { archiveProjectDir, executeSessionCopy, projectDirHasTranscripts, removeSourceSession } from '../core/session-copy.js'
 import { shellQuoteArg } from '../core/shell.js'
 import { applyTabColor, resolveColorPreference, TAB_COLOR_NAMES } from '../core/colors.js'
-import { readProcessTable } from '../core/claude-procs.js'
+import { liveSessionPids, readProcessTable } from '../core/claude-procs.js'
 import { suspendedTabsIn } from '../core/suspend-ops.js'
 import { wakeInPlace } from './suspend.js'
 
@@ -40,6 +42,38 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
 }
 
+/**
+ * A session filed under a worktree that no longer exists is moved, with its
+ * sidecar, into the folder of the directory it is being resumed in (see
+ * core/session-relocate.ts). Copy first, then remove the source only when no
+ * Claude is running it, and archive the dead worktree's folder once it is empty
+ * so `restore` stops taking it for a live worktree.
+ */
+function relocateFromDeadWorktree(sessionId: string, dir: string, configRoot: string): void {
+  const decision = planResumeRelocation({ sessionId, dir, projectsRoot: join(configRoot, 'projects') })
+  if (decision.kind !== 'relocate') return
+  const { plan } = decision
+  const sourceProjectDir = dirname(plan.sourceJsonl)
+  try {
+    const copied = executeSessionCopy(plan, { overwrite: true })
+    consola.info(`Session ${sessionId.slice(0, 8)} was filed under ${basename(sourceProjectDir)}, whose directory is gone. Moved it to ${basename(plan.targetProjectDir)} (${copied.sidecarFilesCopied} sidecar file(s) with it).`)
+  } catch (e) {
+    consola.warn(`Could not move session ${sessionId.slice(0, 8)} out of ${basename(sourceProjectDir)}: ${(e as Error).message}. Resuming it where it is.`)
+    return
+  }
+  const rows = readProcessTable()
+  if (!rows || liveSessionPids(rows).has(sessionId)) {
+    consola.warn(`Left the original in ${basename(sourceProjectDir)}: ${rows ? 'a Claude is still running it' : 'could not read the process table'}.`)
+    return
+  }
+  removeSourceSession(plan.sourceJsonl, sessionId)
+  if (!projectDirHasTranscripts(sourceProjectDir)) {
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')
+    const archived = archiveProjectDir(sourceProjectDir, configRoot, stamp)
+    if (archived) consola.info(`Archived the empty folder → ${archived}`)
+  }
+}
+
 export const resumeCommand = define({
   name: 'resume',
   description: 'Resume a Claude or Codex session by name — wakes it if suspended, else reuses its tab or creates one. Usage: cctabs resume <name> [dir] (dir defaults to cwd)',
@@ -50,7 +84,7 @@ export const resumeCommand = define({
     // `cctabs resume <name>` fail with "Positional argument 'dir' is required"
     // despite the documented cwd default.
     engine: { type: 'string', short: 'e', description: 'claude or codex; defaults to the target tab/session, then calling engine. Closed Codex sessions need --session <id>.' },
-    session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name)' },
+    session: { type: 'string', short: 's', description: 'Session ID to resume (use when multiple sessions share the same name). With a [dir], a session filed under a worktree that has since been deleted is moved into [dir]\'s project folder first, with its subagent transcripts.' },
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local). Defaults to the backend whose Claude config dir the session was found in, else the CURRENT session\'s backend (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to Claude or -m to Codex).' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Applied whether the tab is reused or created. Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
@@ -152,6 +186,9 @@ export const resumeCommand = define({
       }
       sessionId = located.id
       foundOrigin = { backend: located.backend, configDir: located.configDir }
+      // Only for a directory named on the command line: moving a transcript
+      // into whatever folder this happened to be run from is not a request.
+      if (ctx.positionals[2]) relocateFromDeadWorktree(located.id, dir, located.configDir ?? DEFAULT_CONFIG_ROOT)
     } else {
       const sessions = findSessionsByName(dir, displayName)
       if (sessions.length === 0) {
