@@ -6,9 +6,8 @@
 
 ## Which directories are gated — it is NOT "is it a worktree"
 
-Trust is recorded per path in **`${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`** as
-`projects["<abs path>"].hasTrustDialogAccepted` (that default really is
-`~/.claude.json`, a sibling of `~/.claude/` and not inside it). The check walks *up* from the
+Claude Code records trust per path, in each config dir's own state (so every
+backend preset keeps its own list). The check walks *up* from the
 tab's directory and takes the first ancestor marked `true` — but the walk **stops
 at the enclosing git repo root**, so trust never leaks in from above that root.
 For a `--worktree` path, that root resolves to the **main repository**, not the
