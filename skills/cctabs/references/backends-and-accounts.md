@@ -29,7 +29,7 @@ invisible from the other side.
 
 By default, `cctabs new` runs `claude` against the Anthropic API, using whatever account is logged into Claude Code's default profile. Pass `--backend <preset>` (or `-b`) to launch the tab against a different model provider (Ollama/Kimi/Qwen/local) **or a different Claude account entirely** (e.g. a separate client's or organization's subscription) — useful for cheap/free scratch sessions, privacy-sensitive work, experimenting with frontier open-weight models, or keeping a client's Claude usage cleanly separated from your own.
 
-`cctabs` does this by prepending env vars to the `claude` command in the new tab: for model-provider presets that's `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, etc. plus `--model <name>`; for a different-account preset it's `CLAUDE_CODE_OAUTH_TOKEN` (and optionally `CLAUDE_CONFIG_DIR`) — see below.
+`cctabs` does this by prepending env vars to the `claude` command in the new tab: for model-provider presets that's `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, etc. plus `--model <name>`; for a different-account preset it's `CLAUDE_CONFIG_DIR` — see below.
 
 ### Built-in presets
 
@@ -100,9 +100,7 @@ cctabs new x ~/Dev/myapp -b qwen-local -m my-custom-tag:latest
 
 ### Running Claude Code as a different account (e.g. a client's or org's subscription)
 
-macOS stores Claude Code's OAuth login in the Keychain as a single global entry per macOS user (service `Claude Code-credentials`, account `<your OS username>`) — it is **not** scoped by `CLAUDE_CONFIG_DIR`. So `CLAUDE_CONFIG_DIR` alone isolates settings/history/MCP config between profiles, but **not** login — two interactive `/login` sessions under different config dirs still fight over the same Keychain slot, and the most recent login wins for both.
-
-So each other account gets a **long-lived token** instead, passed as `CLAUDE_CODE_OAUTH_TOKEN`, which Claude Code honours *before* the Keychain: a tab with it runs as that account, beside your own sessions, with no Keychain collision. The account needs a Claude subscription.
+An account is its own `CLAUDE_CONFIG_DIR`, signed in once with Claude's normal login. Claude Code keeps each config dir's login in its own Keychain entry (`Claude Code-credentials-<hash of the dir>`), so that login and yours run side by side and neither replaces the other. No token is needed.
 
 To add one, run:
 
@@ -110,4 +108,4 @@ To add one, run:
 cctabs account add client-x
 ```
 
-From an agent it opens a tab, where **the user** signs in as the other account (OAuth in the browser, which an agent cannot and should not drive). cctabs runs Claude's token sign-in there; the user pastes the token it prints into a hidden prompt, and cctabs stores it as the `client-x` preset in its config file (owner-only), checks the user's own login survived and signs them back in if not. The token never passes through the agent. From then on `cctabs new <name> <dir> -b client-x` runs as that account. `cctabs account list` shows the accounts.
+From an agent it opens a tab, where **the user** signs in as the other account (OAuth in the browser, which an agent cannot and should not drive). cctabs runs `claude auth login` there under `~/.claude-client-x` and writes the `client-x` preset into its config file. From then on `cctabs new <name> <dir> -b client-x` runs as that account. `cctabs account list` shows the accounts.

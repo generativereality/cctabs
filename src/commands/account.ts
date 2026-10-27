@@ -2,7 +2,6 @@ import { spawnSync } from 'child_process'
 import { homedir } from 'os'
 import { define } from 'gunshi'
 import { consola } from 'consola'
-import { isCancel, password } from '@clack/prompts'
 import { requireAdapter } from '../core/adapter.js'
 import { listBackendSpecs, resolveBackend } from '../core/backends.js'
 import { CONFIG_PATH } from '../core/config.js'
@@ -10,8 +9,7 @@ import { resolveTabShell, shellQuoteArg, tabLaunchArgv } from '../core/shell.js'
 import {
   accountNameProblem,
   defaultAccountConfigDir,
-  normaliseToken,
-  ownLoginChanged,
+  isAccountPreset,
   parseAuthStatus,
   writeAccountPreset,
   type AuthStatus,
@@ -32,10 +30,9 @@ function ownEnv(): Record<string, string | undefined> {
 }
 
 /**
- * The sign-in has to be a person at a keyboard (OAuth in a browser), and the
- * agent that asked for it should not be holding the token afterwards. So from
- * an agent's Bash tool, which has no terminal, the command opens a tab and runs
- * itself there, where the person can sign in and paste.
+ * The sign-in has to be a person at a keyboard (OAuth in a browser). So from an
+ * agent's Bash tool, which has no terminal, the command opens a tab and runs
+ * itself there, where the person can sign in.
  */
 async function openInTab(name: string, configDir: string): Promise<void> {
   const adapter = requireAdapter()
@@ -61,50 +58,33 @@ async function openInTab(name: string, configDir: string): Promise<void> {
 async function addAccount(name: string, configDir: string): Promise<void> {
   consola.info(`Adding the Claude account "${name}" (its own config dir: ${configDir}).`)
   consola.info(`A browser opens next. Sign in as the account you are adding, not as yourself.`)
-  const before = authStatus(ownEnv())
+  const env = { ...ownEnv(), CLAUDE_CONFIG_DIR: configDir } as NodeJS.ProcessEnv
 
-  const mint = spawnSync('claude', ['setup-token'], {
-    stdio: 'inherit',
-    env: { ...ownEnv(), CLAUDE_CONFIG_DIR: configDir } as NodeJS.ProcessEnv,
-  })
-  if (mint.status !== 0) {
-    consola.error(`\`claude setup-token\` exited ${mint.status ?? 'abnormally'}; nothing was saved.`)
+  const login = spawnSync('claude', ['auth', 'login'], { stdio: 'inherit', env })
+  if (login.status !== 0) {
+    consola.error(`\`claude auth login\` exited ${login.status ?? 'abnormally'}; nothing was saved.`)
     process.exit(1)
   }
 
-  const pasted = await password({
-    message: 'Paste the token it printed (sk-ant-oat…). It is saved to the config file, not shown.',
-    validate: (v) => (normaliseToken(v ?? '') ? undefined : "That doesn't look like a setup-token (sk-ant-oat…)."),
-  })
-  if (isCancel(pasted)) {
-    consola.warn('Cancelled; nothing was saved.')
-    process.exit(1)
+  const theirs = authStatus(env)
+  const mine = authStatus(ownEnv())
+  if (theirs?.loggedIn && mine?.email && theirs.email === mine.email) {
+    consola.warn(`That signed in as ${mine.email}, your own account. Sign in as the other account: \`CLAUDE_CONFIG_DIR=${configDir} claude auth login\`.`)
   }
-  const token = normaliseToken(pasted)!
 
   try {
-    writeAccountPreset(name, token, configDir)
+    writeAccountPreset(name, configDir)
   } catch (e) {
     consola.error((e as Error).message)
     process.exit(1)
   }
-  consola.success(`Saved [backends.${name}] in ${CONFIG_PATH} (owner-only, 0600).`)
-
-  const theirs = authStatus({ ...ownEnv(), CLAUDE_CONFIG_DIR: configDir, CLAUDE_CODE_OAUTH_TOKEN: token })
-  if (theirs?.loggedIn) consola.success(`-b ${name} runs as ${theirs.email ?? 'the new account'}.`)
-  else consola.warn(`Couldn't confirm the new token with \`claude auth status\`; try \`cctabs new test ~ -b ${name}\`.`)
-
-  const after = authStatus(ownEnv())
-  if (ownLoginChanged(before, after)) {
-    consola.warn(`Your own login changed (${before?.email ?? 'you'} → ${after?.loggedIn ? after.email : 'signed out'}). Signing you back in:`)
-    spawnSync('claude', ['auth', 'login'], { stdio: 'inherit', env: ownEnv() as NodeJS.ProcessEnv })
-  }
+  consola.success(`Saved [backends.${name}] in ${CONFIG_PATH}.${theirs?.loggedIn ? ` -b ${name} runs as ${theirs.email ?? 'the new account'}.` : ''}`)
   consola.info(`Use it: cctabs new <tab> <dir> -b ${name}`)
 }
 
 export const accountCommand = define({
   name: 'account',
-  description: 'Add another Claude account (a client\'s, an org\'s) as a backend preset: `cctabs account add <name>` opens a tab where YOU sign in as that account; cctabs stores its token itself (0600). `cctabs account list` shows the accounts. Then `cctabs new <tab> <dir> -b <name>`.',
+  description: 'Add another Claude account (a client\'s, an org\'s) as a backend preset: `cctabs account add <name>` opens a tab where YOU sign in as that account, in its own config dir; no token is stored. `cctabs account list` shows the accounts. Then `cctabs new <tab> <dir> -b <name>`.',
   args: {
     action: { type: 'positional', description: 'add | list' },
     'config-dir': { type: 'string', description: 'The account\'s Claude config dir (default ~/.claude-<name>)' },
@@ -114,7 +94,7 @@ export const accountCommand = define({
     const name = ctx.positionals[2]
 
     if (action === 'list') {
-      const accounts = listBackendSpecs().filter(({ spec }) => spec.env.CLAUDE_CODE_OAUTH_TOKEN)
+      const accounts = listBackendSpecs().filter(({ spec }) => isAccountPreset(spec.env))
       if (!accounts.length) {
         consola.info('No other Claude accounts yet. Add one: cctabs account add <name>')
         return

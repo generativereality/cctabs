@@ -189,18 +189,17 @@ cctabs backends
 Add another Claude account (a client's, an organisation's) as a backend preset.
 
 ```bash
-cctabs account add client-x   # you sign in as that account; cctabs stores its token
+cctabs account add client-x   # you sign in as that account, in its own config dir
 cctabs account list
 cctabs new task ~/Dev/client -b client-x
 ```
 
-`add` runs Claude's token sign-in under the account's own config dir
-(`~/.claude-client-x`, or `--config-dir`). You sign in in the browser as the
-account you are adding and paste the token it prints into a hidden prompt; cctabs
-writes `[backends.client-x]` into its config file and makes the file owner-only
-(0600). It then checks your own login is still yours and signs you back in if the
-sign-in replaced it. Run from an agent, which has no terminal, it opens a tab and
-runs there, so the token never passes through the agent.
+`add` runs Claude's normal sign-in (`claude auth login`) under the account's own
+config dir (`~/.claude-client-x`, or `--config-dir`). You sign in in the browser as
+the account you are adding, and cctabs writes `[backends.client-x]` into its config
+file. Claude Code keeps each config dir's login in its own Keychain entry, so your
+own login is untouched and the preset holds no token. Run from an agent, which has
+no terminal, it opens a tab and runs there.
 
 ## cctabs fork
 
@@ -516,12 +515,10 @@ things make the hand-copy easy to get wrong, and this command handles each:
 
 ### Why `--to` names a preset
 
-On macOS the Keychain holds one Claude Code login per OS user, and it is *not*
-scoped by `CLAUDE_CONFIG_DIR` — so running a session under another profile depends
-on that profile's `CLAUDE_CODE_OAUTH_TOKEN`. Backend presets already carry it, so
-`--to <preset>` gets both the config dir and the credentials. A bare config-dir
-path is accepted for the case where no preset exists yet, with a warning that
-Claude may not be able to authenticate there.
+A preset names the account, so the copy reopens under it and tabs spawned from it
+inherit it. A bare config-dir path works too, since Claude Code keeps each config
+dir's login in its own Keychain entry, but it has to be signed in once, and the
+warning says how, or how to name it with `cctabs account add`.
 
 ### Naming
 

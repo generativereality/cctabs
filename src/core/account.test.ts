@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
@@ -7,13 +7,10 @@ import {
   accountPresetBlock,
   appendPreset,
   hasPresetSection,
-  normaliseToken,
-  ownLoginChanged,
+  isAccountPreset,
   parseAuthStatus,
   writeAccountPreset,
 } from './account.js'
-
-const TOKEN = 'sk-ant-oat01-' + 'a'.repeat(40)
 
 describe('accountNameProblem', () => {
   it('accepts a plain preset name', () => {
@@ -30,24 +27,17 @@ describe('accountNameProblem', () => {
   })
 })
 
-describe('normaliseToken', () => {
-  // A paste out of a terminal carries its line wrapping.
-  it('joins a wrapped paste', () => {
-    expect(normaliseToken(`  ${TOKEN.slice(0, 20)}\n${TOKEN.slice(20)}\n`)).toBe(TOKEN)
-  })
-
-  it('refuses anything that is not a setup-token', () => {
-    expect(normaliseToken('sk-ant-api03-' + 'a'.repeat(40))).toBeNull()
-    expect(normaliseToken('hello')).toBeNull()
-  })
-})
-
 describe('preset text', () => {
   it('writes the env the backend loader reads', () => {
-    const block = accountPresetBlock('client-x', TOKEN, '/Users/me/.claude-client-x')
+    const block = accountPresetBlock('client-x', '/Users/me/.claude-client-x')
     expect(block).toContain('[backends.client-x]')
-    expect(block).toContain(`env_CLAUDE_CODE_OAUTH_TOKEN = "${TOKEN}"`)
     expect(block).toContain('env_CLAUDE_CONFIG_DIR = "/Users/me/.claude-client-x"')
+  })
+
+  // The login lives in the config dir's own Keychain entry, so nothing secret
+  // goes into config.toml.
+  it('holds no token', () => {
+    expect(accountPresetBlock('client-x', '/tmp/c')).not.toContain('TOKEN')
   })
 
   it('finds an existing table and appends after a blank line', () => {
@@ -62,38 +52,31 @@ describe('writeAccountPreset', () => {
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'cctabs-account-')) })
   afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-  // The file holds a live credential from here on: a looser mode it had before
-  // is tightened, not kept.
-  it('appends the preset and leaves the file owner-only', () => {
+  it('appends the preset after what is there', () => {
     const path = join(dir, 'config.toml')
-    writeFileSync(path, '[claude]\nflags = []\n', { mode: 0o644 })
-    writeAccountPreset('client-x', TOKEN, '/tmp/c', path)
+    writeFileSync(path, '[claude]\nflags = []\n')
+    writeAccountPreset('client-x', '/tmp/c', path)
     expect(readFileSync(path, 'utf-8')).toContain('[backends.client-x]')
     expect(readFileSync(path, 'utf-8')).toStartWith('[claude]\n')
-    expect(statSync(path).mode & 0o777).toBe(0o600)
   })
 
   it('never overwrites a preset of the same name', () => {
     const path = join(dir, 'config.toml')
-    writeAccountPreset('client-x', TOKEN, '/tmp/c', path)
-    expect(() => writeAccountPreset('client-x', TOKEN, '/tmp/c', path)).toThrow('already exists')
+    writeAccountPreset('client-x', '/tmp/c', path)
+    expect(() => writeAccountPreset('client-x', '/tmp/c', path)).toThrow('already exists')
   })
 })
 
-describe('ownLoginChanged', () => {
-  const me = { loggedIn: true, email: 'me@x.io' }
-
-  it('notices the sign-in replaced your own login', () => {
-    expect(ownLoginChanged(me, { loggedIn: true, email: 'client@x.io' })).toBe(true)
-    expect(ownLoginChanged(me, { loggedIn: false })).toBe(true)
+describe('isAccountPreset', () => {
+  it('is a config dir that still talks to Anthropic', () => {
+    expect(isAccountPreset({ CLAUDE_CONFIG_DIR: '/tmp/c' })).toBe(true)
+    expect(isAccountPreset({ CLAUDE_CONFIG_DIR: '/tmp/c', CLAUDE_CODE_OAUTH_TOKEN: 'x' })).toBe(true)
+    expect(isAccountPreset({ ANTHROPIC_BASE_URL: 'http://localhost:11434' })).toBe(false)
+    expect(isAccountPreset({})).toBe(false)
   })
+})
 
-  it('stays quiet when nothing changed or nothing is known', () => {
-    expect(ownLoginChanged(me, me)).toBe(false)
-    expect(ownLoginChanged(null, me)).toBe(false)
-    expect(ownLoginChanged({ loggedIn: false }, { loggedIn: false })).toBe(false)
-  })
-
+describe('parseAuthStatus', () => {
   it('reads claude auth status --json', () => {
     expect(parseAuthStatus('{"loggedIn":true,"email":"me@x.io","authMethod":"claude.ai"}')).toEqual({ loggedIn: true, email: 'me@x.io', authMethod: 'claude.ai' })
     expect(parseAuthStatus('not json')).toBeNull()
