@@ -1,28 +1,12 @@
 # Installing, updating and reaching cctabs
 
-> Read when installing the Tabby plugin by hand, when the skill text may be older than the CLI, or when driving a Tabby on another machine over SSH.
+> Read when installing the Tabby plugin, when the skill text may be older than the CLI, or when driving a Tabby on another machine over SSH.
 >
 > Reference for the `cctabs` skill — moved out of [SKILL.md](../SKILL.md) to keep it short.
 
 ## When this skill text is the stale half
 
-⚠️ **The drift runs the other way too: THIS TEXT can be the stale half.** Because
-those are two channels, the cached skill can lag the CLI by several releases. On
-2026-09-16 a driver was reading
-`<config-dir>/plugins/cache/generativereality/cctabs/0.5.0/skills/cctabs/SKILL.md`
-— **691 lines, zero occurrences of the word "trust"** — while the CLI on PATH was
-`0.5.3` and the source skill was 1030 lines and already documented the failure
-that then cost it five tabs. The cache path carries the version, so compare it
-against `cctabs --version`:
-
-```bash
-ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/*/cctabs/*/ && cctabs --version
-```
-
-If the cached version is behind, ask the user to run `/plugins` → Marketplaces →
-Update generativereality. Until they do, treat anything *absent* from this file as
-"possibly just missing here", not "not a thing" — and prefer `cctabs <cmd> --help`
-from the installed binary over this text where the two could disagree.
+The skill (the plugin marketplace) and the CLI (npm) update separately, so this text can lag the CLI by several releases. `cctabs doctor` says so: its `cctabs skill` line warns when the installed skill is older than the CLI, and says how to update it. Until the user updates, treat anything *absent* from this file as possibly just missing here, and prefer `cctabs <cmd> --help` where the two disagree.
 
 ### Auto-install + auto-restart (recommended)
 
@@ -40,20 +24,7 @@ Before 0.5.12 step 2 resumed "the newest session in this directory" — not nece
 — as a `--fork-session` copy, and left the other tabs to Tabby's own recovery. Use `--no-restart`
 to install only and restart Tabby yourself.
 
-### Manual install (fallback)
-
-```bash
-TABBY_PLUGINS="$HOME/Library/Application Support/tabby/plugins"
-mkdir -p "$TABBY_PLUGINS"
-[ -f "$TABBY_PLUGINS/package.json" ] || echo '{"private":true}' > "$TABBY_PLUGINS/package.json"
-npm install --legacy-peer-deps --prefix "$TABBY_PLUGINS" tabby-cctabs@0.2.1
-# then ask the user to quit + reopen Tabby
-```
-
-`--legacy-peer-deps` is required: the plugin's peer deps (`tabby-core`, `@angular/*`, …) live inside Tabby itself, not on npm. Tabby's GUI plugin manager handles this internally.
-
-Linux: replace `~/Library/Application Support/tabby` with `${XDG_CONFIG_HOME:-$HOME/.config}/tabby`.
-Windows: `%APPDATA%\tabby`.
+If it fails, it says why and leaves Tabby alone. `--legacy-peer-deps` is what it needs and a plain `npm install` lacks: the plugin's peer dependencies live inside Tabby, not on npm.
 
 ### Alternative: install via Tabby's GUI
 

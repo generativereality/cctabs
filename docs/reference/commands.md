@@ -132,6 +132,11 @@ backend: explicit `-b`, then the account the session was found in, then the one
 inherited from the calling tab (`CCTABS_ACTIVE_BACKEND`). The success line says
 which was used.
 
+With `-s <id>` and a `dir`, a session filed under a worktree that has since been
+deleted is moved into `dir`'s project folder first, with its subagent
+transcripts, and the dead worktree's empty folder is archived out of
+`projects/`. A session whose worktree still exists is left where it is.
+
 ## cctabs restore
 
 Bring back every tab that lost its session — the usual after a reboot or a
@@ -178,6 +183,24 @@ accounts. See [Configuration](/guide/configuration#backends).
 ```bash
 cctabs backends
 ```
+
+## cctabs account
+
+Add another Claude account (a client's, an organisation's) as a backend preset.
+
+```bash
+cctabs account add client-x   # you sign in as that account; cctabs stores its token
+cctabs account list
+cctabs new task ~/Dev/client -b client-x
+```
+
+`add` runs Claude's token sign-in under the account's own config dir
+(`~/.claude-client-x`, or `--config-dir`). You sign in in the browser as the
+account you are adding and paste the token it prints into a hidden prompt; cctabs
+writes `[backends.client-x]` into its config file and makes the file owner-only
+(0600). It then checks your own login is still yours and signs you back in if the
+sign-in replaced it. Run from an agent, which has no terminal, it opens a tab and
+runs there, so the token never passes through the agent.
 
 ## cctabs fork
 
@@ -523,6 +546,9 @@ Checks:
 - **Spawned shell PATH** — whether a login+interactive `zsh` can find `node`.
   This is the canonical macOS PATH-sourcing failure: when it breaks, tabs spawn
   but Claude Code and plugin MCPs can't start inside them.
+- **cctabs skill** — whether the skill Claude Code has installed is older than
+  this CLI. They update through different channels (the plugin marketplace and
+  npm), and a stale skill can lack what the CLI now does.
 - **Tabby cctabs plugin** — whether the companion plugin answers on
   `127.0.0.1:3300`, and which version.
 

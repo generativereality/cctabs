@@ -141,12 +141,7 @@ Two consequences worth knowing:
 
 **Bulk restore is reliable — with the current plugin.** A 45-tab close-and-restore completes in under a minute with tab order preserved. This used to be the opposite: spawning ~35+ tabs in one call left most of them registered in Tabby but sitting as empty shells at `? unreadable` status, because a Tabby tab only spawns its process once its terminal frontend attaches, which only happens once the tab has been focused — and each new tab stole focus from the last. `tabby-cctabs` ≥ 0.1.3 serialises tab creation internally and doesn't answer until the process is actually running, advertising `spawn-waits-for-pty` on `/api/health`; the CLI probes for that and only then spawns in parallel. Against an older plugin it falls back to one-at-a-time with a settle gap — slower, still correct.
 
-**If you do need to verify what's running, never use `ps aux | grep`.** It truncates long command lines, so any entry whose `--name` falls past the cutoff silently disappears and a healthy tab reads as dead. Use the tab list itself, or a full-width `ps`:
-
-```bash
-cctabs sessions                       # status per tab, straight from the terminal
-ps -Aww -o command | grep -c -- "--resume"   # full command lines, not truncated
-```
+**If you do need to verify what's running, never use `ps aux | grep`.** It truncates long command lines, so any entry whose `--name` falls past the cutoff silently disappears and a healthy tab reads as dead. Use `cctabs sessions`: status per tab, straight from the terminal and the full process table.
 
 And don't read "every Claude without `--resume`" as "every empty tab": a tab opened fresh with `cctabs new` has no `--resume` and is perfectly healthy — including the one you're running in. The question that matters is narrower, and `cctabs restart` answers it: does every session *you restored* have a Claude launched on its id?
 

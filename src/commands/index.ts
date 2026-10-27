@@ -30,6 +30,7 @@ import { profileCopyCommand } from './profile-copy.js'
 import { sortCommand } from './sort.js'
 import { restartTabbyCommand, prepareRebootCommand, restartTabbyWorkerCommand } from './restart-tabby.js'
 import { suspendCommand, wakeCommand } from './suspend.js'
+import { accountCommand } from './account.js'
 
 // Default command: show sessions (most common use)
 const defaultCommand = define({
@@ -100,6 +101,7 @@ const subCommands = new Map([
   ['prepare-reboot', prepareRebootCommand],
   ['restart-tabby-worker', restartTabbyWorkerCommand],
   ['backends', backendsCommand],
+  ['account', accountCommand],
   ['doctor', doctorCommand],
   ['install-tabby-plugin', installTabbyPluginCommand],
   ['export', exportCommand],

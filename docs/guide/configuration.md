@@ -98,6 +98,10 @@ env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
 env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
 ```
 
+You don't write an account's preset by hand: `cctabs account add client-x` opens a
+tab where you sign in as that account, and writes the preset with its token into
+this file, owner-only (0600). `cctabs account list` shows the accounts.
+
 ### Inheritance
 
 A launched tab carries `CCTABS_ACTIVE_BACKEND=<name>`, so `new` / `resume` /

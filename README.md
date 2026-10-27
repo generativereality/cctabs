@@ -282,7 +282,8 @@ flags = ["--allow-dangerously-skip-permissions"]
 # Launch with `cctabs new <name> [dir] -b client-x`; tabs spawned from inside
 # that session inherit it. Sessions started under a preset that sets its own
 # CLAUDE_CONFIG_DIR are still found by `resume`/`restore`, and come back under
-# that account automatically.
+# that account automatically. `cctabs account add client-x` writes an account's
+# preset for you: you sign in as that account in the tab it opens.
 [backends.client-x]
 description = "Client X's Claude account"
 env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."

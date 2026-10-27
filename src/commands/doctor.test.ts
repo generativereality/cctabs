@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { agentBashResult, AGENT_BASH_CHECK, lastLine } from './doctor.js'
+import { agentBashResult, AGENT_BASH_CHECK, installedPluginVersion, lastLine, skillVersionResult } from './doctor.js'
 
 describe('agentBashResult', () => {
   it('passes when bash is already on PATH', () => {
@@ -45,5 +45,46 @@ describe('lastLine', () => {
 
   it('handles CRLF and a bare answer', () => {
     expect(lastLine('C:\\Git\\bin\\bash.exe\r\n')).toBe('C:\\Git\\bin\\bash.exe')
+  })
+})
+
+describe('skillVersionResult', () => {
+  // The case the check exists for: Claude reads a skill releases behind the CLI.
+  it('warns when the skill is older than the CLI, and says how to update', () => {
+    const r = skillVersionResult('0.5.0', '0.7.2')
+    expect(r.status).toBe('warn')
+    expect(r.detail).toContain('0.5.0')
+    expect(r.hint).toContain('Update generativereality')
+  })
+
+  it('passes when they match, or the skill is ahead', () => {
+    expect(skillVersionResult('0.7.2', '0.7.2').status).toBe('ok')
+    expect(skillVersionResult('0.7.3', '0.7.2').status).toBe('ok')
+  })
+
+  it('compares numerically, not as text', () => {
+    expect(skillVersionResult('0.5.9', '0.5.10').status).toBe('warn')
+  })
+
+  it('skips without failing when the plugin is not installed', () => {
+    expect(skillVersionResult(undefined, '0.7.2').status).toBe('skip')
+  })
+})
+
+describe('installedPluginVersion', () => {
+  it('reads the cctabs entry from installed_plugins.json', () => {
+    const json = JSON.stringify({
+      version: 2,
+      plugins: {
+        'other@x': [{ version: '9.9.9' }],
+        'cctabs@generativereality': [{ scope: 'user', version: '0.7.1' }, { scope: 'project', version: '0.6.0' }],
+      },
+    })
+    expect(installedPluginVersion(json)).toBe('0.7.1')
+  })
+
+  it('is undefined for no install or a broken file', () => {
+    expect(installedPluginVersion('{"plugins":{}}')).toBeUndefined()
+    expect(installedPluginVersion('nope')).toBeUndefined()
   })
 })

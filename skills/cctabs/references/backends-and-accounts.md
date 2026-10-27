@@ -91,36 +91,23 @@ cctabs new x ~/Dev/myapp -b qwen-local -m my-custom-tag:latest
   base_url = "http://localhost:11434"
   description = "My custom preset"
 
-  # Fully custom env vars via env_<NAME> — use this for anything not covered
-  # by the base_url shorthand, including a different Claude account:
-  [backends.client-x]
-  description = "Client X's Claude account"
-  env_CLAUDE_CODE_OAUTH_TOKEN = "sk-ant-oat-..."
-  env_CLAUDE_CONFIG_DIR = "/Users/you/.claude-client-x"
+  # Fully custom env vars via env_<NAME> — for anything the base_url
+  # shorthand doesn't cover:
+  [backends.my-proxy]
+  env_HTTPS_PROXY = "http://localhost:8080"
   ```
-  `env_<NAME>` sets any env var verbatim on the spawned `claude` process — not limited to the Ollama-oriented fields.
+  `env_<NAME>` sets any env var verbatim on the spawned `claude` process — not limited to the Ollama-oriented fields. A different Claude **account** is not written by hand: `cctabs account add` (below) writes its preset.
 
 ### Running Claude Code as a different account (e.g. a client's or org's subscription)
 
 macOS stores Claude Code's OAuth login in the Keychain as a single global entry per macOS user (service `Claude Code-credentials`, account `<your OS username>`) — it is **not** scoped by `CLAUDE_CONFIG_DIR`. So `CLAUDE_CONFIG_DIR` alone isolates settings/history/MCP config between profiles, but **not** login — two interactive `/login` sessions under different config dirs still fight over the same Keychain slot, and the most recent login wins for both.
 
-The fix: mint a **long-lived OAuth token** for the other account (`claude setup-token`, requires that account to have a Claude subscription) and pass it via `CLAUDE_CODE_OAUTH_TOKEN`, which Claude Code's auth precedence honors *before* falling back to the Keychain default — so a tab exporting that token runs as the other account with zero Keychain collision, concurrently with your own default-profile sessions.
+So each other account gets a **long-lived token** instead, passed as `CLAUDE_CODE_OAUTH_TOKEN`, which Claude Code honours *before* the Keychain: a tab with it runs as that account, beside your own sessions, with no Keychain collision. The account needs a Claude subscription.
 
-One-time bootstrap (the interactive login step must be done by the account owner — an agent cannot drive OAuth):
+To add one, run:
+
 ```bash
-# 1. Log into the OTHER account in an isolated profile:
-export CLAUDE_CONFIG_DIR=~/.claude-client-x
-claude
-#   -> /login -> sign in as the other account
-
-# 2. Still in that same shell/profile, mint the long-lived token:
-claude setup-token
-#   -> prints a token; this is a real credential, handle like a password
-
-# 3. Restore YOUR OWN login in the default profile (step 1 temporarily
-#    overwrote the shared Keychain slot):
-unset CLAUDE_CONFIG_DIR
-claude
-#   -> /login -> sign in as yourself again
+cctabs account add client-x
 ```
-Then add the token to a preset as shown above (`env_CLAUDE_CODE_OAUTH_TOKEN`), `chmod 600 ~/.config/cctabs/config.toml` (it now holds a live credential in plaintext TOML — no dynamic Keychain lookup is supported by the preset loader), and `cctabs new <name> <dir> -b client-x` just works from then on, no further login needed.
+
+From an agent it opens a tab, where **the user** signs in as the other account (OAuth in the browser, which an agent cannot and should not drive). cctabs runs Claude's token sign-in there; the user pastes the token it prints into a hidden prompt, and cctabs stores it as the `client-x` preset in its config file (owner-only), checks the user's own login survived and signs them back in if not. The token never passes through the agent. From then on `cctabs new <name> <dir> -b client-x` runs as that account. `cctabs account list` shows the accounts.
