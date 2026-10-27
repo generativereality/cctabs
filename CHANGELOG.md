@@ -3,7 +3,7 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
-## Unreleased
+## 0.7.2 — 2026-10-27
 
 - **`cctabs account add <name>` adds another Claude account.** You sign in as that account with Claude's normal login in the tab it opens, and cctabs writes the `[backends.<name>]` preset itself: a name and a config dir, no token. Claude Code keeps each `CLAUDE_CONFIG_DIR`'s login in its own Keychain entry (`Claude Code-credentials-<hash>`), so the new login doesn't replace yours. `cctabs account list` shows the accounts. This replaces a fifteen-line skill recipe (sign in elsewhere, `claude setup-token`, paste the token into the config, `chmod`, sign back in) written when the Keychain held one login per OS user. Presets that carry a token keep working.
 - **`cctabs doctor` says when the skill is older than the CLI.** It reads the cctabs version Claude Code has installed as a plugin and warns when the CLI is newer. The skill used to tell agents to `ls` the plugin cache for this.

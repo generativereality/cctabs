@@ -21,6 +21,13 @@ npm i -g @generativereality/cctabs
 
 <!-- releases -->
 
+## 0.7.2 — 2026-10-27
+
+- **`cctabs account add <name>` adds another Claude account.** You sign in as that account with Claude's normal login in the tab it opens, and cctabs writes the `[backends.<name>]` preset itself: a name and a config dir, no token. Claude Code keeps each `CLAUDE_CONFIG_DIR`'s login in its own Keychain entry (`Claude Code-credentials-<hash>`), so the new login doesn't replace yours. `cctabs account list` shows the accounts. This replaces a fifteen-line skill recipe (sign in elsewhere, `claude setup-token`, paste the token into the config, `chmod`, sign back in) written when the Keychain held one login per OS user. Presets that carry a token keep working.
+- **`cctabs doctor` says when the skill is older than the CLI.** It reads the cctabs version Claude Code has installed as a plugin and warns when the CLI is newer. The skill used to tell agents to `ls` the plugin cache for this.
+- **`cctabs resume <name> <dir> -s <id>` recovers a session whose worktree was deleted.** The transcript and its subagent sidecar are moved into `dir`'s project folder, the original is removed once no Claude is running it, and the dead worktree's empty folder is archived out of `projects/`, so `restore` stops taking it for a live worktree. This replaces a hand-run `cp` that lost the subagent transcripts when it copied only the `.jsonl`.
+- **The skill is shorter.** The manual Tabby plugin install (`install-tabby-plugin` does it) and a `ps | grep` check (`sessions` answers it) are gone with the recipes above.
+
 ## 0.7.1 — 2026-10-26
 
 - **Fix: `fork <tab>` could fork the wrong conversation.** It resumed the newest session in the tab's folder, and with several tabs in one repo that is usually the one running the fork. It now asks the Claude running in the tab which session it is on, falls back to what `sessions` reports for that tab, and refuses rather than guess.
