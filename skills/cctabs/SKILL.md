@@ -149,16 +149,11 @@ cctabs send <tab> --submit            # ⛔ bare Enter confirms "No, exit" and k
 
 **Which directories are gated is NOT "is it a worktree".** Trust is recorded per repo root, and each `CLAUDE_CONFIG_DIR` has its own list: a `--worktree` of an already-trusted repo is not gated, a repo Claude Code has never run in is, however many trusted ancestors it has. Details and measurements: [references/trust-gate.md](references/trust-gate.md).
 
-⭐ **Not sure the repo root is trusted in the config dir this tab will use?** Then
-**spawn bare, clear the gate, then send**, so no brief is in flight while a menu
-is on screen:
-
-```bash
-cctabs new fix-auth ~/Dev/myapp --worktree       # no --prompt/--file yet
-cctabs scrollback fix-auth                       # confirm it IS the trust dialog
-printf '\033[B' | cctabs send fix-auth           # "Yes, I trust this folder"
-cctabs send fix-auth --wait-for-prompt --path /tmp/brief.txt
-```
+⭐ **No pre-check: the CLI does it.** Pass the brief to `cctabs new` itself
+(`--prompt`, `--file` or `--path`). For the directory you named, it answers the
+trust question as above and only then sends; if any dialog is still open it sends
+nothing and prints the `cctabs send <tab> --path <file>` to run once you have
+answered it in the tab.
 
 A human can also pre-clear a repo once (run Claude Code in it and accept, or set
 `hasTrustDialogAccepted` for that root by hand) — that is their call to make, not
