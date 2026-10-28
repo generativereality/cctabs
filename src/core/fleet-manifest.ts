@@ -59,6 +59,8 @@ export type ProblemCode =
   | 'worktree-repointed'
   /** The id has no transcript in any config dir. */
   | 'no-transcript'
+  /** The tab's cwd is not where the session's transcript ran; the transcript's dir is used. */
+  | 'tab-cwd-mismatch'
   /** Two or more entries resolve to one session, and nothing says which owns it. */
   | 'duplicate-session'
   /** A collision settled by a live process — the losers are dropped. */
@@ -219,6 +221,15 @@ export function buildManifest(rows: SessionRow[], opts: ManifestOptions): Manife
           message: `${dir || '(no directory)'} does not exist — a Claude restored there cannot load skills or run git. Pass --repoint-missing-dirs <dir> or recreate it`,
         })
       }
+    }
+
+    if (r.tab_cwd_mismatch) {
+      problems.push({
+        name: r.name,
+        severity: 'warning',
+        code: 'tab-cwd-mismatch',
+        message: `the tab sits in ${r.tab_cwd_mismatch}, but its session's transcript ran in ${r.cwd} — the manifest resumes it in ${r.cwd}. Check before restoring: resumed in the tab's dir, it would load that repo's CLAUDE.md and act on that repo`,
+      })
     }
 
     if (r.session_id && !opts.transcriptExists(r.session_id, r.engine)) {
