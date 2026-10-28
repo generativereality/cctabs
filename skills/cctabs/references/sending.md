@@ -56,6 +56,13 @@ See [suspended-tabs.md](suspended-tabs.md).
   (tabby-cctabs ≥ 0.1.6): it reads the tab's screen, because the output stream
   can't show what's in the box. With an older plugin, or a tab that has never
   been shown, `send` can't see the box and types as before.
+- **A dim prompt line is Claude's suggestion, not a draft.** An idle Claude
+  often shows a guess at your next message in its empty box (`❯ ok run the
+  tests`, dim, Tab accepts it). It isn't typed: `send` doesn't wait on it, and
+  typing replaces it. `cctabs scrollback` shows it as `❯ ⟨suggestion: …⟩`, and
+  `sessions --json` reports `prompt: {typed, suggestion}`. Plain scrollback
+  from an older plugin (no `screen`) can't tell the two apart, so don't treat
+  bare text after `❯` there as someone's unsent draft.
 - `--no-enter` leaves the text in the input box unsent. (Before 0.5.11 there
   was no way to turn the Enter off: `--enter=false` and `--no-enter` both read
   as "on".)

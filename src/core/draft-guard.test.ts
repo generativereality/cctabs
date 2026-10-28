@@ -14,6 +14,16 @@ describe('waitOutDraft', () => {
     expect(r).toMatchObject({ ok: true, waitedMs: 0 })
   })
 
+  it('treats a box holding only a prompt suggestion as empty: no wait, no draft warning', async () => {
+    let warned = false
+    const r = await waitOutDraft(fake([{ state: 'empty', suggestion: 'ok run the tests' }]), 'b', {
+      sleep: noSleep,
+      onWaiting: () => { warned = true },
+    })
+    expect(r).toMatchObject({ ok: true, waitedMs: 0, state: { state: 'empty' } })
+    expect(warned).toBe(false)
+  })
+
   it('does not wait on an unreadable box — that is no evidence of a draft', async () => {
     const r = await waitOutDraft(fake([{ state: 'unknown', why: 'old plugin' }]), 'b', { sleep: noSleep })
     expect(r).toMatchObject({ ok: true, waitedMs: 0 })

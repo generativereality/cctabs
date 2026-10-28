@@ -6,6 +6,7 @@ import { classifyTerminalBuffer, parsePermissionMode } from '../core/session-sta
 import { collectSessionRows } from '../core/session-rows.js'
 import { readProcessTable } from '../core/claude-procs.js'
 import { suspendedTabsIn } from '../core/suspend-ops.js'
+import { draftPreview } from '../core/draft-guard.js'
 
 /** Rows of captured output to read per tab — see session-rows.ts. */
 const BUFFER_ROWS = 200
@@ -70,6 +71,13 @@ export const sessionsCommand = define({
 
         console.log(`  [${tabId.slice(0, 8)}] "${name}"${cur}  ${cwd}`)
         console.log(`    ${statusLabel}${permissionMode ? `  ·  ${permissionMode}` : ''}`)
+        // What is in the input box. A suggestion is said to be one, because in
+        // scrollback it reads exactly like a draft someone never sent.
+        const draft = (status === 'idle' || status === 'active') && adapter.inputDraft
+          ? await adapter.inputDraft(b.blockid).catch(() => null)
+          : null
+        if (draft?.state === 'draft') console.log(`    draft in input box: ${draftPreview(draft.text)}${draft.suggestion ? ` (+ suggested ${draftPreview(draft.suggestion)})` : ''}`)
+        else if (draft?.state === 'empty' && draft.suggestion) console.log(`    input box empty · suggestion ${draftPreview(draft.suggestion)} (dim, not typed)`)
         if (susp?.record.sessionId) console.log(`    session ${susp.record.sessionId.slice(0, 8)}… · ${susp.record.dir.replace(process.env.HOME ?? '', '~')}`)
         // An unreadable tab is the one case where the status line alone would
         // mislead, so say what we do know: whether a process is running in it.

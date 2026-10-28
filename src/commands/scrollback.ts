@@ -2,10 +2,11 @@ import { define } from 'gunshi'
 import { consola } from 'consola'
 import { requireAdapter } from '../core/adapter.js'
 import { resolveTabTarget } from '../core/tab-target.js'
+import { markSuggestion } from '../core/input-draft.js'
 
 export const scrollbackCommand = define({
   name: 'scrollback',
-  description: 'Show terminal output for a tab or block (default: last 50 lines). This is the last PAINTED FRAME — a tab mid-turn shows a spinner and little else, so use `cctabs transcript` to read what it has actually said.',
+  description: 'Show terminal output for a tab or block (default: last 50 lines). This is the last PAINTED FRAME — a tab mid-turn shows a spinner and little else, so use `cctabs transcript` to read what it has actually said. Claude\'s dim prompt suggestion in an empty input box is shown as `⟨suggestion: …⟩`: it is not a typed draft.',
   args: {
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     // No gunshi `default` here on purpose: a default fills the value in
@@ -32,6 +33,11 @@ export const scrollbackCommand = define({
       process.exit(1)
     }
 
-    process.stdout.write(adapter.scrollback(resolved.target.blockId, lines))
+    const blockId = resolved.target.blockId
+    const text = adapter.scrollback(blockId, lines)
+    // A prompt suggestion is dim ghost text, but the stream has no dimness, so
+    // ask the screen what is really in the box and mark it (input-draft.ts).
+    const state = adapter.inputDraft ? await adapter.inputDraft(blockId).catch(() => null) : null
+    process.stdout.write(state ? markSuggestion(text, state) : text)
   },
 })
