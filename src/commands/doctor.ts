@@ -256,15 +256,36 @@ export function skillVersionResult (inUse: string | undefined, cli: string): Che
 }
 
 /**
+ * Whether a plugin of this name carries the cctabs skill: `cctabs` itself, or a
+ * repackaged per-tool plugin named `<prefix>-cctabs`, versioned the same way.
+ */
+const isCctabsPlugin = (name: string) => name === 'cctabs' || name.endsWith('-cctabs')
+
+/**
+ * The plugins a config dir's settings.json switches off (`enabledPlugins`
+ * entries set to false). Claude Code keeps a disabled plugin installed, so its
+ * record alone would make the check read a skill Claude does not load.
+ */
+export function disabledPlugins (settingsJson: string): Set<string> {
+  try {
+    const d = JSON.parse(settingsJson) as { enabledPlugins?: Record<string, unknown> }
+    return new Set(Object.entries(d.enabledPlugins ?? {}).filter(([, on]) => on === false).map(([key]) => key))
+  } catch {
+    return new Set()
+  }
+}
+
+/**
  * The installed plugin version, from Claude Code's own record of it. Newest
  * across config dirs, because an account profile can hold its own install.
+ * Plugins in `disabled` are skipped.
  */
-export function installedPluginVersion (installedPluginsJson: string): string | undefined {
+export function installedPluginVersion (installedPluginsJson: string, disabled: Set<string> = new Set()): string | undefined {
   try {
     const d = JSON.parse(installedPluginsJson) as { plugins?: Record<string, Array<{ version?: string }>> }
     const versions: string[] = []
     for (const [key, entries] of Object.entries(d.plugins ?? {})) {
-      if (!key.startsWith('cctabs@')) continue
+      if (!isCctabsPlugin(key.slice(0, key.lastIndexOf('@'))) || disabled.has(key)) continue
       for (const e of entries ?? []) if (e.version) versions.push(e.version)
     }
     return versions.reduce<string | undefined>((best, v) => (!best || isNewer(v, best) ? v : best), undefined)
@@ -278,7 +299,9 @@ function checkSkillVersion (): CheckResult {
   for (const dir of listClaudeConfigDirs()) {
     const file = join(dir.root, 'plugins', 'installed_plugins.json')
     if (!existsSync(file)) continue
-    const v = installedPluginVersion(readFileSync(file, 'utf-8'))
+    const settings = join(dir.root, 'settings.json')
+    const disabled = existsSync(settings) ? disabledPlugins(readFileSync(settings, 'utf-8')) : new Set<string>()
+    const v = installedPluginVersion(readFileSync(file, 'utf-8'), disabled)
     if (v && (!inUse || isNewer(v, inUse))) inUse = v
   }
   // No record of the install, but the cache has one: the newest cached copy.
@@ -287,9 +310,11 @@ function checkSkillVersion (): CheckResult {
       const cache = join(dir.root, 'plugins', 'cache')
       if (!existsSync(cache)) continue
       for (const marketplace of readdirSync(cache)) {
-        const versions = join(cache, marketplace, 'cctabs')
-        if (!existsSync(versions)) continue
-        for (const v of readdirSync(versions)) if (!inUse || isNewer(v, inUse)) inUse = v
+        try {
+          for (const plugin of readdirSync(join(cache, marketplace)).filter(isCctabsPlugin)) {
+            for (const v of readdirSync(join(cache, marketplace, plugin))) if (!inUse || isNewer(v, inUse)) inUse = v
+          }
+        } catch {} // a stray file, not a marketplace directory
       }
     }
   }

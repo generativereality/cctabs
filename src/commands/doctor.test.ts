@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { agentBashResult, AGENT_BASH_CHECK, installedPluginVersion, lastLine, skillVersionResult } from './doctor.js'
+import { agentBashResult, AGENT_BASH_CHECK, disabledPlugins, installedPluginVersion, lastLine, skillVersionResult } from './doctor.js'
 
 describe('agentBashResult', () => {
   it('passes when bash is already on PATH', () => {
@@ -71,6 +71,13 @@ describe('skillVersionResult', () => {
   })
 })
 
+describe('disabledPlugins', () => {
+  it('lists the plugins set to false, and nothing for a broken file', () => {
+    expect([...disabledPlugins(JSON.stringify({ enabledPlugins: { 'a@x': false, 'b@x': true } }))]).toEqual(['a@x'])
+    expect(disabledPlugins('{').size).toBe(0)
+  })
+})
+
 describe('installedPluginVersion', () => {
   it('reads the cctabs entry from installed_plugins.json', () => {
     const json = JSON.stringify({
@@ -81,6 +88,24 @@ describe('installedPluginVersion', () => {
       },
     })
     expect(installedPluginVersion(json)).toBe('0.7.1')
+  })
+
+  // A disabled plugin stays installed; Claude does not read its skill.
+  it('skips a plugin that settings.json disables', () => {
+    const json = JSON.stringify({
+      plugins: {
+        'cctabs@generativereality': [{ version: '0.7.2' }],
+        'acme-tools-cctabs@acme': [{ version: '1.2.2' }],
+      },
+    })
+    const disabled = disabledPlugins(JSON.stringify({ enabledPlugins: { 'cctabs@generativereality': false, 'acme-tools-cctabs@acme': true } }))
+    expect(installedPluginVersion(json, disabled)).toBe('1.2.2')
+    expect(installedPluginVersion(json, disabledPlugins(JSON.stringify({ enabledPlugins: { 'acme-tools-cctabs@acme': false } })))).toBe('0.7.2')
+  })
+
+  it("reads a repackaged per-tool plugin named <prefix>-cctabs", () => {
+    const json = JSON.stringify({ plugins: { 'acme-tools@acme': [{ version: '0.1.4' }], 'acme-tools-cctabs@acme': [{ version: '1.2.2' }] } })
+    expect(installedPluginVersion(json)).toBe('1.2.2')
   })
 
   it('is undefined for no install or a broken file', () => {
