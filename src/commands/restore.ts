@@ -15,6 +15,7 @@ import { findSessionsByNameGlobally, locateSessionById, resetTitleIndexCache, re
 import { launchEnvFor, resolveBackend } from '../core/backends.js'
 import { listClaudeConfigDirs, type ClaudeConfigDir, type ConfigDirScope } from '../core/config-dirs.js'
 import { readLastMessageAt, locateTranscriptFile, type LocatedTranscript } from '../core/transcript.js'
+import { sessionDirFromTranscript } from '../core/session-dir.js'
 import { parseManifest } from '../core/manifest.js'
 import {
   planRestore,
@@ -542,9 +543,17 @@ function resolveEntrySession(entry: RestoreEntry, scope?: ConfigDirScope, codexS
   if (entry.sessionId) {
     const located =
       locateSessionById(entry.sessionId, entry.dir, scope) ?? locateSessionById(entry.sessionId, undefined, scope)
+    const id = located?.id ?? entry.sessionId
+    // The manifest's dir is a snapshot of a tab's cwd, and can be wrong in a way
+    // that repeats itself every restart. The transcript says where the
+    // conversation ran (session-dir.ts).
+    const where = sessionDirFromTranscript(locateTranscriptFile(id, scope)?.file, entry.dir)
+    if (where?.overruled) {
+      consola.warn(`  ${entry.name} — the manifest says ${where.overruled}, but session ${shortId(id)} ran in ${where.dir}; resuming it there.`)
+    }
     return {
-      id: located?.id ?? entry.sessionId,
-      dir: entry.dir ?? process.cwd(),
+      id,
+      dir: where?.dir ?? process.cwd(),
       backend: located?.backend,
       configDir: located?.configDir,
     }
