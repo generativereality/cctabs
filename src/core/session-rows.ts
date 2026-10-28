@@ -12,6 +12,7 @@ import {
   type ProcRow,
 } from './claude-procs.js'
 import { suspendedTabsIn } from './suspend-ops.js'
+import { sessionDirFromTranscript } from './session-dir.js'
 
 /**
  * Rows of captured output to read per tab.
@@ -84,6 +85,12 @@ export interface SessionRow {
    */
   suspended_at?: string
   suspended_dormant?: boolean
+  /**
+   * The tab's own cwd, when it disagrees with where the session's transcript
+   * says the conversation ran. `cwd` is then the transcript's, so a manifest
+   * built from this resumes the session in its own repo, not the tab's.
+   */
+  tab_cwd_mismatch?: string
 }
 
 export interface WorkspaceRow {
@@ -168,6 +175,8 @@ export async function collectSessionRows(
       // is reported as `lookup-failed`, which is not the same answer as
       // "this tab has no session" and must not be flattened into it.
       let lookupError: Error | undefined
+      // The tab's own cwd, when the session's transcript places it elsewhere.
+      let tabCwdMismatch: string | undefined
       if (susp?.record.sessionId) {
         // The registry names the session exactly; no title search needed, and
         // the placeholder's cwd may not be where the session resumes.
@@ -210,6 +219,13 @@ export async function collectSessionRows(
           backend = located?.backend
           configDir = located?.configDir
           lookupError = undefined
+          // The id no longer came from this tab's directory, so neither should
+          // the dir: take the transcript's, and say so when the tab disagrees.
+          const where = sessionDirFromTranscript(located?.file, cwd)
+          if (where) {
+            sessionDir = where.dir
+            if (where.overruled) tabCwdMismatch = where.overruled
+          }
         }
       }
 
@@ -242,6 +258,7 @@ export async function collectSessionRows(
         ...(tabProc ? { claude_pid: tabProc.proc.pid, claude_pid_via: tabProc.via } : {}),
         ...(susp?.record.suspendedAt ? { suspended_at: susp.record.suspendedAt } : {}),
         ...(susp?.dormant ? { suspended_dormant: true } : {}),
+        ...(tabCwdMismatch ? { tab_cwd_mismatch: tabCwdMismatch } : {}),
       })
     }
 

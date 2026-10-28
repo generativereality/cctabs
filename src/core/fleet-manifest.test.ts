@@ -223,3 +223,14 @@ it('excludes its own Codex process even before a rollout id is known', () => {
   expect(result.entries).toEqual([])
   expect(result.excluded.map((e) => e.name)).toEqual(['self-codex'])
 })
+
+describe('buildManifest — tab cwd mismatch', () => {
+  it('warns when the tab sat elsewhere than its session ran, and keeps the transcript dir', () => {
+    const r = buildManifest(
+      [row('ts', { cwd: '/home/vault', session_id: S1, session_lookup: 'found', session_source: 'registry', tab_cwd_mismatch: '/work/other/.claude/worktrees/w37' })],
+      opts({ transcriptInDir: () => true }),
+    )
+    expect(r.problems).toEqual([expect.objectContaining({ name: 'ts', code: 'tab-cwd-mismatch', severity: 'warning' })])
+    expect(JSON.stringify(r)).toContain('/home/vault')
+  })
+})

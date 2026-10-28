@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **Fix: a restored session could come back in the wrong repo.** When a tab's session id came from the running Claude rather than from the tab's directory, `sessions --json` and the fleet manifest still took the tab's cwd as the session's dir. A tab whose shell sat in one repo while its Claude worked in another was therefore restored in the wrong repo, where it loaded that repo's CLAUDE.md, and every restart repeated it. The dir now comes from the transcript's last recorded cwd, unless the tab's dir is the same tree (a worktree's repo root, a subdirectory). The manifest warns `tab-cwd-mismatch`, `sessions --json` reports `tab_cwd_mismatch`, and `restore` says when it overrules a manifest's dir.
+
 ## 0.7.2 — 2026-10-27
 
 - **`cctabs account add <name>` adds another Claude account.** You sign in as that account with Claude's normal login in the tab it opens, and cctabs writes the `[backends.<name>]` preset itself: a name and a config dir, no token. Claude Code keeps each `CLAUDE_CONFIG_DIR`'s login in its own Keychain entry (`Claude Code-credentials-<hash>`), so the new login doesn't replace yours. `cctabs account list` shows the accounts. This replaces a fifteen-line skill recipe (sign in elsewhere, `claude setup-token`, paste the token into the config, `chmod`, sign back in) written when the Keychain held one login per OS user. Presets that carry a token keep working.
