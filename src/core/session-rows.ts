@@ -84,6 +84,13 @@ export interface SessionRow {
    */
   suspended_at?: string
   suspended_dormant?: boolean
+  /**
+   * What is in the input box, read off the screen: `typed` is a draft that
+   * Enter would send, `suggestion` is Claude's dim prompt suggestion (ghost
+   * text Tab accepts), which is NOT a draft. Omitted when the box can't be
+   * read — an older plugin without `screen`, a never-shown tab, a picker.
+   */
+  prompt?: { typed: string; suggestion: string | null }
 }
 
 export interface WorkspaceRow {
@@ -220,6 +227,15 @@ export async function collectSessionRows(
         countInDir: () => engine === 'codex' ? codexSessions.filter((s) => s.cwd === sessionDir).length : countSessionsInDir(cwd),
       })
 
+      // Only where an agent's input box can be on screen: one screen read per
+      // tab, and a shell or a suspended tab has no box to read.
+      const draft = (status === 'idle' || status === 'active') && adapter.inputDraft
+        ? await adapter.inputDraft(b.blockid).catch(() => null)
+        : null
+      const prompt = draft && draft.state !== 'unknown'
+        ? { typed: draft.state === 'draft' ? draft.text : '', suggestion: draft.suggestion ?? null }
+        : undefined
+
       wsRow.sessions.push({
         engine,
         ...(cx ? { codex_pid: cx.proc.pid } : {}),
@@ -242,6 +258,7 @@ export async function collectSessionRows(
         ...(tabProc ? { claude_pid: tabProc.proc.pid, claude_pid_via: tabProc.via } : {}),
         ...(susp?.record.suspendedAt ? { suspended_at: susp.record.suspendedAt } : {}),
         ...(susp?.dormant ? { suspended_dormant: true } : {}),
+        ...(prompt ? { prompt } : {}),
       })
     }
 

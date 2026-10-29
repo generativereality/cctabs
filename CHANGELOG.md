@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **A prompt suggestion is no longer mistaken for a typed draft.** An idle Claude shows a guess at your next message in its empty input box: dim text that Tab accepts. Scrollback printed it as plain text, so it read exactly like a draft someone never sent, and agents driving the tab held back their sends on it. `cctabs scrollback` now shows it as `❯ ⟨suggestion: …⟩`, `cctabs sessions` says so, and `sessions --json` reports `prompt: {typed, suggestion}`. `send` already treated the box as empty, and typing replaces the suggestion (Claude Code draws it as the input's placeholder). Needs tabby-cctabs with the `screen` capability (0.1.6+); with an older plugin nothing changes.
+
 ## 0.7.2 — 2026-10-27
 
 - **`cctabs account add <name>` adds another Claude account.** You sign in as that account with Claude's normal login in the tab it opens, and cctabs writes the `[backends.<name>]` preset itself: a name and a config dir, no token. Claude Code keeps each `CLAUDE_CONFIG_DIR`'s login in its own Keychain entry (`Claude Code-credentials-<hash>`), so the new login doesn't replace yours. `cctabs account list` shows the accounts. This replaces a fifteen-line skill recipe (sign in elsewhere, `claude setup-token`, paste the token into the config, `chmod`, sign back in) written when the Keychain held one login per OS user. Presets that carry a token keep working.

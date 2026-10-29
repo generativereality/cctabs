@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { readInputDraft, draftBackoff, type ScreenRow } from './input-draft.js'
+import { readInputDraft, draftBackoff, markSuggestion, type ScreenRow } from './input-draft.js'
 
 // Shapes taken from real Claude Code 2.1.300 screens rendered through a
 // headless xterm 5.4.0 (Tabby's): `{…}` marks dim text in the helper below.
@@ -102,5 +102,80 @@ describe('readInputDraft — Codex while typing', () => {
   })
   it('does not read a shell prompt drawn with › as a Codex box', () => {
     expect(readInputDraft(screen('motin › ls', 'a b c', 'motin › ')).state).toBe('unknown')
+  })
+})
+
+// Claude Code's prompt suggestion — the guess at your next message that Tab
+// accepts — is drawn as the input's placeholder: dim, and only while the box
+// is empty (Claude Code 2.1.312). Typing over it replaces it; a real 2.1.312
+// screen through xterm 5.4.0 after typing `hello` over the placeholder:
+const TYPED_OVER = [RULE, '❯ hello', RULE]
+const PLACEHOLDER_BEFORE = [RULE, '❯ {Try "write a test for <filepath>"}', RULE]
+
+describe('readInputDraft — prompt line states', () => {
+  it('typed text: a draft, no suggestion', () => {
+    expect(readInputDraft(screen(RULE, '❯ fix the flaky test', RULE, ...FOOTER)))
+      .toEqual({ state: 'draft', text: 'fix the flaky test' })
+  })
+
+  it('a suggestion only: empty, with the suggestion reported apart', () => {
+    expect(readInputDraft(screen(RULE, '❯ {ok run the tests}', RULE, ...FOOTER)))
+      .toEqual({ state: 'empty', suggestion: 'ok run the tests' })
+  })
+
+  it('typed text followed by a dim completion, on one line', () => {
+    expect(readInputDraft(screen(RULE, '❯ /rev{iew}', RULE)))
+      .toEqual({ state: 'draft', text: '/rev', suggestion: 'iew' })
+  })
+
+  it('an empty line: empty, and the stock hint is not a suggestion', () => {
+    expect(readInputDraft(screen(RULE, '❯ ', RULE))).toEqual({ state: 'empty' })
+    expect(readInputDraft(screen(...PLACEHOLDER_BEFORE))).toEqual({ state: 'empty' })
+  })
+
+  it('an open menu: unchanged, still unknown', () => {
+    const s = screen('❯ /model', RULE, '  Select model', '  ❯ 2.  Opus 5.5 ✔', '  Enter to set as default · Esc to cancel')
+    expect(readInputDraft(s).state).toBe('unknown')
+  })
+
+  it('typing over the placeholder replaces it, leaving nothing dim behind', () => {
+    expect(readInputDraft(screen(...TYPED_OVER))).toEqual({ state: 'draft', text: 'hello' })
+  })
+
+  it('reads a Codex suggestion the same way', () => {
+    expect(readInputDraft(screen('• ready', '› {summarize the diff}', '  GPT default · /tmp', '  ? for shortcuts')))
+      .toEqual({ state: 'empty', suggestion: 'summarize the diff' })
+  })
+})
+
+describe('markSuggestion', () => {
+  const sb = ['⏺ Done. The report is ready.', '', '────', '❯ ok run the tests', '────', '  ⏵⏵ auto mode on'].join('\n')
+
+  it('wraps a suggestion-only prompt line, so it does not read as a draft', () => {
+    const out = markSuggestion(sb, { state: 'empty', suggestion: 'ok run the tests' })
+    expect(out).toContain('❯ ⟨suggestion: ok run the tests⟩')
+    expect(out).not.toContain('❯ ok start')
+  })
+
+  it('matches the stream with its spaces lost, and a line cut short', () => {
+    const squashed = '────\n❯ okrunthe\n────'
+    expect(markSuggestion(squashed, { state: 'empty', suggestion: 'ok run the tests' }))
+      .toBe('────\n❯ ⟨suggestion: ok run the tests⟩\n────')
+  })
+
+  it('keeps typed text bare and marks only the completion', () => {
+    expect(markSuggestion('────\n❯ /review\n────', { state: 'draft', text: '/rev', suggestion: 'iew' }))
+      .toBe('────\n❯ /rev⟨suggestion: iew⟩\n────')
+  })
+
+  it('appends a note when no line spells the suggestion out', () => {
+    const out = markSuggestion('⏺ hi\n', { state: 'empty', suggestion: 'run it' })
+    expect(out).toBe('⏺ hi\n⟨input box: empty — the dim "run it" in it is Claude\'s prompt suggestion, not a draft⟩\n')
+  })
+
+  it('leaves scrollback alone for a draft, an empty box, or an unreadable one', () => {
+    expect(markSuggestion(sb, { state: 'draft', text: 'ok run the tests' })).toBe(sb)
+    expect(markSuggestion(sb, { state: 'empty' })).toBe(sb)
+    expect(markSuggestion(sb, { state: 'unknown', why: 'old plugin' })).toBe(sb)
   })
 })
