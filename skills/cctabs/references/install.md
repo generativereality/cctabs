@@ -4,6 +4,58 @@
 >
 > Reference for the `cctabs` skill — moved out of [SKILL.md](../SKILL.md) to keep it short.
 
+## Getting cctabs running
+
+```bash
+which cctabs || ls "$(npm prefix -g)/bin/cctabs" 2>/dev/null
+```
+
+If found, use whichever path works. If `cctabs` is on PATH, use it directly. Otherwise use the full path from `npm prefix -g`.
+
+If not found, ask the user: "cctabs isn't installed yet — want me to install it globally with npm?" If they agree, run:
+
+```bash
+npm install -g @generativereality/cctabs
+```
+
+Do not modify PATH or npm configuration beyond this.
+
+### Check the installed version isn't stale
+
+On your first cctabs invocation in a session, look at the version banner cctabs prints (`(@generativereality/cctabs vX.Y.Z)`) and at any `[cctabs] OUTDATED ...` warning line (on stderr, so `--json` output stays clean). If you see the warning — or if the banner version is older than the version in this skill's `plugin.json` — tell the user:
+
+> *"Your installed cctabs is `vX.Y.Z`; the current release is `vA.B.C`. Want me to upgrade with `npm install -g @generativereality/cctabs@latest` before continuing?"*
+
+Don't silently work around an outdated CLI: detection heuristics, command flags, and bug fixes diverge between versions, so misbehavior on the user's machine is often "binary on PATH lags behind the plugin docs you're reading." The Claude Code marketplace plugin update path only refreshes this skill — the npm-installed CLI binary is a separate channel and must be upgraded explicitly.
+
+⚠️ **This text can itself be the stale half**: the cached skill can lag the CLI on PATH by several releases. If `cctabs <cmd> --help` disagrees with this file, trust the binary; `cctabs doctor` says when this skill is older than the CLI.
+
+### A one-time plugin install is needed
+
+Tabby is the terminal cctabs supports, and it **needs a small companion plugin** that exposes a localhost HTTP API the cctabs CLI talks to.
+
+**Wave Terminal is not supported.** It was a working backend through 0.4.x and was withdrawn in 0.5.0 — tabs opened, but the Claude session inside them often never started. Under Wave, every cctabs command exits with a pointer to Tabby. If a user is on Wave, the move is: install Tabby, install the companion plugin, then `cctabs restore` — their conversations live in `~/.claude/projects` and are unaffected by the terminal switch.
+
+You don't need to detect this proactively — every cctabs command will fail with a self-documenting error if the plugin isn't running:
+
+```
+cctabs Tabby plugin not reachable at http://127.0.0.1:3300.
+  reason: …
+Install + restart Tabby in one shot from inside a Tabby tab:
+  cctabs install-tabby-plugin
+…
+```
+
+When you see that error, ask the user once:
+
+> *"You're in Tabby and the cctabs plugin isn't installed. I can `cctabs install-tabby-plugin --yes`: it installs the plugin, saves every open session, closes the tabs, restarts Tabby and restores them all in a new tab. OK?"*
+
+On approval, run `cctabs install-tabby-plugin --yes`. **Your current turn ends when Tabby quits**; this session comes back with the rest. `--no-restart` installs only, for a user who will restart Tabby themselves.
+
+`cctabs doctor` is also available for a deliberate environment check: it reports the detected terminal (and how it was detected), whether a login+interactive shell can find `node`, and — on Tabby — whether the cctabs plugin answers its localhost health endpoint. Useful if something feels off, but **not required as a preflight** since every command fails loudly on its own.
+
+What the auto-install does step by step, the manual and GUI installs, and driving a remote Tabby over SSH: [references/install.md](install.md).
+
 ## When this skill text is the stale half
 
 The skill (the plugin marketplace) and the CLI (npm) update separately, so this text can lag the CLI by several releases. `cctabs doctor` says so: its `cctabs skill` line warns when the installed skill is older than the CLI, and says how to update it. Until the user updates, treat anything *absent* from this file as possibly just missing here, and prefer `cctabs <cmd> --help` where the two disagree.
