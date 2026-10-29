@@ -4,6 +4,37 @@
 >
 > Reference for the `cctabs` skill — moved out of [SKILL.md](../SKILL.md) to keep it short.
 
+## When to Use Worktrees
+
+**Use `--worktree` whenever a tab will edit code on a branch that differs from the main working tree.** This includes:
+- Fixing CI on a PR (`cctabs new fix-1789 ~/Dev/myapp --worktree`)
+- Working on a feature branch while the main checkout runs a dev server
+- Any task where multiple tabs might checkout different branches
+
+Without `--worktree`, all tabs share the same working directory. If two tabs checkout different branches, they stomp on each other's files — causing silent conflicts, lost changes, and broken dev servers.
+
+**Rule of thumb:**
+- **Read-only / docs / coordination** → no worktree needed (stays on current branch)
+- **Editing code on a different branch** → always `--worktree`
+
+```bash
+# ❌ WRONG — two tabs checking out different branches in the same directory
+cctabs new fix-auth ~/Dev/myapp --prompt "checkout PR #101 and fix lint"
+cctabs new fix-api ~/Dev/myapp --prompt "checkout PR #102 and fix tests"
+
+# ✅ RIGHT — each gets its own isolated copy
+cctabs new fix-auth ~/Dev/myapp --worktree --prompt "checkout PR #101 and fix lint"
+cctabs new fix-api ~/Dev/myapp --worktree --prompt "checkout PR #102 and fix tests"
+```
+
+⚠️ Both ✅ lines carry a precondition: `~/Dev/myapp` must be a repo **Claude Code
+has already been trusted in**. If it isn't, the tab opens on the trust dialog, the
+`--prompt` is never seen, and the spawn still reports fine — see [trust-gate.md](trust-gate.md).
+
+## Worktrees: point tabs at the repo root
+
+**Always point tabs at the repo root — never at a manually-created worktree directory.** Use `cctabs new feature ~/Dev/myapp --worktree` and let it create `~/Dev/myapp/.claude/worktrees/feature/`. Existing branches, the reasons, and recovering a session whose worktree is gone: [references/worktrees.md](worktrees.md).
+
 ## Workflow: Worktrees
 
 **Always point tabs at the repo root — never at a manually-created worktree directory.** Claude Code manages worktrees itself via `claude --worktree <name>`, which creates `.claude/worktrees/<name>/` inside the repo and handles branch creation and cleanup automatically.

@@ -4,6 +4,14 @@
 >
 > Reference for the `cctabs` skill — moved out of [SKILL.md](../SKILL.md) to keep it short.
 
+## In short: before you message another tab
+
+- ⛔ **Resolve the owner from the BRANCH, not the tab's name.** If no tab maps to the owning branch, say so and send nothing. Read what the tab has already said (`cctabs transcript`) and relay what was SAID, not your conclusions. The three gates in full: [references/routing.md](routing.md).
+- **Text containing `--` is just text** (0.6.3+): `cctabs send auth "run publish.sh --push"` and `cctabs new … --prompt "… --push …"` both work. Only a message that is a single bare flag-shaped word needs the terminator: `cctabs send auth -- --push`.
+- ⛔ **Read a send's LAST line, and its exit code.** `NOT SENT to …` (exit 1) means nothing was submitted — the box held a draft, the text didn't land, or Enter didn't take. `| tail -1` is safe from 0.6.3 (the error used to be followed by a blank line, so it printed nothing). A refusal on a draft that is itself a peer's message meant for that tab is the one case for `--allow-draft`.
+- ⛔ **`nothing from the text appeared in the tab` means the tab is on a rendered menu** — don't retry with `--path` and don't drive the menu blind; `cctabs scrollback` it and escalate (the trust dialog is the one exception, above). The 1 KB busy-tab refusal means shorten the message, not `--force` it.
+- All `send` forms and refusals: [references/sending.md](sending.md). Remote Control status across the fleet: [references/remote-control.md](remote-control.md).
+
 ## Workflow: Sending Input to a Session
 
 ```bash
@@ -12,7 +20,7 @@ cctabs send auth "\n"           # press enter (confirm a prompt)
 cctabs send auth --submit       # press Enter only — submits a prompt already parked in the box
 cctabs send auth "/clear\n"     # send a slash command
 cctabs send auth --path ~/prompts/task.txt   # hand over a path — the safe way for anything large
-cctabs send auth --file ~/prompts/task.txt   # paste the contents (short payloads only, see SKILL.md)
+cctabs send auth --file ~/prompts/task.txt   # paste the contents (short payloads only: anything large goes by --path)
 echo "do the thing" | cctabs send auth       # pipe via stdin
 ```
 
@@ -114,8 +122,7 @@ a case for `--force`.
   unblocks it; a driver reports it. **The trust dialog is the one exception** —
   two options with the marker parked on `No, exit`, so
   `printf '\033[B' | cctabs send <tab>` is deterministic rather than a guess. Best
-  of all, don't arrive here: the gate is preventable at spawn time, see **"The
-  trust gate"** in [SKILL.md](../SKILL.md).
+  of all, don't arrive here: the gate is preventable at spawn time, see [trust-gate.md](trust-gate.md).
 - ⚠️ **The 1 KB busy-tab refusal means shorten the message, not force it
   through.** It fired twice in one day of driving and shortening was the right
   response both times — a multi-kilobyte brief aimed at a tab mid-turn is nearly

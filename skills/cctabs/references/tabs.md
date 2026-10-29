@@ -107,3 +107,9 @@ Name tabs after the **project or task**:
 - `infra` — infrastructure
 - `pr-1234` — specific PR work
 - `auth-v2` — forked attempt
+
+## Notes: names, matching and config
+
+- Tab names are matched by exact name, then by prefix, ignoring case — except that an exact-case match wins, so `dal` and `DAL` are two different targets. Block IDs can be abbreviated to 8 characters, and `send` resolves a name to its block
+- `cctabs new` and `cctabs resume` automatically pass `--name <tab-name>` to claude, syncing the session display name with the tab title. `cctabs rename` changes the tab title, the live session/RC name (it sends Claude `/rename`) and the on-disk `customTitle`, so `resume`/`restore` find the new name after a restart (see "Two names" in [references/tabs.md](tabs.md))
+- `claude.flags` in `~/.config/cctabs/config.toml` apply to every session; `defaults.prefix` in `~/.config/cctabs/config.toml` (empty by default) is prepended to both the tab title and the `claude --name` for every name minted by `new`/`resume`/`fork` — set it to disambiguate this machine when multiple machines share one claude.ai remote-control list

@@ -3,6 +3,10 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **The skill costs a fifth of what it did.** Its body, which every session that uses cctabs carries for the rest of the session, went from about 8,450 tokens (475 lines) to about 1,600 (73 lines): eleven rules, the commands you use most and an index of the references. Nothing was dropped: the walkthroughs, incident notes and the full command list moved into `references/` (new: `spawning.md`, `reading-tabs.md`, `commands.md`), which Claude reads only when one fits. Prompted by ClaudeTTY's ~75-token skill description; the comparison is in `notes/2026-10-29-borrow-from-claudetty.md`.
+
 ## 0.7.2 — 2026-10-27
 
 - **`cctabs account add <name>` adds another Claude account.** You sign in as that account with Claude's normal login in the tab it opens, and cctabs writes the `[backends.<name>]` preset itself: a name and a config dir, no token. Claude Code keeps each `CLAUDE_CONFIG_DIR`'s login in its own Keychain entry (`Claude Code-credentials-<hash>`), so the new login doesn't replace yours. `cctabs account list` shows the accounts. This replaces a fifteen-line skill recipe (sign in elsewhere, `claude setup-token`, paste the token into the config, `chmod`, sign back in) written when the Keychain held one login per OS user. Presets that carry a token keep working.
