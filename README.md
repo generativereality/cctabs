@@ -1,16 +1,18 @@
 # cctabs
 
-**Run 20+ Claude Code and Codex CLI sessions in your own terminal tabs.**
+**Make Claude Code aware of the other tabs in your terminal, so it can message them and hand out work.**
+
+Nothing more, nothing less. Your terminal and your tabs stay as they are; cctabs adds the awareness. [Tabby](https://tabby.sh) is supported today.
 
 https://github.com/user-attachments/assets/69a50f86-27dc-42b3-a401-330cac051810
 
 No video above? [Watch the 47-second demo on cctabs.com](https://cctabs.com).
 
+- **Claude hands out the work.** It opens tabs by name, reads what each one is doing, and sends them prompts (`cctabs send`), on any account or backend, checking that the message arrived.
 - **Built for 20+ sessions.** Around ten you can juggle by hand; past that you need orchestration, and Claude Code can do it itself.
 - **Native tabs, not tmux.** Your keybindings work and scrolling behaves.
 - **Any account, any backend, per tab.** Your Claude account, a client's, [Codex CLI](skills/cctabs/references/codex.md), Ollama Cloud or a local model, side by side.
 - **Out of quota? Move the session** to another account and pick it up where it left off (`cctabs profile-copy`).
-- **Sessions talk across accounts.** Claude Code's own messaging only reaches sessions on the same account; `cctabs send` reaches any tab.
 - **Restore after a restart.** Every tab comes back, named, in order, resumed.
 - And: tab colours by account or by rule, reorder tabs by recent activity, suspend idle tabs so they stop taking memory.
 
