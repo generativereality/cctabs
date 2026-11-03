@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitepress'
 
 const siteUrl = 'https://cctabs.com'
-const ogTitle = 'cctabs — Run 20+ Claude Code sessions in your own terminal tabs'
-const ogDescription = 'A Claude Code and Codex CLI fleet tab manager for people who prefer each session in its own native terminal tab, not tmux or a dashboard. It enables swift coordination of 20+ long-running sessions: Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact.'
+const ogTitle = 'cctabs — Make Claude Code aware of the other tabs in your terminal'
+const ogDescription = 'cctabs makes Claude Code aware of the other tabs in your terminal, so it can message them and hand out work. Nothing more, nothing less: your terminal and your tabs stay as they are. Tabby is supported today. For people who keep many Claude Code or Codex CLI sessions open; every tab can run its own account or backend, and the whole fleet comes back after a restart.'
 
 export default defineConfig({
   title: 'cctabs',
-  description: 'A Claude Code and Codex CLI fleet tab manager for people who prefer each session in its own native terminal tab, not tmux or a dashboard. It enables swift coordination of 20+ long-running sessions: Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact.',
+  description: ogDescription,
   lang: 'en-US',
   cleanUrls: true,
 

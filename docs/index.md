@@ -1,12 +1,12 @@
 ---
 layout: home
-title: cctabs — Run 20+ Claude Code sessions in your own terminal tabs
-description: "A Claude Code and Codex CLI fleet tab manager for people who prefer each session in its own native terminal tab, not tmux or a dashboard. It enables swift coordination of 20+ long-running sessions: Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact."
+title: cctabs — Make Claude Code aware of the other tabs in your terminal
+description: "cctabs makes Claude Code aware of the other tabs in your terminal, so it can message them and hand out work. Nothing more, nothing less: your terminal and your tabs stay as they are. Tabby is supported today. For people who keep many Claude Code or Codex CLI sessions open; every tab can run its own account or backend, and the whole fleet comes back after a restart."
 
 hero:
   name: cctabs
-  text: Run 20+ Claude Code sessions in your own terminal tabs
-  tagline: "A fleet tab manager for Claude Code and Codex CLI, for people who prefer each session in its own native terminal tab: no tmux, no dashboard, so your keybindings and scrolling still work. Claude/Codex itself opens, reads and prompts the tabs, every tab comes back after a restart, and any tab can be moved to another account on demand, its session continuing intact."
+  text: Make Claude Code aware of the other tabs in your terminal
+  tagline: "So it can message them and hand out work. Nothing more, nothing less: your terminal and your tabs stay as they are, with no tmux and no dashboard. Tabby is supported today."
   actions:
     - theme: brand
       text: Get Started
@@ -16,6 +16,8 @@ hero:
       link: https://github.com/generativereality/cctabs
 
 features:
+  - title: Claude hands out the work
+    details: Claude opens tabs by name, reads what any tab is doing without switching to it, and sends it a prompt, whatever account or backend either one runs on. The send checks that the message actually arrived.
   - title: Built for 20+ sessions
     details: Around ten sessions you can still juggle by hand. Past that you need orchestration. cctabs names every tab, shows which sessions are busy and which are waiting for you, and lets Claude open, read and message the rest, so the fleet keeps growing without the bookkeeping growing with it.
   - title: Native tabs, not tmux
@@ -28,8 +30,6 @@ features:
     details: When one account runs out, move the session to another and pick it up right where it left off. cctabs copies the whole conversation, subagent history included, and opens it in a new tab under the other account.
     link: /reference/commands#cctabs-profile-copy
     linkText: profile-copy
-  - title: Sessions talk across accounts
-    details: Claude Code's own messaging between sessions only reaches sessions on the same account. With cctabs, any tab can read what another is doing and send it a prompt, whatever account or backend either one runs on, and the send checks that the message actually arrived.
   - title: Restore after a restart
     details: Restart the computer and every tab comes back, named, in its original order, resumed where it left off. cctabs can also restart Tabby itself, or the whole fleet onto a new Claude Code version, without losing a conversation.
     link: /guide/workflows#resuming-after-a-restart
