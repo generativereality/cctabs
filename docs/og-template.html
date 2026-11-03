@@ -133,7 +133,7 @@
     <div class="left">
       <div class="badge">Claude Code</div>
       <h1>cc<span>tabs</span></h1>
-      <div class="tagline">Run 20+ Claude Code sessions<br>in your own terminal tabs.<br>No tmux. Claude orchestrates itself.</div>
+      <div class="tagline">Make Claude Code aware of the<br>other tabs in your terminal, so it can<br>message them and hand out work.</div>
       <div class="install">
         <span class="prompt">$</span>npm install -g @generativereality/cctabs
       </div>
@@ -150,12 +150,12 @@
         <div class="line"><span class="ps">$</span><span class="cmd">cctabs sessions</span></div>
         <div class="line"><span class="out green">● auth</span><span class="out">active  ~/Dev/myapp</span></div>
         <div class="line"><span class="out indigo">○ api</span><span class="out">idle    ~/Dev/myapp</span></div>
-        <div class="line"><span class="out">  infra  terminal</span></div>
-        <div class="line" style="margin-top:8px"><span class="ps">$</span><span class="cmd">cctabs new payments ~/Dev/myapp \</span></div>
-        <div class="line"><span class="cmd" style="padding-left:16px">--prompt "implement billing"</span></div>
-        <div class="line"><span class="out green">✔ Tab "payments" opened</span></div>
-        <div class="line" style="margin-top:8px"><span class="ps">$</span><span class="cmd">cctabs scrollback payments 5</span></div>
-        <div class="line"><span class="out">❯ Starting on billing endpoint...</span></div>
+        <div class="line"><span class="out indigo">○ docs</span><span class="out">idle    ~/Dev/myapp</span></div>
+        <div class="line" style="margin-top:8px"><span class="ps">$</span><span class="cmd">cctabs send api \</span></div>
+        <div class="line"><span class="cmd" style="padding-left:16px">"add the /refresh endpoint"</span></div>
+        <div class="line"><span class="out green">✔ Sent to 5f3e853e and verified</span></div>
+        <div class="line" style="margin-top:8px"><span class="ps">$</span><span class="cmd">cctabs scrollback api 5</span></div>
+        <div class="line"><span class="out">❯ Adding the /refresh endpoint...</span></div>
       </div>
     </div>
   </div>
