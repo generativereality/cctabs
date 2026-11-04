@@ -194,7 +194,7 @@ cctabs sort --first a,b,c [--dry]        # PIN these tabs to the front, in this 
 cctabs scrollback <tab-or-block> [n]    # read terminal output — the last PAINTED FRAME (default: 50 lines)
 cctabs transcript <tab> [n] [--json]    # read what a tab has SAID: its last n assistant messages, from the transcript (alias: `findings`)
 cctabs new <name> [dir] --engine codex [--prompt …]   # Codex; session discovery, manifest restore and --suspended work — see references/codex.md
-cctabs new <name> [dir] --engine opencode|pi|hermes [--prompt …] [--resume <id>] [-m <model>]   # opens the harness's TUI with the prompt as its first turn; status, fork, suspend and restore are Claude/Codex only for now
+cctabs new <name> [dir] --engine opencode|opencode2|pi|hermes|grok [--prompt …] [--resume <id>] [-m <model>]   # opens the harness's TUI with the prompt as its first turn (grok: no --prompt, use `cctabs send`; opencode2: no -m); status, fork, suspend and restore are Claude/Codex only for now
 cctabs send <tab-or-block> [text]        # send input — arg, --file, or stdin pipe
 cctabs send <tab> --path <file>          # hand the tab a file PATH to read — the safe way to deliver anything large
 cctabs send <tab> --file <f> --verify    # check the target's transcript for what it actually RECEIVED

@@ -1,5 +1,6 @@
 /**
- * Other agent harnesses as the program in a tab: opencode, pi and Hermes. Pure.
+ * Other agent harnesses as the program in a tab: opencode (1.x and 2.x), pi,
+ * Hermes and Grok Build. Pure.
  *
  * Launch-only for now: `cctabs new --engine <harness>` opens a named tab that
  * starts the harness's interactive TUI, with the first turn, the model and a
@@ -20,21 +21,49 @@
  *             `hermes chat -q/--query`: "On a real TTY the prompt is submitted
  *             literally as the first turn of a normal interactive session … and
  *             the session stays open"; `-m/--model`, `-r/--resume <session>`.
+ *   opencode2 https://opencode.ai/v2/docs/cli and the root command's flags in
+ *             anomalyco/opencode packages/cli/src/commands/commands.ts (dev @ ffe6fed,
+ *             read 2026-11-04): `opencode [directory]` with `--prompt` "Prompt to
+ *             use", `-s/--session` "Session ID to continue, or to create if it does
+ *             not exist", `-c/--continue`. No `--model` on the root command (only
+ *             `mini` and `run` take one), so cctabs refuses `-m` for it. The TUI
+ *             auto-submits `--prompt` once it is ready (packages/tui/src/routes/home.tsx).
+ *             Same binary name as 1.x: `opencode`.
+ *   grok      https://docs.x.ai/build/cli/reference: "Running `grok` with no
+ *             arguments starts the interactive TUI"; `-m/--model <MODEL>`,
+ *             `-r/--resume [<ID>]`. The only documented prompt is headless
+ *             (`grok -p`, https://docs.x.ai/build/cli/headless-scripting), so
+ *             cctabs refuses `--prompt` for Grok rather than guess a TUI flag.
  */
 
-export type Harness = 'opencode' | 'pi' | 'hermes'
-export const HARNESSES: readonly Harness[] = ['opencode', 'pi', 'hermes']
+export type Harness = 'opencode' | 'opencode2' | 'pi' | 'hermes' | 'grok'
+export const HARNESSES: readonly Harness[] = ['opencode', 'opencode2', 'pi', 'hermes', 'grok']
 
 export function parseHarness(v: string | undefined): Harness | null {
   return (HARNESSES as readonly string[]).includes(v ?? '') ? v as Harness : null
 }
 
-export const HARNESS_LABEL: Record<Harness, string> = { opencode: 'opencode', pi: 'pi', hermes: 'Hermes' }
+export const HARNESS_LABEL: Record<Harness, string> = { opencode: 'opencode', opencode2: 'opencode 2', pi: 'pi', hermes: 'Hermes', grok: 'Grok Build' }
+
+/** The program each harness runs: opencode 2 kept 1.x's binary name. */
+export const HARNESS_BIN: Record<Harness, string> = { opencode: 'opencode', opencode2: 'opencode', pi: 'pi', hermes: 'hermes', grok: 'grok' }
+
+/**
+ * Why this harness cannot take what was asked on its launch line, or null. Pure.
+ * Refusing beats guessing a flag the harness would reject or misread.
+ */
+export function harnessUnsupported(engine: Harness, o: { prompt?: string; model?: string }): string | null {
+  if (engine === 'opencode2' && o.model) return 'opencode 2 has no --model on its launch line (only `opencode mini` and `opencode run` take one). Open the tab without -m and pick the model in its TUI.'
+  if (engine === 'grok' && o.prompt !== undefined) return 'Grok Build documents no way to start its TUI with a first prompt (only headless `grok -p`). Open the tab without --prompt/--file and send the prompt with `cctabs send`.'
+  return null
+}
 
 export const HARNESS_INSTALL: Record<Harness, string> = {
   opencode: 'npm install -g opencode-ai (or https://opencode.ai/docs/)',
+  opencode2: 'npm install -g @opencode/cli (or https://opencode.ai/v2/docs/)',
   pi: 'npm install -g --ignore-scripts @earendil-works/pi-coding-agent (or https://pi.dev)',
   hermes: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash',
+  grok: 'see https://docs.x.ai/build/cli/reference',
 }
 
 /**
@@ -49,6 +78,12 @@ export function harnessArgs(engine: Harness, o: { prompt?: string; resumeId?: st
     if (o.model) out.push('--model', o.model)
     if (o.resumeId) out.push('--session', o.resumeId)
     if (o.prompt !== undefined) out.push(`--prompt=${o.prompt}`)
+  } else if (engine === 'opencode2') {
+    if (o.resumeId) out.push('--session', o.resumeId)
+    if (o.prompt !== undefined) out.push(`--prompt=${o.prompt}`)
+  } else if (engine === 'grok') {
+    if (o.model) out.push('--model', o.model)
+    if (o.resumeId) out.push('--resume', o.resumeId)
   } else if (engine === 'pi') {
     if (o.model) out.push('--model', o.model)
     if (o.resumeId) out.push('--session', o.resumeId)
@@ -67,5 +102,6 @@ export function harnessArgs(engine: Harness, o: { prompt?: string; resumeId?: st
 export function harnessOfCommand(command: string): Harness | null {
   const first = (command.trim().match(/^"[^"]*"|^\S+/)?.[0] ?? '').replace(/^"|"$/g, '')
   const base = (first.split(/[\\/]/).pop() ?? '').replace(/\.(exe|cmd|js)$/i, '').toLowerCase()
+  // opencode 1.x and 2.x share a binary; the command line cannot tell them apart.
   return parseHarness(base)
 }

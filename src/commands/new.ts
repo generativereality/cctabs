@@ -17,7 +17,7 @@ import { locateTranscriptFile } from '../core/transcript.js'
 import { launchEngine } from '../core/engine.js'
 import { openCodexSession } from '../core/open-codex.js'
 import { openHarnessSession } from '../core/open-harness.js'
-import { HARNESS_LABEL, parseHarness } from '../core/harness.js'
+import { HARNESS_LABEL, harnessUnsupported, parseHarness } from '../core/harness.js'
 
 export const newCommand = define({
   name: 'new',
@@ -37,7 +37,7 @@ export const newCommand = define({
     backend: { type: 'string', short: 'b', description: 'Backend preset (e.g. kimi, qwen-cloud, qwen-next-local, gpt-oss). Defaults to the CURRENT session\'s backend if any (via CCTABS_ACTIVE_BACKEND) — pass -b anthropic to force the default back explicitly. Run `cctabs backends` to list.' },
     model: { type: 'string', short: 'm', description: 'Override the model name (passed as --model to Claude or -m to Codex). Useful with --backend ollama-local.' },
     color: { type: 'string', short: 'c', description: `Tab colour: ${TAB_COLOR_NAMES.join(', ')} or a hex value like "#0275d8". Defaults to the backend preset's \`color\`, else \`[defaults] color\`.` },
-    engine: { type: 'string', short: 'e', description: 'Engine: claude, codex, opencode, pi or hermes. Defaults to the calling agent, else Claude; an explicit --backend selects Claude. --resume uses that engine’s session ID; Codex --model passes -m.' },
+    engine: { type: 'string', short: 'e', description: 'Engine: claude, codex, opencode, opencode2, pi, hermes or grok. Defaults to the calling agent, else Claude; an explicit --backend selects Claude. --resume uses that engine’s session ID; Codex --model passes -m.' },
     background: { type: 'boolean', short: 'B', description: 'Keep the tab you ran this from in front; the new tab opens and starts behind it. Default from `[defaults] background` in the config. Needs Tabby plugin 0.2.1+ (`tab-focus`).' },
     foreground: { type: 'boolean', description: 'Switch to the new tab (the default), overriding `[defaults] background`.' },
     suspended: { type: 'boolean', short: 's', description: 'Open the tab SUSPENDED (needs --resume): named and holding the session, but running a placeholder instead of its agent until woken by Enter, `cctabs resume`/`wake`, or `cctabs send`.' },
@@ -60,7 +60,7 @@ export const newCommand = define({
     if (!name) { consola.error('Tab name is required'); process.exit(1) }
     const harness = parseHarness(ctx.values.engine as string | undefined)
     const engine = harness ? 'codex' : launchEngine(ctx.values.engine as string | undefined, explicitBackend)
-    if (!engine) { consola.error(`Unknown --engine "${ctx.values.engine}". Use claude, codex, opencode, pi or hermes.`); process.exit(1) }
+    if (!engine) { consola.error(`Unknown --engine "${ctx.values.engine}". Use claude, codex, opencode, opencode2, pi, hermes or grok.`); process.exit(1) }
     if (harness) {
       if (explicitBackend) { consola.error(`--backend picks a Claude backend preset; it does not apply to --engine ${harness}.`); process.exit(1) }
       if (suspended || useWorktree || handoffPath !== undefined) {
@@ -77,6 +77,8 @@ export const newCommand = define({
       let color: string | null | undefined
       try { color = resolveColorPreference(colorInput, undefined, config.defaults.color) } catch (e) { consola.error((e as Error).message); process.exit(1) }
       const prompt = promptFile !== undefined ? readFileSync(promptFile, 'utf-8').trimEnd() : promptText
+      const unsupported = harnessUnsupported(harness, { prompt, model: modelOverride })
+      if (unsupported) { consola.error(unsupported); process.exit(1) }
       try {
         const tabId = await openHarnessSession({ engine: harness, tabName: displayName, dir, prompt, resumeId, model: modelOverride, afterActive: true, color, background })
         const rs = resumeId ? ` resume ${resumeId.slice(0, 8)}…` : ''

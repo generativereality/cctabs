@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test'
-import { harnessArgs, harnessOfCommand, parseHarness } from './harness.js'
-import { harnessLaunchBody } from './open-harness.js'
+import { harnessArgs, harnessOfCommand, harnessUnsupported, parseHarness } from './harness.js'
+import { harnessLaunchBody, harnessMissing } from './open-harness.js'
 
-test('only the three harnesses parse', () => {
+test('only the five harnesses parse', () => {
+  expect(parseHarness('opencode2')).toBe('opencode2')
+  expect(parseHarness('grok')).toBe('grok')
   expect(parseHarness('opencode')).toBe('opencode')
   expect(parseHarness('pi')).toBe('pi')
   expect(parseHarness('hermes')).toBe('hermes')
@@ -52,4 +54,30 @@ test('Windows launch line carries no user text for cmd or Git Bash to parse', ()
     expect(script).toContain(JSON.stringify([`--prompt=${prompt}`]))
     expect(script).toContain("shell:false")
   }
+})
+
+test('opencode 2: TUI with --prompt and --session, and no --model on its launch line', () => {
+  expect(harnessArgs('opencode2', {})).toEqual([])
+  expect(harnessArgs('opencode2', { prompt: '-x first', resumeId: 'ses_2', model: 'ignored/model' }))
+    .toEqual(['--session', 'ses_2', '--prompt=-x first'])
+  expect(harnessUnsupported('opencode2', { model: 'anthropic/claude-sonnet-4' })).toContain('no --model')
+  expect(harnessUnsupported('opencode2', { prompt: 'hi' })).toBeNull()
+})
+
+test('grok: TUI with --model and --resume; a first prompt is refused, never sent as headless -p', () => {
+  expect(harnessArgs('grok', {})).toEqual([])
+  expect(harnessArgs('grok', { model: 'grok-code', resumeId: 'abc' })).toEqual(['--model', 'grok-code', '--resume', 'abc'])
+  expect(harnessArgs('grok', { prompt: 'hi' })).not.toContain('-p')
+  expect(harnessUnsupported('grok', { prompt: 'hi' })).toContain('cctabs send')
+  expect(harnessUnsupported('grok', { model: 'grok-code' })).toBeNull()
+})
+
+test('opencode 2 runs the `opencode` binary, and its missing-install message names it', () => {
+  expect(harnessLaunchBody('opencode2', ['--prompt=hi'], { posix: true }, 'darwin')).toBe(`opencode '--prompt=hi'`)
+  expect(harnessMissing('zsh: command not found: opencode', 'opencode2')).toBe(true)
+  expect(harnessMissing('zsh: command not found: grok', 'grok')).toBe(true)
+  const win = harnessLaunchBody('opencode2', [], { posix: false }, 'win32')
+  const script = Buffer.from(win.match(/[A-Za-z0-9+/=]{40,}/)![0], 'base64').toString()
+  expect(script).toContain('"opencode.exe"')
+  expect(script).not.toContain('opencode2.exe')
 })
