@@ -3,6 +3,11 @@
 All notable changes to **cctabs** are listed here. The user-facing version of this
 page lives at [cctabs.com/changelog](https://cctabs.com/changelog).
 
+## Unreleased
+
+- **`cctabs new --engine opencode|pi|hermes` opens a tab running opencode, pi or Hermes Agent.** The tab is named like any other and starts the harness's own interactive TUI, with `--prompt`/`--file` as its first turn, `-m` as its model and `--resume <id>` as the session to continue, all passed on argv (`opencode --prompt=`, `pi -- <message>`, `hermes chat --query=`), so nothing is typed into the TUI. If the harness is not installed, `new` says so with its install line. On Windows the launch goes through the same encoded Node bootstrap as Codex, so no prompt text is parsed by cmd or Git Bash. Session status, `fork`, `--suspended` and `restore` still know only Claude and Codex; these tabs read as plain tabs there for now.
+- **`--engine opencode2` and `--engine grok` too.** opencode 2 (`@opencode/cli`) runs the same `opencode` binary with `--prompt=` and `--session`; its launch line has no `--model`, so `-m` is refused for it. Grok Build (`grok`) opens its TUI with `-m` and `--resume`; its docs show no way to give the TUI a first prompt (only headless `grok -p`), so `--prompt`/`--file` are refused for it and `cctabs send` delivers the prompt instead.
+
 ## 0.7.2 — 2026-10-27
 
 - **`cctabs account add <name>` adds another Claude account.** You sign in as that account with Claude's normal login in the tab it opens, and cctabs writes the `[backends.<name>]` preset itself: a name and a config dir, no token. Claude Code keeps each `CLAUDE_CONFIG_DIR`'s login in its own Keychain entry (`Claude Code-credentials-<hash>`), so the new login doesn't replace yours. `cctabs account list` shows the accounts. This replaces a fifteen-line skill recipe (sign in elsewhere, `claude setup-token`, paste the token into the config, `chmod`, sign back in) written when the Keychain held one login per OS user. Presets that carry a token keep working.

@@ -11,7 +11,7 @@ No video above? [Watch the 47-second demo on cctabs.com](https://cctabs.com).
 - **Claude hands out the work.** It opens tabs by name, reads what each one is doing, and sends them prompts (`cctabs send`), on any account or backend, checking that the message arrived.
 - **Built for 20+ sessions.** Around ten you can juggle by hand; past that you need orchestration, and Claude Code can do it itself.
 - **Native tabs, not tmux.** Your keybindings work and scrolling behaves.
-- **Any account, any backend, per tab.** Your Claude account, a client's, [Codex CLI](skills/cctabs/references/codex.md), Ollama Cloud or a local model, side by side.
+- **Any account, any backend, per tab.** Your Claude account, a client's, [Codex CLI](skills/cctabs/references/codex.md), opencode, pi, Hermes, Grok Build, Ollama Cloud or a local model, side by side.
 - **Out of quota? Move the session** to another account and pick it up where it left off (`cctabs profile-copy`).
 - **Restore after a restart.** Every tab comes back, named, in order, resumed.
 - And: tab colours by account or by rule, reorder tabs by recent activity, suspend idle tabs so they stop taking memory.
@@ -22,6 +22,7 @@ CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https
 cctabs new auth ~/Dev/myapp       # new tab, claude starts
 cctabs new api ~/Dev/myapp -b client-x        # same, on another Claude account
 cctabs new review ~/Dev/myapp --engine codex
+cctabs new explore ~/Dev/myapp --engine opencode   # or opencode2, pi, hermes, grok
 
 cctabs sessions                   # what's running across all tabs
 cctabs scrollback auth            # read what auth is doing without switching tabs
