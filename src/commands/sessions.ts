@@ -1,5 +1,6 @@
 import { codexStatus } from '../core/codex.js'
-import { matchCodexTabs } from '../core/codex-sessions.js'
+import { matchCodexTabs, readCodexSessions } from '../core/codex-sessions.js'
+import { contextByTab, contextOfSession, formatContext } from '../core/context-usage.js'
 import { define } from 'gunshi'
 import { requireAdapter } from '../core/adapter.js'
 import { classifyTerminalBuffer, parsePermissionMode } from '../core/session-status.js'
@@ -33,6 +34,8 @@ export const sessionsCommand = define({
     const procRows = readProcessTable()
     const suspended = suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)
     const codex = matchCodexTabs([...tabsById].flatMap(([tabId, blocks]) => { const b = blocks.find((b) => b.view === 'term'); return b ? [{ tabId, name: '', shellPid: b.shellPid }] : [] }), procRows ?? [], [])
+    const codexSessions = readCodexSessions()
+    const context = contextByTab(tabsById, tabNames, procRows, codexSessions)
 
     console.log('Sessions')
     console.log('='.repeat(50))
@@ -69,7 +72,9 @@ export const sessionsCommand = define({
           : '  terminal'
 
         console.log(`  [${tabId.slice(0, 8)}] "${name}"${cur}  ${cwd}`)
-        console.log(`    ${statusLabel}${permissionMode ? `  ·  ${permissionMode}` : ''}`)
+        // A suspended tab has no process to ask, but its registry names the session.
+        const ctxUsage = susp?.record.sessionId ? contextOfSession(susp.record.sessionId, susp.record.engine, codexSessions) : context.get(tabId)
+        console.log(`    ${statusLabel}${permissionMode ? `  ·  ${permissionMode}` : ''}${ctxUsage ? `  ·  ${formatContext(ctxUsage)}` : ''}`)
         if (susp?.record.sessionId) console.log(`    session ${susp.record.sessionId.slice(0, 8)}… · ${susp.record.dir.replace(process.env.HOME ?? '', '~')}`)
         // An unreadable tab is the one case where the status line alone would
         // mislead, so say what we do know: whether a process is running in it.
