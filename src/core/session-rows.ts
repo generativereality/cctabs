@@ -87,8 +87,8 @@ export interface SessionRow {
   suspended_dormant?: boolean
   /**
    * How full the session's context window is, from the last turn recorded in
-   * its transcript (see context-usage.ts). Omitted for a suspended tab, and
-   * when no transcript or no turn was found.
+   * its transcript (see context-usage.ts). A suspended tab reports the size
+   * it will wake with. Omitted when no transcript or no turn was found.
    */
   context?: ContextUsage
 }
@@ -221,7 +221,7 @@ export async function collectSessionRows(
       }
 
       let context: ContextUsage | null = null
-      if (sessionId && !susp) {
+      if (sessionId) {
         try {
           const file = engine === 'codex'
             ? (cx?.session ?? codexSessions.find((s) => s.id === sessionId))?.file

@@ -251,6 +251,19 @@ export function contextByTab(
   return out
 }
 
+/**
+ * Context usage of a session known by id, for when there is no live process
+ * to ask: a suspended tab's registry names its session and engine exactly.
+ */
+export function contextOfSession(id: string, engine: 'claude' | 'codex' | string | undefined, codexSessions: CodexSession[]): ContextUsage | null {
+  if (engine === 'codex') {
+    const file = codexSessions.find((s) => s.id === id)?.file
+    return file ? safe(() => codexContextUsage(file)) : null
+  }
+  const file = locateTranscriptFile(id)?.file
+  return file ? safe(() => claudeContextUsage(file)) : null
+}
+
 /** A listing must not fail because one transcript could not be read. */
 function safe<T>(f: () => T): T | null {
   try { return f() } catch { return null }
