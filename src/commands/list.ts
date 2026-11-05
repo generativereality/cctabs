@@ -2,7 +2,8 @@ import { define } from 'gunshi'
 import { requireAdapter } from '../core/adapter.js'
 import { readProcessTable } from '../core/claude-procs.js'
 import { readCodexSessions } from '../core/codex-sessions.js'
-import { contextByTab, formatContext } from '../core/context-usage.js'
+import { contextByTab, contextOfSession, formatContext } from '../core/context-usage.js'
+import { suspendedTabsIn } from '../core/suspend-ops.js'
 
 export const listCommand = define({
   name: 'list',
@@ -14,7 +15,14 @@ export const listCommand = define({
     const currentBlock = adapter.currentBlockId()
     const currentTab = adapter.currentTabId()
     const currentWs = adapter.currentWorkspaceId()
-    const context = contextByTab(tabsById, tabNames, readProcessTable(), readCodexSessions())
+    const procRows = readProcessTable()
+    const codexSessions = readCodexSessions()
+    const context = contextByTab(tabsById, tabNames, procRows, codexSessions)
+    // A suspended tab has no process to ask, but its registry names the session.
+    for (const [tabId, susp] of suspendedTabsIn(adapter, { tabsById, tabNames }, procRows)) {
+      const u = susp.record.sessionId ? contextOfSession(susp.record.sessionId, susp.record.engine, codexSessions) : null
+      if (u) context.set(tabId, u)
+    }
 
     for (const wsp of workspaces) {
       const { oid, name, tabids } = wsp.workspacedata
