@@ -4,8 +4,8 @@
 
 
 ```bash
-cctabs sessions                          # list all tabs with session status
-cctabs list                              # list all workspaces, tabs, and blocks
+cctabs sessions                          # list all tabs with session status and context use (ctx 42%; ~ = window guessed)
+cctabs list                              # list all workspaces, tabs, and blocks (also ctx %)
 cctabs new <name> [dir] [-w workspace] [-p "prompt"] [-f file]  # new tab; inherits caller’s engine (else Claude)
 cctabs new <name> [dir] --path <file>    # new tab handed a file PATH to read — same handoff as `send --path`, no short flag (`-p` is --prompt here)
 cctabs new <name> [dir] -b <preset>      # new tab on another backend / Claude account

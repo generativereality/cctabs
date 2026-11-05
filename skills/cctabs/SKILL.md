@@ -36,7 +36,7 @@ You drive Claude Code and Codex CLI sessions that each run in their own **termin
 ## Commands you will use
 
 ```bash
-cctabs sessions [--json]                    # every tab and its state
+cctabs sessions [--json]                    # every tab, its state and how full its context is (ctx 42%)
 cctabs new <name> [dir] --prompt "…"        # new tab with a task (--path <file> for a long one; -B keeps your tab in front)
 cctabs new <name> [dir] --worktree          # its own git worktree
 cctabs new <name> [dir] -b <preset>         # another account or model backend
