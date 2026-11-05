@@ -45,6 +45,13 @@ Then `prepare-reboot` stops: reboot, open Tabby, run `cctabs restore --pending`.
 come back as placeholders that wake on Enter or `cctabs send` (`--suspend-older-than <age>` to
 choose, `--all-running` for none). 96 Claudes starting at once took this machine to load 575.
 
+**Upgrading Tabby itself** (macOS, Homebrew): Tabby updates itself, so `brew info --cask tabby`
+can report an older installed version than the app really is (1.0.233 against a running 1.0.235,
+2026-10-21). `brew upgrade --cask tabby` replaces the app on disk while the old one keeps
+running, so follow it straight away with `cctabs restart-tabby` to load the new version, and save a
+`cctabs manifest --include-self -o <file>` first in case the running copy falls over in between.
+Worked 2026-10-21, 1.0.235 → 1.0.238, 29 sessions restored, none failed.
+
 **Windows** has been run end to end (Windows 11 ARM64, Tabby 1.0.238, 2026-10-15): the worker
 survives its own tab closing, quits Tabby with `taskkill` (no `/F`), and reopens it from the
 recorded `Tabby.exe` path. One Windows-specific behaviour: the first tab the restore spawns into
