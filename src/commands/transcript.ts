@@ -7,6 +7,8 @@ import { resolveTabTarget } from '../core/tab-target.js'
 import { resolveTabSession } from '../core/session.js'
 import { classifySessionLookup, explainSessionLookup } from '../core/session-lookup.js'
 import { readProcessTable } from '../core/claude-procs.js'
+import { harnessInShell, readHarnessTranscript } from '../core/harness-transcript.js'
+import { HARNESS_LABEL } from '../core/harness.js'
 import { liveTabSession, procTabsOf } from '../core/tab-session.js'
 import {
   countSessionsInDir,
@@ -20,7 +22,7 @@ const DEFAULT_TURNS = 3
 
 export const transcriptCommand = define({
   name: 'transcript',
-  description: "Print what a tab's Claude or Codex session has actually SAID — its last assistant messages, read from the transcript rather than the screen. Unlike `scrollback` this works on a tab that is mid-turn (whose screen is just a spinner).",
+  description: "Print what a tab's Claude, Codex, pi or opencode session has actually SAID — its last assistant messages, read from the transcript rather than the screen. Unlike `scrollback` this works on a tab that is mid-turn (whose screen is just a spinner).",
   args: {
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     turns: { type: 'number', short: 'n', description: `How many trailing assistant messages to print (default: ${DEFAULT_TURNS})` },
@@ -52,7 +54,28 @@ export const transcriptCommand = define({
     }
     const { name, cwd, blockId, tabId } = resolved.target
     const owner = [...tabsById].find(([, blocks]) => blocks.some((b) => b.blockid === blockId))?.[0]
-    const agent = owner ? tabAgent(adapter, data, owner) : undefined
+    // A tab running another harness (`cctabs new --engine`) is read from that
+    // harness's own store, before the Codex/Claude checks can misread it.
+    const rows = readProcessTable()
+    const shellPid = owner ? data.tabsById.get(owner)?.find((b) => b.view === 'term')?.shellPid : undefined
+    const harness = harnessInShell(shellPid, rows ?? [])
+    if (harness) {
+      adapter.closeSocket()
+      const read = readHarnessTranscript(harness.harness, harness.proc.cwd || cwd || '', name ?? '', harness.proc)
+      if (typeof read === 'string') fail(asJson, blockId, 'unreadable', `${name}: ${read}`)
+      const t = read as Exclude<typeof read, string>
+      const shown = t.turns.slice(-turnCount).map((x) => ({ ...x, text: truncateTurn(x.text, maxChars) }))
+      if (asJson) {
+        console.log(JSON.stringify({ engine: t.engine, tab: name, block_id: blockId, session_id: t.sessionId, cwd: harness.proc.cwd || cwd, source: t.source, matched_by: t.matchedBy, assistant_messages: t.turns.length, turns: shown }, null, 2))
+        return
+      }
+      console.log(`# ${name}  engine=${t.engine}  session=${t.sessionId}  source=${t.source}`)
+      if (t.matchedBy === 'newest-in-dir') console.log(`# ${HARNESS_LABEL[t.engine]} does not record the tab's name: this is the newest session in the tab's folder`)
+      console.log(`# ${t.turns.length} assistant message(s) on record; showing the last ${shown.length}`)
+      for (const x of shown) console.log(`\n--- ${x.timestamp ?? 'no timestamp'} ---\n${x.text}`)
+      return
+    }
+    const agent = owner ? tabAgent(adapter, data, owner, rows) : undefined
     if (agent?.engine === 'unknown') fail(asJson, blockId, 'unknown-engine', 'Cannot identify the tab’s engine; no transcript was selected by name.')
     if (agent?.engine === 'codex') {
       adapter.closeSocket()
