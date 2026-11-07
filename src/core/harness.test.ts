@@ -2,12 +2,13 @@ import { expect, test } from 'bun:test'
 import { harnessArgs, harnessOfCommand, harnessUnsupported, parseHarness } from './harness.js'
 import { harnessLaunchBody, harnessMissing } from './open-harness.js'
 
-test('only the five harnesses parse', () => {
+test('only the six harnesses parse', () => {
   expect(parseHarness('opencode2')).toBe('opencode2')
   expect(parseHarness('grok')).toBe('grok')
   expect(parseHarness('opencode')).toBe('opencode')
   expect(parseHarness('pi')).toBe('pi')
   expect(parseHarness('hermes')).toBe('hermes')
+  expect(parseHarness('omp')).toBe('omp')
   expect(parseHarness('codex')).toBeNull()
   expect(parseHarness(undefined)).toBeNull()
 })
@@ -25,6 +26,12 @@ test('pi: the prompt is a message after --, and the tab name names the session',
   expect(harnessArgs('pi', { prompt: '--print' })).not.toContain('-p')
 })
 
+test('omp: like pi, the prompt after --, but --resume and no --name', () => {
+  expect(harnessArgs('omp', {})).toEqual([])
+  expect(harnessArgs('omp', { prompt: '-v is broken', name: 'review' })).toEqual(['--', '-v is broken'])
+  expect(harnessArgs('omp', { resumeId: 'abc', model: 'gpt-5.6' })).toEqual(['--model', 'gpt-5.6', '--resume', 'abc'])
+})
+
 test('hermes: interactive chat seeded with --query, never --oneshot', () => {
   expect(harnessArgs('hermes', {})).toEqual(['chat'])
   expect(harnessArgs('hermes', { prompt: 'hi', model: 'nous/hermes-4', resumeId: 'latest' }))
@@ -36,6 +43,14 @@ test('a harness is recognised from its command line, whatever its install path',
   expect(harnessOfCommand('"C:\\Users\\a\\AppData\\Roaming\\npm\\pi.cmd" -- hi')).toBe('pi')
   expect(harnessOfCommand('hermes.exe chat')).toBe('hermes')
   expect(harnessOfCommand('pip install x')).toBeNull()
+})
+
+test('a harness run by its runtime is recognised by its script (omp runs on Bun)', () => {
+  expect(harnessOfCommand('bun /opt/homebrew/bin/omp --session-dir=/s Read README.txt')).toBe('omp')
+  expect(harnessOfCommand('/Users/a/.bun/bin/bun /Users/a/.bun/bin/omp')).toBe('omp')
+  expect(harnessOfCommand('node /opt/homebrew/bin/pi -- hi')).toBe('pi')
+  expect(harnessOfCommand('bun run dev')).toBeNull()
+  expect(harnessOfCommand('node server.js')).toBeNull()
 })
 
 test('POSIX launch line quotes every word', () => {

@@ -16,12 +16,24 @@
  *             binary name, and 1.x cannot see 2.x's sessions, so the binary
  *             is the one the tab's process runs, not the first on PATH.
  *
+ *   omp       oh-my-pi writes pi's JSONL format (a `session` line with `cwd` and
+ *             `id`, then `message` lines) under `<sessions root>/<folder>/`, the
+ *             root `--session-dir` from its argv, else `$PI_CODING_AGENT_DIR/sessions`
+ *             or `~/.omp/agent/sessions`. The folder is named from the cwd
+ *             relative to the temp folder (`-tmp-a-b`), else to home (`-a-b`),
+ *             else the whole path (`--a-b--`) (src/session/session-paths.ts,
+ *             18.18.0). It records no tab name, so the session is the file the
+ *             tab's process holds open (lsof), else the one on `--resume`, else
+ *             the newest whose `cwd` is the tab's folder. The open file comes
+ *             first because omp forks a resumed session into a new file when
+ *             another omp still has it open.
+ *
  * Hermes and Grok Build are not read yet: they say so instead of guessing.
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { descendantsOf, type ProcRow } from './claude-procs.js'
 import { HARNESS_BIN, HARNESS_LABEL, harnessOfCommand, type Harness } from './harness.js'
 import type { AssistantTurn } from './transcript.js'
@@ -42,7 +54,7 @@ export interface HarnessTranscript {
   /** Where it was read from: a file, or the harness command that printed it. */
   source: string
   /** How the session was chosen, so a guess is never shown as a certainty. */
-  matchedBy: 'name' | 'session-arg' | 'newest-in-dir'
+  matchedBy: 'name' | 'session-arg' | 'open-file' | 'newest-in-dir'
   turns: AssistantTurn[]
 }
 
@@ -112,6 +124,97 @@ export function readPiTranscript(cwd: string, tabName: string, agentDir = piAgen
     sessionId: meta.id ?? pick.file,
     source: pick.file,
     matchedBy: named ? 'name' : 'newest-in-dir',
+    turns: parsePiTurns(pick.text),
+  }
+}
+
+// ── oh-my-pi ─────────────────────────────────────────────────────────────────
+
+export function ompSessionsRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const dir = env.PI_CODING_AGENT_DIR
+  if (dir) return join(dir.startsWith('~') ? join(homedir(), dir.slice(1)) : dir, 'sessions')
+  return join(homedir(), '.omp', 'agent', 'sessions')
+}
+
+/** `--session-dir DIR` or `--session-dir=DIR` on an omp command line. Pure. */
+export function ompSessionDirArg(command: string): string | undefined {
+  return command.match(/(?:^|\s)--session-dir(?:=|\s+)(\S+)/)?.[1]
+}
+
+/** `--resume ID`, `-r ID` or `--session ID` on an omp command line. Pure. */
+export function ompResumeArg(command: string): string | undefined {
+  return command.match(/(?:^|\s)(?:-r|--resume|--session)(?:=|\s+)([^\s-]\S*)/)?.[1]
+}
+
+/** The folder names omp may file a cwd's sessions under, most likely first. Pure. */
+export function ompSessionDirNames(cwd: string, roots: { home: string; tmp: string }): string[] {
+  const within = (root: string) => { const r = relative(root, cwd); return r === '' || (!r.startsWith('..') && !isAbsolute(r)) ? r : undefined }
+  const enc = (r: string) => r.replace(/[/\\:]/g, '-')
+  const names: string[] = []
+  const t = within(roots.tmp)
+  if (t !== undefined) names.push(t ? `-tmp-${enc(t)}` : '-tmp')
+  const h = within(roots.home)
+  if (h !== undefined) names.push(h ? `-${enc(h)}` : '-')
+  names.push(`--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`)
+  return names
+}
+
+/** The session `.jsonl` files a process holds open, from `lsof -Fn` output. Pure. */
+export function ompOpenSessionFiles(lsofOutput: string): string[] {
+  return lsofOutput.split('\n')
+    .filter((l) => l.startsWith('n') && l.endsWith('.jsonl'))
+    .map((l) => l.slice(1))
+    .filter((f) => !/[/\\]\.[^/\\]*$/.test(f))
+}
+
+/** The session file an omp process is writing, when lsof can tell (macOS, Linux). */
+export function ompOpenSessionFile(pid: number | undefined): string | undefined {
+  if (!pid || process.platform === 'win32') return undefined
+  try {
+    const out = execFileSync('lsof', ['-a', '-p', String(pid), '-Fn'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 })
+    return ompOpenSessionFiles(out)[0]
+  } catch (e) {
+    const out = (e as { stdout?: string }).stdout
+    return out ? ompOpenSessionFiles(out)[0] : undefined
+  }
+}
+
+export function readOmpTranscript(cwd: string, command: string, sessionsRoot = ompSessionsRoot(), openFile?: string): HarnessTranscript | string {
+  if (openFile && existsSync(openFile)) {
+    const text = readFileSync(openFile, 'utf8')
+    return { engine: 'omp', sessionId: piSessionMeta(text).id ?? openFile, source: openFile, matchedBy: 'open-file', turns: parsePiTurns(text) }
+  }
+  const real = (p: string) => { try { return realpathSync(p) } catch { return resolve(p) } }
+  const cwds = [...new Set([resolve(cwd), real(cwd)])]
+  const sessionDirArg = ompSessionDirArg(command)
+  const dirs = sessionDirArg
+    ? [resolve(cwd, sessionDirArg)]
+    : [...new Set(cwds.flatMap((c) => [
+        ...ompSessionDirNames(c, { home: homedir(), tmp: tmpdir() }),
+        ...ompSessionDirNames(c, { home: real(homedir()), tmp: real(tmpdir()) }),
+      ]))].map((n) => join(sessionsRoot, n))
+  const files: { file: string; mtime: number }[] = []
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue
+    for (const f of readdirSync(dir)) if (f.endsWith('.jsonl')) files.push({ file: join(dir, f), mtime: statSync(join(dir, f)).mtimeMs })
+  }
+  if (!files.length) return `No oh-my-pi session for ${cwd} under ${sessionDirArg ?? sessionsRoot}.`
+  files.sort((a, b) => b.mtime - a.mtime)
+  const read = files.map((f) => ({ ...f, text: readFileSync(f.file, 'utf8') }))
+  const headerCwd = (text: string) => {
+    for (const line of text.split('\n').slice(0, 5)) { try { const e = JSON.parse(line); if (e.type === 'session') return e.cwd as string | undefined } catch { /* torn */ } }
+    return undefined
+  }
+  const resumeId = ompResumeArg(command)
+  const resumed = resumeId ? read.find((f) => (piSessionMeta(f.text).id ?? '').startsWith(resumeId) || f.file === resolve(cwd, resumeId)) : undefined
+  const here = read.find((f) => { const c = headerCwd(f.text); return c !== undefined && (cwds.includes(c) || cwds.includes(real(c))) })
+  const pick = resumed ?? here
+  if (!pick) return `No oh-my-pi session for ${cwd} under ${sessionDirArg ?? sessionsRoot}.`
+  return {
+    engine: 'omp',
+    sessionId: piSessionMeta(pick.text).id ?? pick.file,
+    source: pick.file,
+    matchedBy: resumed ? 'session-arg' : 'newest-in-dir',
     turns: parsePiTurns(pick.text),
   }
 }
@@ -186,6 +289,7 @@ export function readOpencodeTranscript(cwd: string, command: string, bin = 'open
 /** Read a harness tab's transcript, or say why not. `cwd` is the harness process's own folder (the caller reads it), falling back to the tab's. */
 export function readHarnessTranscript(harness: Harness, cwd: string, tabName: string, proc: ProcRow, exe?: string): HarnessTranscript | string {
   if (harness === 'pi') return readPiTranscript(cwd || proc.cwd || '', tabName)
+  if (harness === 'omp') return readOmpTranscript(cwd || proc.cwd || '', proc.command, ompSessionsRoot(), ompOpenSessionFile(proc.pid))
   if (harness === 'opencode' || harness === 'opencode2') return readOpencodeTranscript(cwd || proc.cwd || '', proc.command, exe || HARNESS_BIN[harness])
   return `cctabs cannot read ${HARNESS_LABEL[harness]} transcripts yet. Use \`cctabs scrollback\` for what is on its screen.`
 }

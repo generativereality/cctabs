@@ -12,6 +12,11 @@ import {
   piSessionMeta,
   pickOpencodeSession,
   readPiTranscript,
+  ompResumeArg,
+  ompSessionDirArg,
+  ompSessionDirNames,
+  readOmpTranscript,
+  ompOpenSessionFiles,
 } from './harness-transcript.js'
 
 const rows = [
@@ -21,12 +26,15 @@ const rows = [
   { pid: 201, ppid: 200, command: 'vim notes.md' },
   { pid: 300, ppid: 1, command: 'zsh' },
   { pid: 301, ppid: 300, command: 'pi' },
+  { pid: 400, ppid: 1, command: '/bin/zsh -l -i' },
+  { pid: 401, ppid: 400, command: 'bun /opt/homebrew/bin/omp -- hi' },
 ]
 
 describe('harnessInShell', () => {
   test('finds the harness under the tab shell, not the shell line that names it', () => {
     expect(harnessInShell(100, rows)).toEqual({ harness: 'opencode', proc: rows[1] })
     expect(harnessInShell(300, rows)?.harness).toBe('pi')
+    expect(harnessInShell(400, rows)?.harness).toBe('omp')
   })
   test('nothing for a shell running something else, or no shell pid', () => {
     expect(harnessInShell(200, rows)).toBeUndefined()
@@ -116,5 +124,66 @@ describe('opencode', () => {
     expect(opencodeSessionArg('opencode -s ses_2')).toBe('ses_2')
     expect(opencodeSessionArg('opencode --session=ses_3')).toBe('ses_3')
     expect(opencodeSessionArg('opencode --prompt=hi')).toBeUndefined()
+  })
+})
+
+describe('omp', () => {
+  const session = (id: string, cwd: string, text: string) => [
+    JSON.stringify({ type: 'title', v: 1, title: 'x' }),
+    JSON.stringify({ type: 'session', version: 3, id, timestamp: '2026-11-07T18:14:29.070Z', cwd }),
+    JSON.stringify({ type: 'message', timestamp: '2026-11-07T18:18:10.000Z', message: { role: 'assistant', content: [{ type: 'text', text }] } }),
+  ].join('\n')
+
+  test('folder names follow omp 18: temp-relative, home-relative, then the whole path', () => {
+    const roots = { home: '/Users/a', tmp: '/var/t' }
+    expect(ompSessionDirNames('/Users/a/Dev/app', roots)).toEqual(['-Dev-app', '--Users-a-Dev-app--'])
+    expect(ompSessionDirNames('/Users/a', roots)).toEqual(['-', '--Users-a--'])
+    expect(ompSessionDirNames('/var/t/x', roots)).toEqual(['-tmp-x', '--var-t-x--'])
+    expect(ompSessionDirNames('/srv/w', roots)).toEqual(['--srv-w--'])
+  })
+
+  test('argv flags', () => {
+    expect(ompSessionDirArg('bun /b/omp --session-dir=/s/d -- hi')).toBe('/s/d')
+    expect(ompSessionDirArg('bun /b/omp --session-dir /s/d')).toBe('/s/d')
+    expect(ompResumeArg('bun /b/omp --resume 01a1 -- hi')).toBe('01a1')
+    expect(ompResumeArg('bun /b/omp -- hi')).toBeUndefined()
+  })
+
+  test('reads the newest session for the folder, or the one on --resume', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omp-sessions-'))
+    const dir = join(root, '--w--')
+    mkdirSync(dir)
+    writeFileSync(join(dir, 'a.jsonl'), session('old-1', '/w', 'first'))
+    writeFileSync(join(dir, 'b.jsonl'), session('new-2', '/w', 'PONG'))
+    writeFileSync(join(dir, 'c.jsonl'), session('else-3', '/elsewhere', 'no'))
+    utimesSync(join(dir, 'a.jsonl'), 1, 1)
+    utimesSync(join(dir, 'b.jsonl'), 2, 2)
+    const newest = readOmpTranscript('/w', 'bun /b/omp', root)
+    if (typeof newest === 'string') throw new Error(newest)
+    expect(newest.engine).toBe('omp')
+    expect(newest.sessionId).toBe('new-2')
+    expect(newest.matchedBy).toBe('newest-in-dir')
+    expect(newest.turns.map((t) => t.text)).toEqual(['PONG'])
+    const resumed = readOmpTranscript('/w', 'bun /b/omp --resume old', root)
+    if (typeof resumed === 'string') throw new Error(resumed)
+    expect(resumed.sessionId).toBe('old-1')
+    expect(resumed.matchedBy).toBe('session-arg')
+    const viaArg = readOmpTranscript('/w', `bun /b/omp --session-dir=${dir}`, join(root, 'nope'))
+    expect(typeof viaArg === 'string' ? viaArg : viaArg.sessionId).toBe('new-2')
+    expect(typeof readOmpTranscript('/none', 'bun /b/omp', root)).toBe('string')
+    // A resumed session still open in another omp is forked to a new file: the file the process holds open wins.
+    writeFileSync(join(dir, 'd.jsonl'), session('fork-4', '/w', 'forked'))
+    utimesSync(join(dir, 'd.jsonl'), 0, 0)
+    const forked = readOmpTranscript('/w', 'bun /b/omp --resume old', root, join(dir, 'd.jsonl'))
+    if (typeof forked === 'string') throw new Error(forked)
+    expect(forked.sessionId).toBe('fork-4')
+    expect(forked.matchedBy).toBe('open-file')
+    expect(readOmpTranscript('/w', 'bun /b/omp --resume old', root, join(dir, 'gone.jsonl'))).toMatchObject({ sessionId: 'old-1' })
+  })
+
+  test('open session files from lsof -Fn', () => {
+    const out = ['p123', 'fcwd', 'n/w', 'f12', 'n/s/--w--/2026_a.jsonl', 'f13', 'n/s/--w--/.2026_a.jsonl.lock.os', 'n/x/y.json'].join('\n')
+    expect(ompOpenSessionFiles(out)).toEqual(['/s/--w--/2026_a.jsonl'])
+    expect(ompOpenSessionFiles('')).toEqual([])
   })
 })

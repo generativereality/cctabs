@@ -22,7 +22,7 @@ const DEFAULT_TURNS = 3
 
 export const transcriptCommand = define({
   name: 'transcript',
-  description: "Print what a tab's Claude, Codex, pi or opencode session has actually SAID — its last assistant messages, read from the transcript rather than the screen. Unlike `scrollback` this works on a tab that is mid-turn (whose screen is just a spinner).",
+  description: "Print what a tab's Claude, Codex, pi, oh-my-pi or opencode session has actually SAID — its last assistant messages, read from the transcript rather than the screen. Unlike `scrollback` this works on a tab that is mid-turn (whose screen is just a spinner).",
   args: {
     target: { type: 'positional', description: 'Tab name, tab ID prefix, or block ID prefix' },
     turns: { type: 'number', short: 'n', description: `How many trailing assistant messages to print (default: ${DEFAULT_TURNS})` },
