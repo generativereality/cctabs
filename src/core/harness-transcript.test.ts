@@ -16,6 +16,7 @@ import {
   ompSessionDirArg,
   ompSessionDirNames,
   readOmpTranscript,
+  ompOpenSessionFiles,
 } from './harness-transcript.js'
 
 const rows = [
@@ -170,5 +171,19 @@ describe('omp', () => {
     const viaArg = readOmpTranscript('/w', `bun /b/omp --session-dir=${dir}`, join(root, 'nope'))
     expect(typeof viaArg === 'string' ? viaArg : viaArg.sessionId).toBe('new-2')
     expect(typeof readOmpTranscript('/none', 'bun /b/omp', root)).toBe('string')
+    // A resumed session still open in another omp is forked to a new file: the file the process holds open wins.
+    writeFileSync(join(dir, 'd.jsonl'), session('fork-4', '/w', 'forked'))
+    utimesSync(join(dir, 'd.jsonl'), 0, 0)
+    const forked = readOmpTranscript('/w', 'bun /b/omp --resume old', root, join(dir, 'd.jsonl'))
+    if (typeof forked === 'string') throw new Error(forked)
+    expect(forked.sessionId).toBe('fork-4')
+    expect(forked.matchedBy).toBe('open-file')
+    expect(readOmpTranscript('/w', 'bun /b/omp --resume old', root, join(dir, 'gone.jsonl'))).toMatchObject({ sessionId: 'old-1' })
+  })
+
+  test('open session files from lsof -Fn', () => {
+    const out = ['p123', 'fcwd', 'n/w', 'f12', 'n/s/--w--/2026_a.jsonl', 'f13', 'n/s/--w--/.2026_a.jsonl.lock.os', 'n/x/y.json'].join('\n')
+    expect(ompOpenSessionFiles(out)).toEqual(['/s/--w--/2026_a.jsonl'])
+    expect(ompOpenSessionFiles('')).toEqual([])
   })
 })

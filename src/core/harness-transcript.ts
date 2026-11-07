@@ -22,8 +22,11 @@
  *             or `~/.omp/agent/sessions`. The folder is named from the cwd
  *             relative to the temp folder (`-tmp-a-b`), else to home (`-a-b`),
  *             else the whole path (`--a-b--`) (src/session/session-paths.ts,
- *             18.18.0). It records no tab name, so the session is the one on
- *             `--resume`, else the newest whose `cwd` is the tab's folder.
+ *             18.18.0). It records no tab name, so the session is the file the
+ *             tab's process holds open (lsof), else the one on `--resume`, else
+ *             the newest whose `cwd` is the tab's folder. The open file comes
+ *             first because omp forks a resumed session into a new file when
+ *             another omp still has it open.
  *
  * Hermes and Grok Build are not read yet: they say so instead of guessing.
  */
@@ -51,7 +54,7 @@ export interface HarnessTranscript {
   /** Where it was read from: a file, or the harness command that printed it. */
   source: string
   /** How the session was chosen, so a guess is never shown as a certainty. */
-  matchedBy: 'name' | 'session-arg' | 'newest-in-dir'
+  matchedBy: 'name' | 'session-arg' | 'open-file' | 'newest-in-dir'
   turns: AssistantTurn[]
 }
 
@@ -156,7 +159,31 @@ export function ompSessionDirNames(cwd: string, roots: { home: string; tmp: stri
   return names
 }
 
-export function readOmpTranscript(cwd: string, command: string, sessionsRoot = ompSessionsRoot()): HarnessTranscript | string {
+/** The session `.jsonl` files a process holds open, from `lsof -Fn` output. Pure. */
+export function ompOpenSessionFiles(lsofOutput: string): string[] {
+  return lsofOutput.split('\n')
+    .filter((l) => l.startsWith('n') && l.endsWith('.jsonl'))
+    .map((l) => l.slice(1))
+    .filter((f) => !/[/\\]\.[^/\\]*$/.test(f))
+}
+
+/** The session file an omp process is writing, when lsof can tell (macOS, Linux). */
+export function ompOpenSessionFile(pid: number | undefined): string | undefined {
+  if (!pid || process.platform === 'win32') return undefined
+  try {
+    const out = execFileSync('lsof', ['-a', '-p', String(pid), '-Fn'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 })
+    return ompOpenSessionFiles(out)[0]
+  } catch (e) {
+    const out = (e as { stdout?: string }).stdout
+    return out ? ompOpenSessionFiles(out)[0] : undefined
+  }
+}
+
+export function readOmpTranscript(cwd: string, command: string, sessionsRoot = ompSessionsRoot(), openFile?: string): HarnessTranscript | string {
+  if (openFile && existsSync(openFile)) {
+    const text = readFileSync(openFile, 'utf8')
+    return { engine: 'omp', sessionId: piSessionMeta(text).id ?? openFile, source: openFile, matchedBy: 'open-file', turns: parsePiTurns(text) }
+  }
   const real = (p: string) => { try { return realpathSync(p) } catch { return resolve(p) } }
   const cwds = [...new Set([resolve(cwd), real(cwd)])]
   const sessionDirArg = ompSessionDirArg(command)
@@ -262,7 +289,7 @@ export function readOpencodeTranscript(cwd: string, command: string, bin = 'open
 /** Read a harness tab's transcript, or say why not. `cwd` is the harness process's own folder (the caller reads it), falling back to the tab's. */
 export function readHarnessTranscript(harness: Harness, cwd: string, tabName: string, proc: ProcRow, exe?: string): HarnessTranscript | string {
   if (harness === 'pi') return readPiTranscript(cwd || proc.cwd || '', tabName)
-  if (harness === 'omp') return readOmpTranscript(cwd || proc.cwd || '', proc.command)
+  if (harness === 'omp') return readOmpTranscript(cwd || proc.cwd || '', proc.command, ompSessionsRoot(), ompOpenSessionFile(proc.pid))
   if (harness === 'opencode' || harness === 'opencode2') return readOpencodeTranscript(cwd || proc.cwd || '', proc.command, exe || HARNESS_BIN[harness])
   return `cctabs cannot read ${HARNESS_LABEL[harness]} transcripts yet. Use \`cctabs scrollback\` for what is on its screen.`
 }
