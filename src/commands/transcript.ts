@@ -6,7 +6,7 @@ import { requireAdapter } from '../core/adapter.js'
 import { resolveTabTarget } from '../core/tab-target.js'
 import { resolveTabSession } from '../core/session.js'
 import { classifySessionLookup, explainSessionLookup } from '../core/session-lookup.js'
-import { readProcessTable } from '../core/claude-procs.js'
+import { processCwd, processExe, readProcessTable } from '../core/claude-procs.js'
 import { harnessInShell, readHarnessTranscript } from '../core/harness-transcript.js'
 import { HARNESS_LABEL } from '../core/harness.js'
 import { liveTabSession, procTabsOf } from '../core/tab-session.js'
@@ -61,12 +61,15 @@ export const transcriptCommand = define({
     const harness = harnessInShell(shellPid, rows ?? [])
     if (harness) {
       adapter.closeSocket()
-      const read = readHarnessTranscript(harness.harness, harness.proc.cwd || cwd || '', name ?? '', harness.proc)
+      // The harness's own folder: Tabby's can be wrong (an opencode 2 tab
+      // reports the home folder while opencode runs in the launch folder).
+      const dir = processCwd(harness.proc.pid) || harness.proc.cwd || cwd || ''
+      const read = readHarnessTranscript(harness.harness, dir, name ?? '', harness.proc, processExe(harness.proc.pid))
       if (typeof read === 'string') fail(asJson, blockId, 'unreadable', `${name}: ${read}`)
       const t = read as Exclude<typeof read, string>
       const shown = t.turns.slice(-turnCount).map((x) => ({ ...x, text: truncateTurn(x.text, maxChars) }))
       if (asJson) {
-        console.log(JSON.stringify({ engine: t.engine, tab: name, block_id: blockId, session_id: t.sessionId, cwd: harness.proc.cwd || cwd, source: t.source, matched_by: t.matchedBy, assistant_messages: t.turns.length, turns: shown }, null, 2))
+        console.log(JSON.stringify({ engine: t.engine, tab: name, block_id: blockId, session_id: t.sessionId, cwd: dir, source: t.source, matched_by: t.matchedBy, assistant_messages: t.turns.length, turns: shown }, null, 2))
         return
       }
       console.log(`# ${name}  engine=${t.engine}  session=${t.sessionId}  source=${t.source}`)

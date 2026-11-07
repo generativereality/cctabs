@@ -9,10 +9,12 @@
  *             to `-`). Line 1 is the session header (`cwd`, `id`); a
  *             `session_info` line carries the `--name` cctabs launched it with.
  *             Assistant turns are `type: message`, `message.role: assistant`.
- *   opencode  sessions live in its SQLite store; read through its own CLI,
- *             `opencode session list --format json` (each with `directory`)
- *             and `opencode export <id>` (`messages[].info.role`, `parts[]`
- *             of `type: text`). 1.x and 2.x share the binary.
+ *   opencode  sessions live in its SQLite store; read through the tab's own
+ *             opencode binary: `opencode session list --format json` (each
+ *             with `directory`), then `opencode export <id>` on 1.x or
+ *             `opencode session export <id>` on 2.x. 1.x and 2.x share the
+ *             binary name, and 1.x cannot see 2.x's sessions, so the binary
+ *             is the one the tab's process runs, not the first on PATH.
  *
  * Hermes and Grok Build are not read yet: they say so instead of guessing.
  */
@@ -21,7 +23,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'n
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { descendantsOf, type ProcRow } from './claude-procs.js'
-import { HARNESS_LABEL, harnessOfCommand, type Harness } from './harness.js'
+import { HARNESS_BIN, HARNESS_LABEL, harnessOfCommand, type Harness } from './harness.js'
 import type { AssistantTurn } from './transcript.js'
 
 /** The harness running under a tab's shell, nearest first. Pure. */
@@ -116,17 +118,30 @@ export function readPiTranscript(cwd: string, tabName: string, agentDir = piAgen
 
 // ── opencode ─────────────────────────────────────────────────────────────────
 
-/** The assistant's text turns in `opencode export` output. Pure. */
+/**
+ * The assistant's text turns in an opencode export. Pure. Reads both shapes:
+ * 1.x `opencode export` (`messages[].info.role`, `parts[]`) and 2.x
+ * `opencode session export` (`messages[].type: assistant`, `content[]`).
+ */
 export function parseOpencodeExport(json: string): AssistantTurn[] {
-  const data = JSON.parse(json) as { messages?: { info?: { role?: string; time?: { created?: number; completed?: number } }; parts?: { type?: string; text?: string }[] }[] }
+  type Part = { type?: string; text?: string }
+  const data = JSON.parse(json) as { messages?: { type?: string; info?: { role?: string; time?: { created?: number; completed?: number } }; time?: { created?: number; completed?: number }; parts?: Part[]; content?: Part[] }[] }
   const turns: AssistantTurn[] = []
   for (const m of data.messages ?? []) {
-    if (m.info?.role !== 'assistant') continue
-    const text = (m.parts ?? []).filter((p) => p.type === 'text' && typeof p.text === 'string').map((p) => p.text!).join('\n')
-    const at = m.info.time?.completed ?? m.info.time?.created
+    if ((m.info?.role ?? m.type) !== 'assistant') continue
+    const parts = m.parts ?? m.content ?? []
+    const text = parts.filter((p) => p.type === 'text' && typeof p.text === 'string').map((p) => p.text!).join('\n')
+    const time = m.info?.time ?? m.time
+    const at = time?.completed ?? time?.created
     if (text.trim()) turns.push({ text, timestamp: at ? new Date(at).toISOString() : undefined })
   }
   return turns
+}
+
+/** opencode's major version from `opencode --version` ("1.19.5", "opencode v2.2.6"). Pure. */
+export function opencodeMajor(versionOutput: string): number | undefined {
+  const m = versionOutput.match(/(\d+)\.\d+\.\d+/)
+  return m ? Number(m[1]) : undefined
 }
 
 /** The session a tab's opencode is on: `--session` on its argv, else the newest in its folder. Pure. */
@@ -153,18 +168,24 @@ export function readOpencodeTranscript(cwd: string, command: string, bin = 'open
     // npm installs opencode as opencode.cmd on Windows, which needs a shell to run.
     shell: process.platform === 'win32',
   })
+  // 1.x and 2.x share the binary name but not the commands: 2.x moved
+  // `export` under `session`, and 1.x cannot see 2.x's sessions.
+  let major: number | undefined
+  try { major = opencodeMajor(run(['--version'])) } catch { /* try 1.x commands */ }
+  const v2 = (major ?? 1) >= 2
   let sessions: { id: string; directory?: string; updated?: number }[]
   try { sessions = JSON.parse(run(['session', 'list', '--format', 'json'])) } catch (e) { return `\`opencode session list\` failed: ${(e as Error).message.split('\n')[0]}` }
   const pick = pickOpencodeSession(sessions, cwds, opencodeSessionArg(command))
   if (!pick) return `opencode has no session in ${cwd}.`
+  const exportArgs = v2 ? ['session', 'export', pick.id] : ['export', pick.id]
   let turns: AssistantTurn[]
-  try { turns = parseOpencodeExport(run(['export', pick.id])) } catch (e) { return `\`opencode export ${pick.id}\` failed: ${(e as Error).message.split('\n')[0]}` }
-  return { engine: 'opencode', sessionId: pick.id, source: `opencode export ${pick.id}`, matchedBy: pick.matchedBy, turns }
+  try { turns = parseOpencodeExport(run(exportArgs)) } catch (e) { return `\`opencode ${exportArgs.join(' ')}\` failed: ${(e as Error).message.split('\n')[0]}` }
+  return { engine: v2 ? 'opencode2' : 'opencode', sessionId: pick.id, source: `opencode ${exportArgs.join(' ')}`, matchedBy: pick.matchedBy, turns }
 }
 
-/** Read a harness tab's transcript, or say why not. */
-export function readHarnessTranscript(harness: Harness, cwd: string, tabName: string, proc: ProcRow): HarnessTranscript | string {
-  if (harness === 'pi') return readPiTranscript(proc.cwd || cwd, tabName)
-  if (harness === 'opencode' || harness === 'opencode2') return readOpencodeTranscript(proc.cwd || cwd, proc.command)
+/** Read a harness tab's transcript, or say why not. `cwd` is the harness process's own folder (the caller reads it), falling back to the tab's. */
+export function readHarnessTranscript(harness: Harness, cwd: string, tabName: string, proc: ProcRow, exe?: string): HarnessTranscript | string {
+  if (harness === 'pi') return readPiTranscript(cwd || proc.cwd || '', tabName)
+  if (harness === 'opencode' || harness === 'opencode2') return readOpencodeTranscript(cwd || proc.cwd || '', proc.command, exe || HARNESS_BIN[harness])
   return `cctabs cannot read ${HARNESS_LABEL[harness]} transcripts yet. Use \`cctabs scrollback\` for what is on its screen.`
 }

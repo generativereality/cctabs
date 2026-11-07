@@ -240,15 +240,29 @@ export function readProcessTable(): ProcRow[] | null {
     const start = spawnSync('ps', ['-p', String(row.pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 2000 })
     const date = Date.parse(start.stdout?.trim() ?? '')
     if (Number.isFinite(date)) row.startedAt = date
-    try {
-      if (process.platform === 'linux') row.cwd = readlinkSync(`/proc/${row.pid}/cwd`)
-      else {
-        const cwd = spawnSync('lsof', ['-a', '-p', String(row.pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8', timeout: 2000 })
-        row.cwd = cwd.stdout?.split('\n').find((l) => l.startsWith('n'))?.slice(1)
-      }
-    } catch { /* process exited */ }
+    row.cwd = processCwd(row.pid)
   }
   return rows
+}
+
+/** The executable a process is running (POSIX), or undefined where it can't be read. */
+export function processExe(pid: number): string | undefined {
+  if (process.platform === 'win32') return undefined
+  try {
+    if (process.platform === 'linux') return readlinkSync(`/proc/${pid}/exe`)
+    const r = spawnSync('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn'], { encoding: 'utf8', timeout: 2000 })
+    return r.stdout?.split('\n').find((l) => l.startsWith('n'))?.slice(1)
+  } catch { return undefined }
+}
+
+/** The folder a process is running in (POSIX), or undefined where it can't be read (Windows, exited). */
+export function processCwd(pid: number): string | undefined {
+  if (process.platform === 'win32') return undefined
+  try {
+    if (process.platform === 'linux') return readlinkSync(`/proc/${pid}/cwd`)
+    const cwd = spawnSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { encoding: 'utf8', timeout: 2000 })
+    return cwd.stdout?.split('\n').find((l) => l.startsWith('n'))?.slice(1)
+  } catch { return undefined /* process exited */ }
 }
 
 /**

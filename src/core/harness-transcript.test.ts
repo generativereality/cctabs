@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   harnessInShell,
+  opencodeMajor,
   opencodeSessionArg,
   parseOpencodeExport,
   parsePiTurns,
@@ -81,6 +82,23 @@ describe('opencode', () => {
       ],
     })
     expect(parseOpencodeExport(json)).toEqual([{ text: 'PONG', timestamp: new Date(1794074802476).toISOString() }])
+  })
+  test('assistant text from a 2.x session export', () => {
+    const json = JSON.stringify({
+      info: {},
+      messages: [
+        { id: 'm1', time: { created: 1 }, text: 'Read README.txt', type: 'user' },
+        { id: 'm2', time: { created: 2, completed: 3 }, type: 'assistant', content: [{ type: 'tool', name: 'read' }] },
+        { id: 'm3', time: { created: 4, completed: 1794075424482 }, type: 'assistant', content: [{ type: 'text', text: 'hello from the engine test' }] },
+        { id: 'm4', time: { created: 5 }, type: 'idle', outcome: 'succeeded' },
+      ],
+    })
+    expect(parseOpencodeExport(json)).toEqual([{ text: 'hello from the engine test', timestamp: new Date(1794075424482).toISOString() }])
+  })
+  test('major version from either --version format', () => {
+    expect(opencodeMajor('1.19.5\n')).toBe(1)
+    expect(opencodeMajor('opencode v2.2.6')).toBe(2)
+    expect(opencodeMajor('garbage')).toBeUndefined()
   })
   test('session from argv first, else newest in the folder', () => {
     const s = [
