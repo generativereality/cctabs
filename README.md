@@ -22,7 +22,7 @@ CLI command: `cctabs` (also installed as `cctab`) · Website: [cctabs.com](https
 cctabs new auth ~/Dev/myapp       # new tab, claude starts
 cctabs new api ~/Dev/myapp -b client-x        # same, on another Claude account
 cctabs new review ~/Dev/myapp --engine codex
-cctabs new explore ~/Dev/myapp --engine opencode   # or opencode2, pi, hermes, grok
+cctabs new explore ~/Dev/myapp --engine opencode   # or opencode2, pi, omp, hermes, grok
 
 cctabs sessions                   # what's running across all tabs
 cctabs scrollback auth            # read what auth is doing without switching tabs

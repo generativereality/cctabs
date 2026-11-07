@@ -1,6 +1,6 @@
 /**
  * Other agent harnesses as the program in a tab: opencode (1.x and 2.x), pi,
- * Hermes and Grok Build. Pure.
+ * oh-my-pi, Hermes and Grok Build. Pure.
  *
  * Launch-only for now: `cctabs new --engine <harness>` opens a named tab that
  * starts the harness's interactive TUI, with the first turn, the model and a
@@ -17,6 +17,10 @@
  *             `pi [options] [--] [messages...]`: a message is "an initial prompt"
  *             and the TUI stays open (`-p/--print` is the one-shot mode);
  *             `--model <pattern>`, `--session <path|id>`, `-n/--name <name>`.
+ *   omp       oh-my-pi, the pi fork (@oh-my-pi/pi-coding-agent 18.18.0, src/cli/args.ts
+ *             and src/cli/flag-tables.ts, read 2026-11-07): `omp [options] [--] [messages...]`
+ *             like pi, with `--model`, `--resume/--session <id|path>`; no `--name`.
+ *             Runs on Bun (>= 1.4.4), so its process reads `bun …/omp`.
  *   hermes    https://hermes-agent.nousresearch.com/docs/reference/cli-commands
  *             `hermes chat -q/--query`: "On a real TTY the prompt is submitted
  *             literally as the first turn of a normal interactive session … and
@@ -36,17 +40,17 @@
  *             cctabs refuses `--prompt` for Grok rather than guess a TUI flag.
  */
 
-export type Harness = 'opencode' | 'opencode2' | 'pi' | 'hermes' | 'grok'
-export const HARNESSES: readonly Harness[] = ['opencode', 'opencode2', 'pi', 'hermes', 'grok']
+export type Harness = 'opencode' | 'opencode2' | 'pi' | 'omp' | 'hermes' | 'grok'
+export const HARNESSES: readonly Harness[] = ['opencode', 'opencode2', 'pi', 'omp', 'hermes', 'grok']
 
 export function parseHarness(v: string | undefined): Harness | null {
   return (HARNESSES as readonly string[]).includes(v ?? '') ? v as Harness : null
 }
 
-export const HARNESS_LABEL: Record<Harness, string> = { opencode: 'opencode', opencode2: 'opencode 2', pi: 'pi', hermes: 'Hermes', grok: 'Grok Build' }
+export const HARNESS_LABEL: Record<Harness, string> = { opencode: 'opencode', opencode2: 'opencode 2', pi: 'pi', omp: 'oh-my-pi', hermes: 'Hermes', grok: 'Grok Build' }
 
 /** The program each harness runs: opencode 2 kept 1.x's binary name. */
-export const HARNESS_BIN: Record<Harness, string> = { opencode: 'opencode', opencode2: 'opencode', pi: 'pi', hermes: 'hermes', grok: 'grok' }
+export const HARNESS_BIN: Record<Harness, string> = { opencode: 'opencode', opencode2: 'opencode', pi: 'pi', omp: 'omp', hermes: 'hermes', grok: 'grok' }
 
 /**
  * Why this harness cannot take what was asked on its launch line, or null. Pure.
@@ -62,6 +66,7 @@ export const HARNESS_INSTALL: Record<Harness, string> = {
   opencode: 'npm install -g opencode-ai (or https://opencode.ai/docs/)',
   opencode2: 'npm install -g @opencode/cli (or https://opencode.ai/v2/docs/)',
   pi: 'npm install -g --ignore-scripts @earendil-works/pi-coding-agent (or https://pi.dev)',
+  omp: 'bun add -g @oh-my-pi/pi-coding-agent (needs Bun 1.4.4 or later; or https://omp.sh)',
   hermes: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash',
   grok: 'see https://docs.x.ai/build/cli/reference',
 }
@@ -89,6 +94,10 @@ export function harnessArgs(engine: Harness, o: { prompt?: string; resumeId?: st
     if (o.resumeId) out.push('--session', o.resumeId)
     if (o.name && !o.resumeId) out.push('--name', o.name)
     if (o.prompt !== undefined) out.push('--', o.prompt)
+  } else if (engine === 'omp') {
+    if (o.model) out.push('--model', o.model)
+    if (o.resumeId) out.push('--resume', o.resumeId)
+    if (o.prompt !== undefined) out.push('--', o.prompt)
   } else {
     out.push('chat')
     if (o.model) out.push('--model', o.model)
@@ -98,10 +107,21 @@ export function harnessArgs(engine: Harness, o: { prompt?: string; resumeId?: st
   return out
 }
 
+/** The program a command line runs, lower-cased, without its folder or extension. Pure. */
+function programBase(word: string): string {
+  return (word.replace(/^"|"$/g, '').split(/[\\/]/).pop() ?? '').replace(/\.(exe|cmd|js)$/i, '').toLowerCase()
+}
+
+/** Runtimes a harness's script runs under (oh-my-pi's process reads `bun …/omp`). */
+const RUNTIMES = new Set(['bun', 'node', 'deno'])
+
 /** Is this command line one of these harnesses (for telling a tab's program apart)? */
 export function harnessOfCommand(command: string): Harness | null {
-  const first = (command.trim().match(/^"[^"]*"|^\S+/)?.[0] ?? '').replace(/^"|"$/g, '')
-  const base = (first.split(/[\\/]/).pop() ?? '').replace(/\.(exe|cmd|js)$/i, '').toLowerCase()
+  const words = command.trim().match(/"[^"]*"|\S+/g) ?? []
+  const base = programBase(words[0] ?? '')
   // opencode 1.x and 2.x share a binary; the command line cannot tell them apart.
-  return parseHarness(base)
+  if (!RUNTIMES.has(base)) return parseHarness(base)
+  // `bun /opt/homebrew/bin/omp …`: the script is the first word that is not a runtime flag.
+  const script = words.slice(1).find((w) => !w.startsWith('-'))
+  return script ? parseHarness(programBase(script)) : null
 }
