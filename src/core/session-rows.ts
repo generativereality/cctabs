@@ -12,6 +12,7 @@ import {
   type ProcRow,
 } from './claude-procs.js'
 import { suspendedTabsIn } from './suspend-ops.js'
+import { claudeContextUsage, codexContextUsage, type ContextUsage } from './context-usage.js'
 
 /**
  * Rows of captured output to read per tab.
@@ -84,6 +85,12 @@ export interface SessionRow {
    */
   suspended_at?: string
   suspended_dormant?: boolean
+  /**
+   * How full the session's context window is, from the last turn recorded in
+   * its transcript (see context-usage.ts). A suspended tab reports the size
+   * it will wake with. Omitted when no transcript or no turn was found.
+   */
+  context?: ContextUsage
 }
 
 export interface WorkspaceRow {
@@ -213,6 +220,16 @@ export async function collectSessionRows(
         }
       }
 
+      let context: ContextUsage | null = null
+      if (sessionId) {
+        try {
+          const file = engine === 'codex'
+            ? (cx?.session ?? codexSessions.find((s) => s.id === sessionId))?.file
+            : locateTranscriptFile(sessionId)?.file
+          if (file) context = engine === 'codex' ? codexContextUsage(file) : claudeContextUsage(file)
+        } catch { /* a listing must not fail on one unreadable transcript */ }
+      }
+
       const lookup = classifySessionLookup({
         cwd,
         found: sessionId !== null,
@@ -242,6 +259,7 @@ export async function collectSessionRows(
         ...(tabProc ? { claude_pid: tabProc.proc.pid, claude_pid_via: tabProc.via } : {}),
         ...(susp?.record.suspendedAt ? { suspended_at: susp.record.suspendedAt } : {}),
         ...(susp?.dormant ? { suspended_dormant: true } : {}),
+        ...(context ? { context } : {}),
       })
     }
 
