@@ -78,6 +78,7 @@ export default defineConfig({
         items: [
           { text: 'Session Workflows', link: '/guide/workflows' },
           { text: 'Claude Code Skill', link: '/guide/claude-code-skill' },
+          { text: 'Other Harnesses', link: '/guide/other-harnesses' },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Troubleshooting', link: '/guide/troubleshooting' },
         ],
